@@ -27,10 +27,17 @@
 Use pnpm and treat `package.json` scripts as the executable source of truth.
 
 - Before completing code or configuration changes, run `pnpm check` and `pnpm build`. Confirm the build's Pagefind postbuild step succeeds when search is affected.
+- If `pnpm check` stops before reaching anti-slop, run `pnpm lint:anti-slop` separately. Run any other skipped verification stages independently so an earlier failure does not hide their results. Separate checks provide partial evidence; they do not make the failed aggregate check pass.
 - For content changes, run `pnpm build` to validate collection schemas and generated routes. For instruction-only or documentation-only changes, check changed statements against their sources, verify referenced paths and links, and run `git diff --check`.
-- Use existing formatter and lint tooling on changed files. Review autofix changes for scope and preserve unrelated user work.
+- Use existing formatter and lint tooling on changed files. Review autofix changes for scope and preserve unrelated user work. Before running repository-wide write commands, check their scope against the vendored-source boundary below.
 - For logic changes, use relevant existing tests; when introducing test tooling, tie it to the behavior that needs verification and state what it covers. Inspect available scripts before naming a test command.
-- Report failed commands and unresolved required checks explicitly. Claim only what the verification establishes, and keep output concise while retaining actionable failure evidence.
+- Report failed commands and unresolved required checks explicitly. Distinguish failures introduced by the change from confirmed pre-existing failures, with file paths and diagnostics. Claim only what the verification establishes, and keep output concise while retaining actionable failure evidence.
+
+### Lint and Vendored Sources
+
+- Biome owns general lint and formatting; anti-slop adds the rules configured in [.oxlintrc.json](.oxlintrc.json). Keep Astro checks for framework and template diagnostics; anti-slop's script checks do not cover Astro templates.
+- Preserve the pinned source under `tools/oxlint/anti-slop/` according to [its provenance and update procedure](tools/oxlint/anti-slop/UPSTREAM.md). Apply application autofixes to explicit application paths. When Biome includes the vendored tree, use read-only checks to report its diagnostics and targeted write commands for authored files.
+- Fix application violations in their owning source. Treat changes to rule configuration or vendor scan exclusions as tooling changes with an explicit rationale; preserve the upstream source when resolving lint-tool integration issues.
 
 ### UI and Generated Output
 
