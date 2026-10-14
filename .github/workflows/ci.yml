@@ -37,6 +37,9 @@ jobs:
       - name: Run Astro check
         run: pnpm astro check
 
+      - name: Run anti-slop rules
+        run: pnpm lint:anti-slop
+
         # ensure build works
       - name: Run Astro build
         run: pnpm build

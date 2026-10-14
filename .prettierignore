@@ -6,3 +6,6 @@ node_modules
 
 pnpm-lock.yaml
 dist
+
+# vendored lint rules
+tools/oxlint/anti-slop
