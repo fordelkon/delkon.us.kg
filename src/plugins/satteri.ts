@@ -1,7 +1,11 @@
+import { z } from "astro/zod";
 import type { Image, Nodes, Parents } from "mdast";
 import { toString as mdastToString } from "mdast-util-to-string";
 import getReadingTime from "reading-time";
 import type { HastPluginDefinition, MdastPluginDefinition } from "satteri";
+
+// HAST properties can contain numbers, booleans, or arrays; only nonempty strings are link values.
+const linkValueSchema = z.string().min(1);
 
 export function satteriAutolinkHeadingsPlugin(): HastPluginDefinition {
 	return {
@@ -9,8 +13,11 @@ export function satteriAutolinkHeadingsPlugin(): HastPluginDefinition {
 		element: {
 			filter: ["h1", "h2", "h3", "h4", "h5", "h6"],
 			visit(node) {
-				const id = node.properties?.id;
-				if (typeof id !== "string" || !id) return;
+				const parsedId = linkValueSchema.safeParse(node.properties?.id);
+
+				if (!parsedId.success) return;
+				const id = parsedId.data;
+
 				return {
 					...node,
 					children: [
@@ -30,6 +37,7 @@ export function satteriAutolinkHeadingsPlugin(): HastPluginDefinition {
 export function satteriReadingTimePlugin(): () => MdastPluginDefinition {
 	return () => {
 		let done = false;
+
 		return {
 			name: "cactus-reading-time",
 			text(node, ctx) {
@@ -37,6 +45,7 @@ export function satteriReadingTimePlugin(): () => MdastPluginDefinition {
 
 				let root: Readonly<Nodes> = node;
 				let parent: Readonly<Parents> | undefined = ctx.parent(root);
+
 				while (parent) {
 					root = parent;
 					parent = ctx.parent(root);
@@ -57,9 +66,11 @@ export function satteriUnwrapImagesPlugin(): MdastPluginDefinition {
 		name: "cactus-unwrap-images",
 		paragraph(node): Image | undefined {
 			const child = node.children[0];
+
 			if (node.children.length === 1 && child?.type === "image") {
 				return child;
 			}
+
 			return;
 		},
 	};
@@ -84,10 +95,13 @@ export function satteriExternalLinksPlugin(): HastPluginDefinition {
 		element: {
 			filter: ["a"],
 			visit(node, ctx) {
-				const href = node.properties?.href;
-				if (typeof href !== "string" || !href) return;
+				const parsedHref = linkValueSchema.safeParse(node.properties?.href);
+
+				if (!parsedHref.success) return;
+				const href = parsedHref.data;
 
 				let url: URL;
+
 				try {
 					url = new URL(href);
 				} catch {

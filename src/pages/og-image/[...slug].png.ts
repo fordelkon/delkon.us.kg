@@ -30,17 +30,20 @@ const ogOptions: SatoriOptions = {
 
 type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
-export async function GET(context: APIContext) {
-	const { pubDate, title } = context.props as Props;
+export async function GET(context: APIContext<Props>) {
+	const { pubDate, title } = context.props;
 
 	// check the og-image cache
 	let pngBuffer = readCache(title, pubDate);
+
 	if (!pngBuffer) {
 		console.info(`Generating new OG image for: ${title}`);
+
 		const postDate = getFormattedDate(pubDate, {
 			month: "long",
 			weekday: "long",
 		});
+
 		const svg = await satori(ogMarkup(title, postDate), ogOptions);
 		pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
 		writeToCache(title, pubDate, pngBuffer);
@@ -56,6 +59,7 @@ export async function GET(context: APIContext) {
 
 export async function getStaticPaths() {
 	const posts = await getAllPosts();
+
 	return posts
 		.values()
 		.filter(({ data }) => !data.ogImage)

@@ -10,6 +10,7 @@ const { mentions } = Astro.props;
 const MAX_LIKES = 10;
 
 const likes = mentions.filter((mention) => mention["wm-property"] === "like-of");
+
 const likesToShow = likes
 	.filter((like) => like.author?.photo && like.author.photo !== "")
 	.slice(0, MAX_LIKES);

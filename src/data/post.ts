@@ -12,6 +12,7 @@ export async function getTagMeta(tag: string): Promise<CollectionEntry<"tag"> | 
 	const tagEntries = await getCollection("tag", (entry) => {
 		return entry.id === tag;
 	});
+
 	return tagEntries[0];
 }
 

@@ -1,5 +1,9 @@
 declare module "@pagefind/default-ui" {
-	declare class PagefindUI {
-		constructor(arg: unknown);
+	interface PagefindUIOptions {
+		element?: string | HTMLElement;
+	}
+
+	class PagefindUI {
+		constructor(arg: PagefindUIOptions);
 	}
 }

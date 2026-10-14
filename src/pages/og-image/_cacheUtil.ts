@@ -20,6 +20,7 @@ function checkCacheDirExists() {
 // Returns a cache key based on CACHE_VERSION, a post's title & pubDate
 function getCacheKey(title: string, pubDate: Date): string {
 	const content = `${CACHE_VERSION}-${title}-${pubDate.toISOString()}`;
+
 	return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 
@@ -32,6 +33,7 @@ export function readCache(title: string, pubDate: Date): Buffer | null {
 
 	if (fs.existsSync(cacheFilePath)) {
 		console.info(`Found cached OG image for: ${title}`);
+
 		return fs.readFileSync(cacheFilePath);
 	}
 

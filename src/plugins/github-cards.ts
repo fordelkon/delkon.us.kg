@@ -10,6 +10,7 @@ export function satteriGithubCardPlugin(): MdastPluginDefinition {
 			if (node.name !== DIRECTIVE_NAME) return;
 
 			let repoName = node.attributes?.repo ?? node.attributes?.user ?? null;
+
 			if (!repoName) return; // Left as a directive; admonitions plugin restores it to text.
 
 			repoName = repoName.endsWith("/") ? repoName.slice(0, -1) : repoName; // Remove trailing slash
@@ -116,7 +117,7 @@ export function satteriGithubCardPlugin(): MdastPluginDefinition {
 					h("div", { class: "gh-title title" }, [
 						h("span", { class: "gh-avatar" }),
 						h("a", { class: "gh-text not-prose cactus-link", href: realUrl }, [
-							{ type: "text", value: repoParts[0] },
+							{ type: "text", value: repoName },
 						]),
 						h("span", { class: "gh-icon" }),
 					]),
@@ -128,6 +129,7 @@ export function satteriGithubCardPlugin(): MdastPluginDefinition {
 					script,
 				]);
 			}
+
 			return undefined;
 		},
 	};

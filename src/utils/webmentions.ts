@@ -24,11 +24,13 @@ const hostName = new URL(DOMAIN).hostname;
 async function fetchWebmentions(timeFrom: string | null, perPage = 1000) {
 	if (!DOMAIN) {
 		console.warn("No domain specified. Please set in astro.config.ts");
+
 		return null;
 	}
 
 	if (!WEBMENTION_API_KEY) {
 		console.warn("No webmention api token specified in .env");
+
 		return null;
 	}
 
@@ -39,7 +41,8 @@ async function fetchWebmentions(timeFrom: string | null, perPage = 1000) {
 	const res = await fetch(url);
 
 	if (res.ok) {
-		const data = (await res.json()) as WebmentionsFeed;
+		const data: WebmentionsFeed = await res.json();
+
 		return data;
 	}
 
@@ -79,6 +82,7 @@ function writeToCache(data: WebmentionsCache) {
 		if (!fs.existsSync(CACHE_DIR)) {
 			fs.mkdirSync(CACHE_DIR, { recursive: true });
 		}
+
 		// write data to cache json file
 		fs.writeFileSync(filePath, fileContent);
 		console.log("Webmentions saved to cache");
@@ -94,10 +98,13 @@ function getFromCache(): WebmentionsCache {
 	if (fs.existsSync(filePath)) {
 		const data = fs.readFileSync(filePath, "utf-8");
 		console.log("Webmentions retrieved from cache");
+
 		return JSON.parse(data);
 	}
+
 	// no cache found
 	console.log("No Webmentions cache found");
+
 	return {
 		lastFetched: null,
 		children: [],
@@ -110,6 +117,7 @@ async function getAndCacheWebmentions() {
 
 	if (mentions) {
 		mentions.children = filterWebmentions(mentions.children);
+
 		const webmentions: WebmentionsCache = {
 			lastFetched: new Date().toISOString(),
 			// Make sure the first arg is the cache
@@ -117,6 +125,7 @@ async function getAndCacheWebmentions() {
 		};
 
 		writeToCache(webmentions);
+
 		return webmentions;
 	}
 
@@ -128,5 +137,6 @@ let webMentionsPromise: Promise<WebmentionsCache> | null = null;
 export async function getWebmentionsForUrl(url: string) {
 	if (!webMentionsPromise) webMentionsPromise = getAndCacheWebmentions();
 	const webMentions = await webMentionsPromise;
+
 	return webMentions.children.filter((entry) => entry["wm-target"] === url);
 }

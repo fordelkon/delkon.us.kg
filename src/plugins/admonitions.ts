@@ -7,11 +7,17 @@ import type { AdmonitionType } from "@/types";
 import { h } from "../utils/remark";
 
 // Supported admonition types
-const Admonitions = new Set<AdmonitionType>(["tip", "note", "important", "caution", "warning"]);
+const Admonitions: ReadonlySet<string> = new Set<AdmonitionType>([
+	"tip",
+	"note",
+	"important",
+	"caution",
+	"warning",
+]);
 
 /** Checks if a string is a supported admonition type. */
 function isAdmonition(s: string): s is AdmonitionType {
-	return Admonitions.has(s as AdmonitionType);
+	return Admonitions.has(s);
 }
 
 /**
@@ -20,6 +26,7 @@ function isAdmonition(s: string): s is AdmonitionType {
  */
 function serializeDirective(node: Parameters<typeof toMarkdown>[0]): string {
 	const md = toMarkdown(node, { extensions: [directiveToMarkdown()] });
+
 	return md.at(-1) === "\n" ? md.slice(0, -1) : md;
 }
 
@@ -28,10 +35,12 @@ export function satteriAdmonitionsPlugin(): MdastPluginDefinition {
 		name: "cactus-admonitions",
 		textDirective(node) {
 			if (node.data !== undefined) return;
+
 			return { type: "text", value: serializeDirective(node) } as const;
 		},
 		leafDirective(node) {
 			if (node.data !== undefined) return;
+
 			return {
 				type: "paragraph",
 				children: [{ type: "text", value: serializeDirective(node) }],
@@ -40,6 +49,7 @@ export function satteriAdmonitionsPlugin(): MdastPluginDefinition {
 		containerDirective(node) {
 			if (node.data !== undefined) return;
 			const admonitionType = node.name;
+
 			if (!isAdmonition(admonitionType)) {
 				// Unrecognized ::: block — keep the content, drop the styling.
 				return h("div", {}, [...node.children]);
@@ -50,6 +60,7 @@ export function satteriAdmonitionsPlugin(): MdastPluginDefinition {
 
 			// Check if there's a custom title
 			const firstChild = node.children[0];
+
 			if (
 				firstChild?.type === "paragraph" &&
 				firstChild.data &&

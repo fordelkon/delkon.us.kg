@@ -13,10 +13,12 @@ interface TocOpts {
 /** Inject a ToC entry as deep in the tree as its `depth` property requires. */
 function injectChild(items: TocItem[], item: TocItem): void {
 	const lastItem = items.at(-1);
+
 	if (!lastItem || lastItem.depth >= item.depth) {
 		items.push(item);
 	} else {
 		injectChild(lastItem.children, item);
+
 		return;
 	}
 }
@@ -29,6 +31,7 @@ export function generateToc(
 	const bodyHeadings = headings.filter(
 		({ depth }) => depth >= minHeadingLevel && depth <= maxHeadingLevel,
 	);
+
 	const toc: Array<TocItem> = [];
 
 	for (const heading of bodyHeadings) injectChild(toc, { ...heading, children: [] });

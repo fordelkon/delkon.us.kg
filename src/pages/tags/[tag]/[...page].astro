@@ -15,6 +15,7 @@ export const getStaticPaths = (async ({ paginate }) => {
 
 	return uniqueTags.flatMap((tag) => {
 		const postsWithTag = sortedPosts.filter((post) => post.data.tags.includes(tag));
+
 		return paginate(postsWithTag, {
 			pageSize: 10,
 			params: { tag },
@@ -24,7 +25,7 @@ export const getStaticPaths = (async ({ paginate }) => {
 
 type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
-const { page } = Astro.props as Props;
+const { page } = Astro.props;
 const { tag } = Astro.params;
 const tagMeta = await getTagMeta(tag);
 

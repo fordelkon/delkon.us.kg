@@ -61,7 +61,10 @@ const readingTime: string = remarkPluginFrontmatter.readingTime;
 </BaseLayout>
 
 <script>
+	// SAFETY: This layout renders a button with id="to-top-btn" before its deferred script runs.
 	const scrollBtn = document.getElementById("to-top-btn") as HTMLButtonElement;
+
+	// SAFETY: This layout renders a div with id="blog-hero" before its deferred script runs.
 	const targetHeader = document.getElementById("blog-hero") as HTMLDivElement;
 
 	function callback(entries: IntersectionObserverEntry[]) {
@@ -76,5 +79,6 @@ const readingTime: string = remarkPluginFrontmatter.readingTime;
 	});
 
 	const observer = new IntersectionObserver(callback);
+
 	observer.observe(targetHeader);
 </script>
