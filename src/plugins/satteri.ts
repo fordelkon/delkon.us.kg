@@ -55,7 +55,13 @@ export function satteriReadingTimePlugin(): () => MdastPluginDefinition {
 				const textOnPage = mdastToString(root);
 				const readingTime = getReadingTime(textOnPage);
 
-				ctx.data.astro!.frontmatter.readingTime = readingTime.text;
+				const astro = ctx.data.astro;
+
+				if (!astro) {
+					throw new Error("Reading time requires Astro frontmatter context.");
+				}
+
+				astro.frontmatter.readingTime = readingTime.text;
 			},
 		};
 	};
