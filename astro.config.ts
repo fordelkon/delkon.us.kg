@@ -18,10 +18,19 @@ import {
 	satteriUnwrapImagesPlugin,
 } from "./src/plugins/satteri";
 import { expressiveCodeOptions, siteConfig } from "./src/site.config";
+import { PRINTER_ACCENT, PRINTER_DESK } from "./src/styles/tokens/printer-palette";
 
 // https://astro.build/config
 export default defineConfig({
 	site: siteConfig.url,
+	// Replaces the former inline speculationrules script: Astro's prefetch
+	// regenerates its rules on every astro:page-load, so client-side
+	// navigation keeps prefetching (a re-inserted static rules script is
+	// ignored by Chrome as "previously inserted into another document").
+	prefetch: {
+		prefetchAll: true,
+		defaultStrategy: "load",
+	},
 	image: {
 		domains: ["webmention.io"],
 	},
@@ -55,8 +64,8 @@ export default defineConfig({
 				},
 			],
 			start_url: "/",
-			background_color: "#1d1f21",
-			theme_color: "#2bbc8a",
+			background_color: PRINTER_DESK,
+			theme_color: PRINTER_ACCENT,
 			display: "standalone",
 			config: {
 				insertFaviconLinks: false,

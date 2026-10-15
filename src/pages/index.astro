@@ -2,82 +2,140 @@
 import { getCollection } from "astro:content";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Note from "@/components/note/Note.astro";
+import PrintedDivider from "@/components/printed/PrintedDivider.astro";
+import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SocialList from "@/components/SocialList.astro";
-import { getAllPosts } from "@/data/post";
+import { getAllPosts, getPinnedPosts } from "@/data/post";
 import PageLayout from "@/layouts/Base.astro";
 import { collectionDateSort } from "@/utils/date";
 
 // Posts
-const MAX_POSTS = 10;
+const MAX_POSTS = 5;
 const allPosts = await getAllPosts();
 const allPostsByDate = allPosts.sort(collectionDateSort);
 const latestPosts = allPostsByDate.slice(0, MAX_POSTS);
 
-// Pinned Posts, set to a max of 3;
-const MAX_PINNED_POSTS = 3;
+const pinnedPosts = getPinnedPosts(allPostsByDate);
 
-const pinnedPosts = allPostsByDate
-	.values()
-	.filter((p) => p.data.pinned)
-	.take(MAX_PINNED_POSTS)
-	.toArray();
-
-// Notes, set to a max of 5
-const MAX_NOTES = 5;
+// Notes, set to a max of 4
+const MAX_NOTES = 4;
 const allNotes = await getCollection("note");
 const latestNotes = allNotes.sort(collectionDateSort).slice(0, MAX_NOTES);
+
+const works = [
+	{
+		href: "/posts/why-static-blog/",
+		name: "Why static?",
+		summary: "为什么我把博客重写成静态站",
+	},
+	{
+		href: "/posts/astro-tailwind-theming/",
+		name: "Theming notes",
+		summary: "Astro + Tailwind 主题化的经验",
+	},
+	{
+		href: "https://github.com/fordelkon",
+		name: "GitHub",
+		summary: "fordelkon — 这个站点的源码与实验",
+	},
+] as const;
+
+const meta = { title: "Home" };
 ---
 
-<PageLayout meta={{ title: "Home" }}>
+<PageLayout meta={meta}>
 	<section>
-		<h1 class="title mb-12">Hello World!</h1>
-		<p class="mb-4">
-			Hi, I’m a theme for Astro, a simple starter that you can use to create your website or blog.
-			If you want to know more about how you can customise me, add more posts, and make it your own,
-			click on the GitHub icon link below and it will take you to my repo.
+		<h1 class="font-serif text-2xl font-bold tracking-tight text-printer-ink sm:text-3xl">
+			Delkon
+		</h1>
+		<p class="mt-2 max-w-prose font-serif text-[13px] leading-relaxed text-printer-ink-light">
+			Hi, I'm Delkon — 一个还在折腾静态博客的学生。这里用一台「热敏打印机」打印我关于
+			Astro、Markdown 工具链和日常工作流的文章与便签。
 		</p>
-		<SocialList />
+		<div class="mt-4">
+			<SocialList />
+		</div>
 	</section>
-	{
-		pinnedPosts.length > 0 && (
-			<section class="mt-16">
-				<h2 class="title mb-6 text-xl">Pinned Posts</h2>
-				<ul class="space-y-4" role="list">
-					{pinnedPosts.map((p) => (
-						<li class="grid gap-1 sm:grid-cols-[auto_1fr]">
-							<PostPreview post={p} />
-						</li>
-					))}
-				</ul>
-			</section>
-		)
-	}
-	<section class="mt-16">
-		<h2 class="title text-accent mb-6 text-xl"><a href="/posts/">Posts</a></h2>
-		<ul class="space-y-4" role="list">
+
+	<PrintedDivider style="dotted" />
+
+	<section>
+		<PrintedSection label="Works" />
+		<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-4">
 			{
-				latestPosts.map((p) => (
-					<li class="grid gap-1 sm:grid-cols-[auto_1fr]">
-						<PostPreview post={p} />
-					</li>
+				works.map(({ href, name, summary }) => (
+					<a
+						class="group -mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-printer-ink/3 focus-within:bg-printer-ink/3"
+						href={href}
+						{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+					>
+						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-printer-accent/10 font-mono text-lg font-bold text-printer-accent">
+							{name.charAt(0)}
+						</div>
+						<div class="min-w-0 flex-1">
+							<div class="font-mono text-sm font-medium text-printer-ink transition-colors group-hover:text-printer-accent">
+								{name}
+							</div>
+							<div class="mt-0.5 line-clamp-1 font-mono text-[10px] text-printer-ink-light">
+								{summary}
+							</div>
+						</div>
+						<span class="shrink-0 font-mono text-[10px] text-printer-ink-light transition-colors group-hover:text-printer-accent">
+							→
+						</span>
+					</a>
 				))
 			}
+		</div>
+	</section>
+
+	<PrintedDivider style="dashed" />
+
+	<section>
+		<PrintedSection label="Posts">
+			<a
+				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
+				href="/posts/">View all →</a
+			>
+		</PrintedSection>
+		{
+			pinnedPosts.length > 0 && (
+				<section class="mb-8">
+					<h2 class="sr-only">Pinned posts</h2>
+					<ul role="list" class="-mx-2 space-y-1">
+						{pinnedPosts.map((p) => (
+							<li>
+								<PostPreview post={p} />
+							</li>
+						))}
+					</ul>
+				</section>
+			)
+		}
+		<ul role="list" class="-mx-2 space-y-1">
+			{latestPosts.map((p) => (
+				<li>
+					<PostPreview post={p} />
+				</li>
+			))}
 		</ul>
 	</section>
-	{
-		latestNotes.length > 0 && (
-			<section class="mt-16">
-				<h2 class="title text-accent mb-6 text-xl">
-					<a href="/notes/">Notes</a>
-				</h2>
-				<ul class="space-y-6" role="list">
-					{latestNotes.map((note) => (
-						<li>
-							<Note note={note} as="h3" isPreview />
-						</li>
-					))}
-				</ul>
-			</section>
-		)
-	}
+
+	<PrintedDivider style="dashed" />
+
+	<section>
+		<PrintedSection label="Notes">
+			<a
+				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
+				href="/notes/">View all →</a
+			>
+		</PrintedSection>
+		<ul role="list" class="-mx-2 space-y-1">
+			{latestNotes.map((note) => (
+				<li>
+					<Note note={note} as="h2" isPreview />
+				</li>
+			))}
+		</ul>
+	</section>
 </PageLayout>

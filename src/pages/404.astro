@@ -2,12 +2,19 @@
 import PageLayout from "@/layouts/Base.astro";
 
 const meta = {
-	description: "Oops! It looks like this page is lost in space!",
-	title: "Oops! You found a missing page!",
+	description: "This page could not be found.",
+	title: "404 | Page not found",
 };
 ---
 
 <PageLayout meta={meta}>
-	<h1 class="title mb-12">404 | Oops something went wrong</h1>
-	<p class="mb-8">Please use the navigation to find your way back</p>
+	<p class="print-label-wide text-printer-ink-light">
+		Error 404 · Page feed empty
+	</p>
+	<h1 class="mt-3 font-serif text-2xl font-bold tracking-tight sm:text-3xl">
+		这一页没有从打印机里出来
+	</h1>
+	<p class="mt-4 font-serif text-sm leading-relaxed text-printer-ink/80">
+		Requested page not found. 请检查地址，或从 <a href="/">首页</a> 重新出发。
+	</p>
 </PageLayout>

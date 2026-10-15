@@ -13,13 +13,26 @@ const { Content } = await render(note);
 ---
 
 <article
-	class:list={[isPreview && "bg-global-text/5 inline-grid rounded-md px-4 py-3"]}
+	class:list={[
+		isPreview &&
+			"group -mx-2 flex flex-col gap-1 rounded-md px-2 py-2.5 transition-colors hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
+	]}
 	data-pagefind-body={isPreview ? false : true}
 >
-	<Tag class="title" class:list={{ "text-base": isPreview }}>
+	<Tag
+		class:list={[
+			"font-serif leading-snug tracking-tight text-printer-ink transition-colors",
+			isPreview
+				? "text-base group-hover:text-printer-accent sm:text-lg"
+				: "text-2xl font-bold sm:text-3xl",
+		]}
+	>
 		{
 			isPreview ? (
-				<a class="cactus-link" href={`/notes/${note.id}/`}>
+				<a
+					class="rounded-xs outline-hidden focus-visible:ring-2 focus-visible:ring-printer-accent/40"
+					href={`/notes/${note.id}/`}
+				>
 					{note.data.title}
 				</a>
 			) : (
@@ -28,6 +41,7 @@ const { Content } = await render(note);
 		}
 	</Tag>
 	<FormattedDate
+		class="print-label text-printer-ink-light tabular-nums"
 		dateTimeOptions={{
 			hour: "2-digit",
 			minute: "2-digit",
@@ -38,7 +52,7 @@ const { Content } = await render(note);
 		date={note.data.publishDate}
 	/>
 	<div
-		class="prose prose-sm prose-cactus mt-4 max-w-none [&>p:last-of-type]:mb-0"
+		class="prose prose-sm mt-3 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:overflow-x-auto"
 		class:list={{ "line-clamp-6": isPreview }}
 	>
 		<Content />

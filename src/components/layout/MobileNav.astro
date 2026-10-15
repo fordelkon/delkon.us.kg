@@ -1,0 +1,108 @@
+<!-- Mobile navigation toggle.
+
+     Contract with the host header: the header element carries id
+     "main-header" and receives a temporary "menu-open" class while the menu
+     is open. Tailwind's group-[.menu-open] utilities on the nav key off that
+     class (see Header.astro), and this script toggles it via getElementById.
+     Keep both sides in sync if the id or class name changes. -->
+<mobile-button>
+	<button
+		aria-controls="navigation-menu"
+		aria-expanded="false"
+		class="group/burger relative h-10 w-10 cursor-pointer text-printer-ink-light transition-colors hover:text-printer-accent sm:invisible sm:hidden"
+		id="toggle-navigation-menu"
+		type="button"
+	>
+		<span class="sr-only">Open main menu</span>
+		<svg
+			aria-hidden="true"
+			class="absolute start-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 transition-all group-aria-expanded/burger:scale-0 group-aria-expanded/burger:opacity-0"
+			fill="none"
+			focusable="false"
+			id="line-svg"
+			stroke="currentColor"
+			stroke-width="1.5"
+			viewBox="0 0 24 24"
+			xmlns="http://www.w3.org/2000/svg"
+		>
+			<path
+				d="M3.75 9h16.5m-16.5 6.75h16.5"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			></path>
+		</svg>
+		<svg
+			aria-hidden="true"
+			class="absolute start-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 scale-0 opacity-0 transition-all group-aria-expanded/burger:scale-100 group-aria-expanded/burger:opacity-100"
+			fill="none"
+			focusable="false"
+			id="cross-svg"
+			stroke="currentColor"
+			stroke-width="1.5"
+			viewBox="0 0 24 24"
+			xmlns="http://www.w3.org/2000/svg"
+		>
+			<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+		</svg>
+	</button>
+</mobile-button>
+
+<style>
+	/* Mobile header control row: give the burger the same 40px touch target
+	   as the search / theme buttons it sits beside, so the cluster's icon
+	   buttons stay uniform at mobile widths. */
+	@media (max-width: 639px) {
+		mobile-button > button {
+			width: 2.5rem;
+			height: 2.5rem;
+		}
+	}
+</style>
+
+<script>
+	import { toggleClass } from "@/utils/domElement";
+
+	class MobileNavBtn extends HTMLElement {
+		#menuOpen: boolean = false;
+		#onKeydown: ((event: KeyboardEvent) => void) | null = null;
+
+		connectedCallback() {
+			const mobileButtonEl = this.querySelector<HTMLButtonElement>("button");
+
+			mobileButtonEl?.addEventListener("click", () => {
+				this.#setOpen(!this.#menuOpen);
+			});
+
+			// Escape closes the mobile menu and returns focus to the toggle.
+			// Bound on document so it works while focus is on a menu link too.
+			this.#onKeydown = (event) => {
+				if (event.key !== "Escape" || !this.#menuOpen) return;
+				this.#setOpen(false);
+				mobileButtonEl?.focus();
+			};
+
+			document.addEventListener("keydown", this.#onKeydown);
+		}
+
+		// The ClientRouter swaps in a fresh element per navigation while the
+		// document itself persists; drop the document-level listener so it
+		// does not accumulate across navigations.
+		disconnectedCallback() {
+			if (this.#onKeydown) {
+				document.removeEventListener("keydown", this.#onKeydown);
+				this.#onKeydown = null;
+			}
+		}
+
+		#setOpen(open: boolean) {
+			const headerEl = document.getElementById("main-header");
+			const mobileButtonEl = this.querySelector<HTMLButtonElement>("button");
+			this.#menuOpen = open;
+
+			if (headerEl) toggleClass(headerEl, "menu-open");
+			mobileButtonEl?.setAttribute("aria-expanded", open.toString());
+		}
+	}
+
+	customElements.define("mobile-button", MobileNavBtn);
+</script>

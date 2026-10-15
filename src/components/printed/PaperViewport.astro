@@ -1,0 +1,65 @@
+---
+import Footer from "@/components/layout/Footer.astro";
+
+// Perforation marks down both paper edges.
+const PERFORATION_DOTS = 60;
+
+// The footer's printed stamp marks the home page's paper.
+const showStamp = Astro.url.pathname === "/";
+---
+
+<!-- Mark repeat visits before first paint so full page loads do not replay
+     the paper-feed entry animation. Client-side navigations replay it on
+     purpose: the astro:after-swap listener below removes .paper-fed so the
+     freshly swapped paper slides out of the slit, matching the persistent
+     printer shell of the reference site. -->
+<script is:inline>
+	try {
+		if (sessionStorage.getItem("paperFed") === "1") {
+			document.documentElement.classList.add("paper-fed");
+		}
+
+		sessionStorage.setItem("paperFed", "1");
+	} catch {
+		/* storage unavailable (privacy mode): animate every load */
+	}
+
+	document.addEventListener("astro:after-swap", () => {
+		document.documentElement.classList.remove("paper-fed");
+	});
+</script>
+
+<!-- Printed paper output area: clipped so paper slides out of the slit.
+     Kept below the sticky print head (z-30 in Base.astro) so scrolling
+     retracts the sheet behind the housing instead of over it. -->
+<div class="paper-viewport relative z-10 mx-(--paper-inset) -mt-[12px]">
+	<div>
+		<div class="paper-feed bg-printer-paper thermal-texture relative z-0 flex min-h-[60vh] flex-col overflow-hidden shadow-(--paper-shadow)">
+			<div aria-hidden="true" class="absolute -top-1 left-0 right-0 h-1 bg-printer-paper"></div>
+			<!-- Perforation marks down both edges -->
+			{["left", "right"].map((side) => (
+				<div
+					aria-hidden="true"
+					class={`pointer-events-none absolute bottom-0 ${side}-0 top-0 flex w-4 flex-col items-center justify-start gap-6 pt-4 opacity-20`}
+				>
+					{Array.from({ length: PERFORATION_DOTS }).map(() => (
+						<div class="h-1.5 w-1.5 shrink-0 rounded-full border border-printer-ink/30" />
+					))}
+				</div>
+			))}
+			<main id="main" class="relative z-10 flex-1 px-6 py-8 sm:px-10">
+				<slot />
+			</main>
+			<Footer showStamp={showStamp} />
+		</div>
+		<div aria-hidden="true" class="paper-edge-bottom h-0"></div>
+	</div>
+</div>
+
+<style>
+	/* Clip only the feed-entry animation. The stationary housing backdrop
+	   masks scrolling paper without moving this clipping boundary. */
+	.paper-viewport {
+		clip-path: inset(0 -20px -56px);
+	}
+</style>

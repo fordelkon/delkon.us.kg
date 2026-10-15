@@ -1,1 +1,412 @@
-<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 272 480"><path fill="#cdffb8" d="M181.334 93.333v-40L226.667 80v40zM136.001 53.333 90.667 26.667v426.666L136.001 480zM45.333 220 0 193.334v140L45.333 360z"/><path fill="#d482ab" d="M90.667 26.667 136.001 0l45.333 26.667-45.333 26.666zM181.334 53.33l45.333-26.72L272 53.33 226.667 80zM136 240l-45.333-26.67v53.34zM0 193.33l45.333-26.72 45.334 26.72L45.333 220zM181.334 93.277 226.667 120l-45.333 26.67z"/><path fill="#2abc89" d="m136 53.333 45.333-26.666v120L226.667 120V80L272 53.333V160l-90.667 53.333v240L136 480V306.667L45.334 360V220l45.333-26.667v73.334L136 240z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="256" height="256" viewBox="-135 0 1024 1024"
+     role="img" aria-labelledby="title desc">
+  <title id="title">灰青绿与暖纸色的侧脸</title>
+  <desc id="desc">复古印刷配色，保留侧脸、青绿眼睛、发束、陶橙色发饰及肩颈衣料细节。</desc>
+
+  <!-- Muted pigment colors stay fixed on both site themes, like a printed badge. -->
+  <defs>
+    <!-- Clip the asset itself so favicons retain the same circular silhouette. -->
+    <clipPath id="icon-circle">
+      <circle cx="377" cy="512" r="512"/>
+    </clipPath>
+    <linearGradient id="skin" x1=".25" y1=".65" x2=".85" y2=".2">
+      <stop stop-color="#f3ebdd"/>
+      <stop offset=".58" stop-color="#f3ebdd"/>
+      <stop offset="1" stop-color="#d1b59a"/>
+    </linearGradient>
+
+    <linearGradient id="forehead" x1="0" x2="1" y1="0" y2=".7">
+      <stop stop-color="#c3a68b"/>
+      <stop offset=".4" stop-color="#e4d3bb"/>
+      <stop offset="1" stop-color="#f3ebdd"/>
+    </linearGradient>
+
+    <linearGradient id="neck" x1=".18" y1=".45" x2=".84" y2=".65">
+      <stop stop-color="#f3ebdd"/>
+      <stop offset=".34" stop-color="#c8aa8c"/>
+      <stop offset=".51" stop-color="#c8aa8c"/>
+      <stop offset=".78" stop-color="#eee2ce"/>
+      <stop offset="1" stop-color="#f3ebdd"/>
+    </linearGradient>
+
+    <linearGradient id="shoulder" x1="0" y1=".15" x2=".6" y2=".55">
+      <stop stop-color="#f6efdf"/>
+      <stop offset=".15" stop-color="#e8d5b8"/>
+      <stop offset=".28" stop-color="#cbb093"/>
+      <stop offset=".41" stop-color="#f3ebdd"/>
+      <stop offset="1" stop-color="#f3ebdd"/>
+    </linearGradient>
+
+    <linearGradient id="arm" x1="0" y1=".5" x2="1" y2=".7">
+      <stop stop-color="#e1c9a9"/>
+      <stop offset=".22" stop-color="#b7b7aa"/>
+      <stop offset="1" stop-color="#93988c"/>
+    </linearGradient>
+
+    <linearGradient id="collar" x1="0" y1="0" x2="1" y2=".45">
+      <stop stop-color="#d8d7c9"/>
+      <stop offset=".4" stop-color="#b3b5a8"/>
+      <stop offset="1" stop-color="#989e90"/>
+    </linearGradient>
+
+    <linearGradient id="iris" gradientUnits="userSpaceOnUse"
+                    x1="250" y1="337" x2="257" y2="380">
+      <stop stop-color="#293e35"/>
+      <stop offset=".28" stop-color="#46695a"/>
+      <stop offset=".68" stop-color="#729b83"/>
+      <stop offset="1" stop-color="#b3cbb1"/>
+    </linearGradient>
+
+    <linearGradient id="eye-shade" x1="0" y1="0" x2=".2" y2="1">
+      <stop stop-color="#817f78"/>
+      <stop offset=".45" stop-color="#dfdacf"/>
+      <stop offset="1" stop-color="#fffaed"/>
+    </linearGradient>
+
+    <radialGradient id="iris-light" cx=".48" cy=".8" r=".55">
+      <stop stop-color="#bad6cb" stop-opacity=".75"/>
+      <stop offset="1" stop-color="#a9c2b9" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="fold" x1="0" y1=".2" x2="1" y2=".8">
+      <stop stop-color="#e8e7da"/>
+      <stop offset=".37" stop-color="#b5b7aa"/>
+      <stop offset=".68" stop-color="#939b8c"/>
+      <stop offset="1" stop-color="#c0c4b5"/>
+    </linearGradient>
+
+    <linearGradient id="clip" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#526b5e"/>
+      <stop offset=".55" stop-color="#42594e"/>
+      <stop offset="1" stop-color="#34483e"/>
+    </linearGradient>
+
+    <radialGradient id="blush">
+      <stop stop-color="#c7ad98" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#c7ad98" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="edge-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="1.5"/>
+    </filter>
+
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+
+    <clipPath id="faceclip">
+      <use href="#face-shape"/>
+    </clipPath>
+
+    <clipPath id="shoulderclip">
+      <use href="#shoulder-shape"/>
+    </clipPath>
+
+    <clipPath id="eyeclip">
+      <path d="M211 359 Q245 337 289 335 Q279 354 259 367
+               L232 384 Q222 373 211 359Z"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#icon-circle)">
+  <!-- 背景与头发使用相同底色 -->
+  <path fill="#829b93" d="M-135 0H889V1024H-135Z"/>
+
+  <!-- 发饰 -->
+  <g id="hair-accessories">
+    <path fill="#6b7b75" d="M496 60 528 86 521 98 511 101 485 78Z"/>
+    <path fill="#56635e" d="m499 64 26 23-8 11-6 1-22-21Z"/>
+    <path fill="#f2ede1" d="m494 63 7 6-8 10-1 5-10 9-4-5 4-7-1-4Z"/>
+
+    <path fill="url(#clip)" stroke="#363e3b"
+          stroke-width="1.5" stroke-linejoin="round"
+          d="m389 180 17-19 12-1 7 4-10 12 83 80 9 13-16 13-13-9-64-68Z"/>
+    <path fill="#f9f4e8" d="m391 178 15-16 8-1-10 12Z"/>
+    <path fill="#c87954"
+          d="m410 162 11 1-10 14 15 20 66 68 5 11-8 3-69-77-17-23Z"/>
+    <path fill="#965b43"
+          d="m416 178 8 13 68 70 7 11-7 5-14-20-61-65-8-13Z"/>
+    <path d="m391 180 20-6m9 18 76 77"
+          fill="none" stroke="#252a28" stroke-width="1" opacity=".65"/>
+  </g>
+
+  <!-- 颈部 -->
+  <g id="neck-area">
+    <path fill="url(#neck)"
+          d="M353 465 375 431 396 411 416 404 430 419
+             425 464 434 497 444 527 463 564 434 580
+             390 596 345 616
+             Q332 573 312 551 Q303 541 281 550
+             L234 567 213 534Z"/>
+    <path fill="#cfb8a4" opacity=".2" filter="url(#soft)"
+          d="m294 544 55-53 24-20-15 44-18 52-18-18-12-4Z"/>
+    <path d="M279 550q24-9 33 1 19 21 33 65M433 497q9 36 30 67"
+          fill="none" stroke="#48534f" stroke-width="1"/>
+  </g>
+
+  <!-- 脸型与肤色 -->
+  <g id="face">
+    <path id="face-shape" fill="url(#skin)"
+          d="M141 268
+             Q171 295 200 315 Q238 338 289 326
+             Q300 345 303 369 Q307 398 287 428
+             Q276 441 264 449 Q294 433 313 405
+             Q309 430 297 446 Q286 465 272 478
+             Q290 480 309 469 Q298 481 273 488
+             Q296 494 323 482 Q338 477 349 468
+             Q348 487 356 501 Q328 523 306 543
+             Q288 548 272 555 Q255 561 239 567
+             Q233 569 230 563 Q224 553 217 542
+             Q200 531 193 518 Q191 513 186 510
+             Q180 507 177 503 Q175 492 171 486
+             Q154 473 148 464 Q146 462 149 460
+             L159 450 Q173 436 170 421
+             Q193 424 208 415 Q186 416 174 406
+             Q198 411 220 399 Q197 397 175 375
+             Q188 379 206 375 Q182 371 163 360
+             Q139 337 141 268Z"/>
+
+    <path fill="url(#forehead)"
+          d="M141 268q32 29 65 49l27 17-20 10-15 29-34-13q-25-26-23-92Z"/>
+    <path fill="#f4ebdc"
+          d="m156 299 34 30 22 9-12 22-24 3-16-7Z"/>
+    <path fill="#c5ab96" opacity=".46"
+          d="m198 361 12-23 49-7 29-1-24 17-41 16-24 18Z"/>
+
+    <ellipse cx="268" cy="408" rx="43" ry="52"
+             fill="url(#blush)" transform="rotate(24 268 408)"/>
+
+    <path fill="#dccab7" d="m263 458 23-27 27-26-7 25-20 20Z"/>
+
+    <path d="M170 423Q172 436 159 450L149 460
+             Q146 462 148 465Q155 474 171 486
+             Q175 492 177 502
+             M179 505q4 2 7 5
+             M194 520Q202 532 217 542
+             Q224 553 230 563Q233 569 239 567
+             Q256 562 273 554"
+          fill="none" stroke="#605e5a"
+          stroke-width=".95" stroke-linecap="round"/>
+
+    <path d="M191 507q5-4 10-5 11-5 20-11 5-3 7-8"
+          fill="none" stroke="#41403c"
+          stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M202 500q11-4 18-9"
+          fill="none" stroke="#a9846b" stroke-width=".65"/>
+    <path d="M154 332q9-16 39-25"
+          fill="none" stroke="#a9846b" stroke-width="1"/>
+  </g>
+
+  <!-- 发束与面部的接触阴影 -->
+  <g id="face-hair-contact" clip-path="url(#faceclip)">
+    <path d="M359 493Q327 523 293 545L266 558"
+          fill="none" stroke="#ceb7a3" stroke-width="18"
+          opacity=".3" filter="url(#soft)"/>
+    <path d="M160 359Q180 372 202 372
+             M178 401q18 8 38 0M177 420q21 5 32-4"
+          stroke="#c3a792" stroke-width="3.1" opacity=".24"
+          fill="none" filter="url(#edge-soft)"/>
+    <path d="M304 397Q310 423 295 445Q283 464 267 478
+             M307 472q-16 15-34 17M276 492q41 4 72-20"
+          fill="none" stroke="#c0a48e" stroke-width="4.5"
+          opacity=".29" filter="url(#edge-soft)"/>
+    <path d="M290 333q-17-3-48 7-30 8-40 31"
+          stroke="#b08d75" stroke-width="3" opacity=".3"
+          fill="none" filter="url(#edge-soft)"/>
+    <path d="M193 511q4 5 11 5"
+          stroke="#d4bfac" stroke-width="1.3" opacity=".4" fill="none"/>
+  </g>
+
+  <!-- 眼睛 -->
+  <g id="eye">
+    <path fill="url(#eye-shade)"
+          d="M207 362Q234 342 289 335Q279 354 259 367
+             L232 384Q215 375 207 362Z"/>
+
+    <g clip-path="url(#eyeclip)">
+      <path fill="url(#iris)" stroke="#404a46" stroke-width="1.05"
+            d="M232 337Q254 326 276 337Q280 354 269 371
+               Q261 383 246 386Q230 375 230 354Q229 344 232 337Z"/>
+      <path fill="url(#iris-light)"
+            d="M232 337Q254 326 276 337Q280 354 269 371
+               Q261 383 246 386Q230 375 230 354Z"/>
+      <path d="M236 361q3 13 12 17 12-2 20-14"
+            fill="none" stroke="#98afa6" stroke-width="1.1" opacity=".7"/>
+      <path d="m239 363 3 4m1-12 2 3m3 10 1 4
+               m8-3-1 4m9-10-2 3m7-13-2 4"
+            fill="none" stroke="#b4cfc5" stroke-width=".75"
+            opacity=".6" stroke-linecap="round"/>
+
+      <ellipse cx="255.5" cy="354.5" rx="5.25" ry="8.1"
+               fill="#3b4440" transform="rotate(22 255.5 354.5)"/>
+      <path d="M251 354q-2 6 2 7 5-2 5-6"
+            fill="none" stroke="#7a8d86" stroke-width="1.3"/>
+      <path fill="#313936" opacity=".57"
+            d="M220 342 286 330 283 344Q254 343 230 359Z"/>
+
+      <path fill="#f8f3e7" d="M250 345q1-3 4-3l2 4q0 3-3 3Z"/>
+      <path fill="#bfdcd1" opacity=".8" d="m267 344 3-1-1 6-3 3Z"/>
+      <ellipse cx="246" cy="370" rx="1.5" ry=".8"
+               fill="#ccebdf" transform="rotate(-29 246 370)" opacity=".85"/>
+    </g>
+
+    <!-- 上眼睑和渐细睫毛 -->
+    <path fill="#292824"
+          d="M198 373Q205 352 224 345Q254 334 292 330
+             L289 337Q254 339 230 348Q212 355 207 364
+             L200 375 203 366Z"/>
+    <path fill="#30322b"
+          d="M208 350Q201 360 195 377Q202 371 205 362L210 354Z
+             M216 347Q207 357 204 370Q211 360 218 354Z
+             M282 334l10-7-2 10-7 8 3-8Z"/>
+    <path d="M198 366Q202 351 218 343Q245 332 282 329"
+          fill="none" stroke="#a9846b" stroke-width=".95"/>
+    <path d="M202 357Q221 339 256 335M214 349Q243 338 279 334"
+          fill="none" stroke="#31302d" stroke-width=".85"/>
+    <path d="M229 388Q240 377 259 367Q276 357 282 349"
+          stroke="#a9846b" stroke-width=".72" fill="none"/>
+    <path d="M232 388Q244 378 256 373"
+          stroke="#c8ae99" stroke-width=".95" fill="none" opacity=".7"/>
+    <path d="m227 391 5-6m45-30 3-2"
+          stroke="#a9846b" stroke-width=".65" fill="none"/>
+
+    <path fill="#f6f1e5"
+          d="M241 317Q266 320 281 322L294 326 292 330
+             Q278 327 267 326L286 332Q264 325 254 322Z"/>
+    <path d="M252 324q23 3 34 5"
+          fill="none" stroke="#6f8079" stroke-width=".85"/>
+    <path fill="#829b93" d="M232 315q31 3 53 10l-26-5Z"/>
+  </g>
+
+  <!-- 耳部 -->
+  <g id="ear">
+    <path fill="#f9f5e8" d="M421 306q15 6 24 25l3 26-10-14-8-21Z"/>
+    <path fill="url(#forehead)"
+          d="m407 357 27 31-6 15-14 12-18 4-5 22-15 22-7 10 5-24 18-45Z"/>
+    <path fill="#fcf7ea" d="m412 372 20 16-8 18-26 10 7-26Z"/>
+    <path fill="#bc9e88" opacity=".55"
+          d="m407 360 5 11-9 25-8 21-4 23-16 22 13-27 9-38Z"/>
+    <path d="m426 408-12 7-18 4-4 20-17 25"
+          fill="none" stroke="#5d5b57" stroke-width="1.05"/>
+  </g>
+
+  <!-- 耳侧发梢 -->
+  <g id="hair-cutouts" fill="#829b93">
+    <path d="M350 460Q346 481 354 497Q357 505 365 510
+             Q352 511 346 499Q342 483 350 460Z"/>
+    <path d="M371 434Q360 463 373 484Q380 493 398 491
+             Q381 498 370 484Q359 466 371 434Z"/>
+    <path d="M430 416Q424 444 418 464L426 453
+             Q423 472 425 484L433 465Q432 478 438 488L435 450Z"/>
+  </g>
+
+  <!-- 衣领、肩部与衣料 -->
+  <g id="collar-and-clothing">
+    <path fill="url(#collar)" stroke="#515e59" stroke-width="1.1"
+          d="M345 613q49-35 118-49l-3 38-6 25-41 16-38-8-45 5Z"/>
+    <path fill="#e8dbcb" d="M370 602l17-9q-8 21-11 36l-16 4Z"/>
+    <path fill="#f3eee2" opacity=".65"
+          d="M345 613q52-34 113-47-51 15-100 47l-18 20-10 7Z"/>
+    <path fill="#879b93" opacity=".36"
+          d="M450 570q8 27-10 54l-24 12 25-6 13-5 6-24 3-35Z"/>
+    <path d="M350 612q31-22 64-32"
+          stroke="#f5f0e4" stroke-width=".8" opacity=".65" fill="none"/>
+
+    <path fill="#e4e0d4" d="m481 578 5 17 11 20-34 3 13-20Z"/>
+    <path fill="url(#fold)"
+          d="M460 619l38-5q9 12 12 25-9 30-35 58l-33-52-28-9Z"/>
+    <path fill="#94aba2" opacity=".48"
+          d="M458 624q30 1 37-7-13 14-18 34l-7 28-12-26Z"/>
+    <path d="M497 622q7 9 8 19-6 18-19 33"
+          stroke="#d8d4c9" stroke-width="1.6" opacity=".5" fill="none"/>
+    <path d="M492 629q-12 8-16 23"
+          stroke="#80938c" stroke-width=".85" opacity=".36" fill="none"/>
+    <path d="m458 620 40-6 9 22"
+          fill="none" stroke="#4c4b47" stroke-width="1.2"/>
+
+    <path fill="url(#arm)"
+          d="m279 762-14 45-4 43 3 22-26 32-29 52-19 43-7 25
+             h-19q-3-64 4-112 3-24 14-40l43-57Z"/>
+    <path fill="#e8daca"
+          d="m273 782-12 31-40 39-26 33-16 21-3 42 4 20
+             2-48 14-33 47-53 20-20Z"/>
+    <path fill="#f3eadb" d="m276 767-9 33-51 54-30 32 4-15 43-52Z"/>
+    <path d="M271 772q-49 66-89 110-14 19-15 50-5 53-3 92"
+          fill="none" stroke="#404a46" stroke-width="1.25"/>
+
+    <path id="shoulder-shape" fill="url(#shoulder)"
+          d="M329 640q29-19 70-8 31 7 48 27 16 18 26 42
+             l-21 18-32 14-49 27-69 45-25 17-11 22-7-21
+             9-34 22-37 6-27 1-32q3-35 15-47Z"/>
+    <path fill="#c8ae99" opacity=".6"
+          d="M302 687q-10 36-6 70l6 47-12 9-5-40 10-37Z"/>
+
+    <g clip-path="url(#shoulderclip)">
+      <path d="M302 711Q301 678 319 657Q334 641 362 643"
+            stroke="#c7ad98" stroke-width="13" opacity=".32"
+            fill="none" filter="url(#soft)"/>
+      <path d="M303 677Q310 645 333 639Q353 632 373 640
+               Q334 638 316 668L304 704Z"
+            fill="#f8f3e7" opacity=".8" filter="url(#edge-soft)"/>
+      <path d="M412 640Q448 650 473 701"
+            stroke="#bb9c86" stroke-width="5" opacity=".27"
+            fill="none" filter="url(#edge-soft)"/>
+    </g>
+
+    <path d="M329 640q-22 16-29 46l-3 28
+             m0 18q-3 23 1 45l4 27
+             m-28-18-8 32q-3 11 0 23"
+          fill="none" stroke="#6b6863" stroke-width="1.05"/>
+
+    <path fill="#f9f5e8"
+          d="M327 797Q359 773 392 757Q441 734 470 720
+             L453 737 433 756Q396 772 329 813
+             Q338 800 352 792L403 758Q362 774 327 797Z"/>
+
+    <path fill="#d4bfab" d="m591 826 3 62-2 51-8-5-21-37 13-35Z"/>
+    <path fill="#dccab7" d="m581 855-11 54 14 25 7 4 1-64Z"/>
+    <path d="m583 850-13 59m22-26-1 55-7-3"
+          fill="none" stroke="#6f6d68" stroke-width="1"/>
+    <path fill="#acc6bc" d="m550 927 5 11 9 5-7 22-17-1Z"/>
+
+    <path fill="#33322f" d="m449 964 24 1-27 59h-31Z"/>
+    <path fill="#242321" d="m450 992-14 32h-10Z"/>
+    <path fill="#343330" d="m560 979 33-9q7 9 8 31l6 23h-69Z"/>
+    <path fill="#232221"
+          d="m551 1024 4-15 7-5 11 7 9 13h-10l-8-10-4 10Z"/>
+  </g>
+
+  <!-- 肩颈与衣料前方的发束 -->
+  <g id="shoulder-hair" fill="#829b93">
+    <path d="M467 551Q481 584 465 613Q446 645 413 664
+             Q440 640 450 614Q462 584 467 551Z"/>
+    <path d="M397 631Q428 628 449 646Q467 662 479 695
+             L472 707Q463 674 444 653Q427 636 397 631Z"/>
+    <path d="M292 697Q280 718 270 732Q263 747 253 772
+             Q271 765 279 751Q293 734 299 712L297 700Z"/>
+    <path d="M298 737Q292 755 281 766Q277 775 275 786
+             L272 791 273 795Q268 809 263 820L260 834
+             Q261 846 268 864L259 851Q255 842 255 831
+             L260 811 263 794Q266 777 274 767Z"/>
+    <path d="M312 797Q345 772 380 755L436 723
+             Q468 706 488 699L459 726
+             Q432 735 398 750Q348 773 312 797Z"/>
+  </g>
+
+  <!-- 交界处细发梢 -->
+  <g id="transition-strands" fill="#829b93">
+    <path d="M348 480Q349 499 357 504Q351 497 351 486Z"/>
+    <path d="M448 622Q433 634 420 636Q437 637 451 628Z"/>
+    <path d="M440 644Q458 660 467 682Q461 658 449 648Z"/>
+    <path d="M296 712Q291 731 280 744Q291 735 298 722Z"/>
+    <path d="M460 727Q432 745 419 753Q443 744 453 737Z"/>
+  </g>
+
+  <g id="fine-lines" fill="none" stroke="#5e6c67" stroke-linecap="round">
+    <path d="m284 719-8 10-12 23m-6 9-17 24m50-73 3-10"
+          stroke-width="1"/>
+    <path d="m308 791 32-27 22-13" stroke-width=".7" opacity=".6"/>
+  </g>
+  </g>
+</svg>

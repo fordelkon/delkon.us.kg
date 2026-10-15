@@ -12,20 +12,23 @@ const meta = {
 ---
 
 <PageLayout meta={meta}>
-	<h1 class="title mb-6">Tags</h1>
-	<ul class="space-y-4">
+	<header class="mb-6">
+		<h1 class="font-serif text-2xl font-bold tracking-tight sm:text-3xl">Tags</h1>
+	</header>
+	<ul role="list">
 		{
 			allTags.map(([tag, val]) => (
-				<li class="flex items-center gap-x-2">
+				<li class="group flex items-baseline justify-between gap-4 border-b border-dotted border-printer-ink/10 py-3">
 					<a
-						class="cactus-link inline-block"
+						class="font-serif text-base transition-colors group-hover:text-printer-accent focus-visible:text-printer-accent"
 						href={`/tags/${tag}/`}
 						title={`View posts with the tag: ${tag}`}
 					>
-						&#35;{tag}
+						<span aria-hidden="true" class="me-0.5 font-mono text-xs text-printer-ink-light">#</span>
+						{tag}
 					</a>
-					<span class="inline-block">
-						- {val} Post{val > 1 && "s"}
+					<span class="print-label text-printer-ink-light tabular-nums">
+						{val} {val > 1 ? "posts" : "post"}
 					</span>
 				</li>
 			))

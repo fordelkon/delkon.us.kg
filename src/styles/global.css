@@ -3,67 +3,49 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
+/* Printer colour tokens: @property registrations, @theme mappings, dark-mode
+   swaps, and the theme-switch transition. Imported here, unlayered after the
+   Tailwind theme defaults, to keep the previous cascade order. */
+@import "./tokens/printer-palette.css";
+
+/* Native cross-document transition fallback for full page loads (e.g. when
+   the ClientRouter script is unavailable). Keep this outside the cascade
+   layers and after the required leading imports. */
+@view-transition {
+	navigation: auto;
+}
 
 /* tailwind to ignore satori generated og-image */
 @source not "../pages/og-image";
 /* config for tailwindcss-typography plugin */
 @config "../../tailwind.config.ts";
 
+/* Self-hosted JetBrains Mono (variable weight, latin subset; downloaded from
+   Google Fonts v24). Avoids the render-blocking third-party CSS chain. */
+@font-face {
+	font-family: "JetBrains Mono";
+	font-style: normal;
+	font-weight: 100 800;
+	font-display: swap;
+	src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+		U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* use a selector-based strategy for dark mode */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* register custom colour properties */
-@property --color-global-bg {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(98.48% 0 0);
-}
-@property --color-global-text {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(26.99% 0.0096 235.05);
-}
-@property --color-muted {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(44.6% 0.03 256.802);
-}
-@property --color-link {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(55.44% 0.0431 185.69);
-}
-@property --color-accent {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(55.27% 0.195 19.06);
-}
-@property --color-accent-2 {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(18.15% 0 0);
-}
-@property --color-quote {
-	syntax: "<color>";
-	inherits: true;
-	initial-value: oklch(55.27% 0.195 19.06);
-}
-
-/* you could refactor below to use light-dark(), depending on your target audience */
+/* Non-colour Tailwind tokens. The printer colour tokens live in
+   ./tokens/printer-palette.css. */
 @theme {
-	--color-global-bg: oklch(98.48% 0 0);
-	--color-global-text: oklch(26.99% 0.0096 235.05);
-	--color-muted: oklch(44.6% 0.03 256.802);
-	--color-link: oklch(55.44% 0.0431 185.69);
-	--color-accent: oklch(55.27% 0.195 19.06);
-	--color-accent-2: oklch(18.15% 0 0);
-	--color-quote: oklch(55.27% 0.195 19.06);
+	--font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
 }
 
 @layer base {
 	html {
 		color-scheme: light dark;
-		accent-color: var(--color-accent);
+		accent-color: var(--color-printer-accent);
 		scrollbar-gutter: stable;
 
 		&[data-theme="light"] {
@@ -72,34 +54,25 @@
 
 		&[data-theme="dark"] {
 			color-scheme: dark;
-			--color-global-bg: oklch(23.64% 0.0045 248);
-			--color-global-text: oklch(83.54% 0 264);
-			--color-muted: oklch(70.7% 0.022 261.325);
-			--color-link: oklch(70.44% 0.1133 349);
-			--color-accent: oklch(70.91% 0.1415 163.7);
-			--color-accent-2: oklch(94.66% 0 0);
-			--color-quote: oklch(94.8% 0.106 136.49);
 		}
-
-		--color-mode-transition-duration: 300ms;
-		--color-mode-transition-easing: ease-in-out;
-
-		transition:
-			--color-global-bg var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-global-text var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-muted var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-link var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-accent var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-accent-2 var(--color-mode-transition-duration) var(--color-mode-transition-easing),
-			--color-quote var(--color-mode-transition-duration) var(--color-mode-transition-easing);
 	}
 
+	/* workbench background: neutral light desk, near-black neutral dark desk */
+	body {
+		background-color: var(--printer-desk);
+	}
+
+	/* global dark-mode border fallback (paper outlines etc. keep their
+	   explicit utilities; layers rank above this base rule) */
+	html[data-theme="dark"] *,
+	html[data-theme="dark"] ::before,
+	html[data-theme="dark"] ::after {
+		border-color: #3a3d38;
+	}
+
+	/* Clear the sticky print-head housing when jumping to anchors. */
 	:target {
-		scroll-margin-block: 5ex;
-	}
-
-	@view-transition {
-		navigation: auto;
+		scroll-margin-block: calc(10.5rem + 5ex);
 	}
 
 	/* Astro image responsive styles, modified from -> https://docs.astro.build/en/guides/images/#responsive-image-styles */
@@ -116,26 +89,51 @@
 }
 
 @layer components {
+	@import "./components/printer-housing.css";
 	@import "./components/admonition.css";
 	@import "./components/github-card.css";
+	@import "./components/receipt.css";
 
-	.cactus-link {
-		@apply hover:decoration-link underline underline-offset-2 hover:decoration-2;
+	/* Warm-faded filter for images inside printed prose */
+	.prose img {
+		filter: saturate(0.78) contrast(1.06) brightness(0.98) sepia(0.16) hue-rotate(-4deg);
 	}
+	html[data-theme="dark"] .prose img {
+		filter: saturate(0.64) contrast(1.08) brightness(0.9) sepia(0.12) hue-rotate(-6deg);
+	}
+}
 
-	.title {
-		@apply text-accent-2 text-2xl font-semibold;
+/* Motion-sensitive users get static paper, a steady LED, and instant scrolls.
+   The html rules stay unlayered so they outrank the utilities layer (e.g.
+   Tailwind's .scroll-smooth utility on <html>). Colour transitions are kept:
+   they are non-vestibular and support the data-theme contract. */
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+		transition: none;
+	}
+	theme-toggle svg,
+	mobile-button svg {
+		transition: none;
 	}
 }
 
 @utility prose {
-	--tw-prose-body: var(--color-global-text);
-	--tw-prose-bold: var(--color-global-text);
-	--tw-prose-bullets: var(--color-global-text);
-	--tw-prose-code: var(--color-global-text);
-	--tw-prose-headings: var(--color-accent-2);
-	--tw-prose-hr: 0.5px dashed #666;
-	--tw-prose-links: var(--color-global-text);
-	--tw-prose-quotes: var(--color-quote);
-	--tw-prose-th-borders: #666;
+	--tw-prose-body: var(--color-printer-ink);
+	--tw-prose-headings: var(--color-printer-ink);
+	--tw-prose-lead: var(--color-printer-ink-light);
+	--tw-prose-links: var(--color-printer-ink);
+	--tw-prose-bold: var(--color-printer-ink);
+	--tw-prose-counters: var(--color-printer-ink);
+	--tw-prose-bullets: var(--color-printer-ink);
+	/* dashed rules read like the receipt dividers a thermal printer draws */
+	--tw-prose-hr: 0.5px dashed color-mix(in oklab, var(--color-printer-ink) 25%, transparent);
+	--tw-prose-quotes: var(--color-printer-ink);
+	--tw-prose-quote-borders: color-mix(in oklab, var(--color-printer-ink) 20%, transparent);
+	--tw-prose-captions: var(--color-printer-ink-light);
+	--tw-prose-code: var(--color-printer-ink);
+	--tw-prose-pre-code: var(--color-printer-ink);
+	--tw-prose-pre-bg: color-mix(in oklab, var(--color-printer-ink) 3%, transparent);
+	--tw-prose-th-borders: color-mix(in oklab, var(--color-printer-ink) 20%, transparent);
+	--tw-prose-td-borders: color-mix(in oklab, var(--color-printer-ink) 10%, transparent);
 }

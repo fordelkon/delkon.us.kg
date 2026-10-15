@@ -1,7 +1,8 @@
 ---
+import { ClientRouter } from "astro:transitions";
 import BaseHead from "@/components/BaseHead.astro";
-import Footer from "@/components/layout/Footer.astro";
 import Header from "@/components/layout/Header.astro";
+import PaperViewport from "@/components/printed/PaperViewport.astro";
 import SkipLink from "@/components/SkipLink.astro";
 import ThemeProvider from "@/components/ThemeProvider.astro";
 import { siteConfig } from "@/site.config";
@@ -14,41 +15,53 @@ interface Props {
 const {
 	meta: { articleDate, description = siteConfig.description, ogImage, title },
 } = Astro.props;
+
+// Rendered only when a page fills the gutter slot (currently the blog post
+// layout's table of contents).
+const hasGutter = Astro.slots.has("gutter");
 ---
 
 <html class="scroll-smooth" lang={siteConfig.lang}>
 	<head>
 		<BaseHead articleDate={articleDate} description={description} ogImage={ogImage} title={title} />
 		<ThemeProvider />
+		<ClientRouter />
 	</head>
-	<body
-		class="bg-global-bg text-global-text mx-auto flex min-h-screen max-w-3xl flex-col px-4 pt-16 font-mono text-sm font-normal antialiased sm:px-8"
-	>
+	<body class="font-mono text-printer-ink antialiased">
 		<SkipLink />
-		<Header />
-		<main id="main">
-			<slot />
-		</main>
-		<Footer />
-		<script is:inline type="speculationrules">
-			{
-				"prefetch": [
-					{
-						"where": {
-							"href_matches": "/*"
-						},
-						"eagerness": "immediate"
-					}
-				],
-				"prerender": [
-					{
-						"where": {
-							"href_matches": "/*"
-						},
-						"eagerness": "moderate"
-					}
-				]
-			}
-		</script>
+		<!-- Desk and housing chrome stay here; the paper mechanics (sheet,
+		     perforations, feed animation, paperFed script) live in
+		     PaperViewport.astro. The desk's constant px-3 is the desk margin —
+		     the paper's responsive inset is the --paper-inset token (see
+		     printer-housing.css), consumed by PaperViewport's margin and
+		     Header's feed slit. -->
+		<div class="page-grid flex min-h-screen flex-col items-center px-3 py-6 sm:py-10">
+			<div class="relative w-full max-w-3xl">
+				<!-- Keep the housing above the sheet as it retracts into the slot. -->
+				<div class="sticky top-0 z-30">
+					<!-- Opaque desk behind the rounded housing masks paper during native scrolling. -->
+					<div
+						aria-hidden="true"
+						class="page-grid pointer-events-none absolute -inset-x-5 top-0 bottom-3"
+					></div>
+					<Header />
+				</div>
+				<PaperViewport>
+					<slot />
+				</PaperViewport>
+				{
+					/* Page-margin gutter: sticky content anchored outside the paper's
+					   end edge on wide screens, so it never squeezes the printed page. */
+					hasGutter && (
+						<div class="pointer-events-none absolute inset-y-0 start-full hidden xl:block">
+							<div class="pointer-events-auto sticky top-48 w-48 ps-8">
+								<slot name="gutter" />
+							</div>
+						</div>
+					)
+				}
+			</div>
+		</div>
+		<slot name="floating-controls" />
 	</body>
 </html>

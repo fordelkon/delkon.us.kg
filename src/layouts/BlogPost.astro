@@ -28,19 +28,32 @@ const readingTime: string = remarkPluginFrontmatter.readingTime;
 	}}
 >
 	<article class="grow break-words" data-pagefind-body>
-		<div id="blog-hero" class="mb-12"><Masthead content={post} readingTime={readingTime} /></div>
-		<div class="flex flex-col gap-10 lg:flex-row lg:items-start lg:justify-between">
-			{!!headings.length && <TOC headings={headings} />}
-			<div
-				class="prose prose-sm prose-headings:font-semibold prose-headings:text-accent-2 prose-headings:before:absolute prose-headings:before:-ms-4 prose-headings:before:text-muted prose-headings:hover:before:text-accent sm:prose-headings:before:content-['#'] sm:prose-th:before:content-none"
-			>
+		<div id="blog-hero" class="mb-12">
+			<Masthead content={post} readingTime={readingTime} />
+		</div>
+		<div class="flex flex-col gap-10 lg:flex-row lg:items-start lg:justify-between xl:block">
+			{/* Sticky column beside the prose on narrow desktops (lg–xl); the xl
+			    gutter in Base.astro takes over on wide screens, so the prose
+			    reclaims the full paper width there. */}
+			{!!headings.length && (
+				<div class="xl:hidden lg:order-2 lg:sticky lg:top-48 lg:basis-40 lg:shrink-0">
+					<TOC headings={headings} />
+				</div>
+			)}
+			<div class="prose prose-sm min-w-0 max-w-none flex-1 font-serif sm:prose-base [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
 				<slot />
 				<WebMentions />
 			</div>
 		</div>
 	</article>
+	{!!headings.length && (
+		<Fragment slot="gutter">
+			<TOC headings={headings} />
+		</Fragment>
+	)}
 	<button
-		class="hover:border-link fixed end-4 bottom-8 z-90 flex h-10 w-10 translate-y-28 cursor-pointer items-center justify-center rounded-full border-2 border-transparent bg-zinc-200 text-3xl opacity-0 transition-all transition-discrete duration-300 data-[show=true]:translate-y-0 data-[show=true]:opacity-100 sm:end-8 sm:h-12 sm:w-12 dark:bg-zinc-700"
+		slot="floating-controls"
+		class="fixed end-4 bottom-8 z-90 flex h-10 w-10 translate-y-28 cursor-pointer items-center justify-center rounded-full border border-printer-ink/10 bg-printer-paper text-printer-ink opacity-0 shadow-(--paper-shadow-soft) transition-all transition-discrete duration-300 hover:border-printer-accent/30 hover:text-printer-accent focus-visible:border-printer-accent/30 focus-visible:text-printer-accent motion-reduce:transition-none data-[show=true]:visible data-[show=true]:translate-y-0 data-[show=true]:opacity-100 data-[show=false]:invisible sm:end-8 sm:h-12 sm:w-12"
 		data-show="false"
 		id="to-top-btn"
 	>
@@ -61,24 +74,47 @@ const readingTime: string = remarkPluginFrontmatter.readingTime;
 </BaseLayout>
 
 <script>
-	// SAFETY: This layout renders a button with id="to-top-btn" before its deferred script runs.
-	const scrollBtn = document.getElementById("to-top-btn") as HTMLButtonElement;
+	// Under the ClientRouter this module runs once per session, but each
+	// navigation swaps in fresh DOM. Re-bind on every astro:page-load
+	// (it also fires for the initial load).
+	let observer: IntersectionObserver | null = null;
 
-	// SAFETY: This layout renders a div with id="blog-hero" before its deferred script runs.
-	const targetHeader = document.getElementById("blog-hero") as HTMLDivElement;
+	function initToTop() {
+		// SAFETY: These ids are rendered by this layout whenever the button is present.
+		const scrollBtn = document.getElementById("to-top-btn") as HTMLButtonElement | null;
+		const targetHeader = document.getElementById("blog-hero");
 
-	function callback(entries: IntersectionObserverEntry[]) {
-		entries.forEach((entry) => {
-			// only show the scroll to top button when the heading is out of view
-			scrollBtn.dataset.show = (!entry.isIntersecting).toString();
+		// Navigating away from a post swaps in a page without them.
+		observer?.disconnect();
+
+		observer = null;
+
+		if (!scrollBtn || !targetHeader) return;
+
+		const button = scrollBtn;
+
+		function callback(entries: IntersectionObserverEntry[]) {
+			entries.forEach((entry) => {
+				// only show the scroll to top button when the heading is out of view
+				button.dataset.show = (!entry.isIntersecting).toString();
+			});
+		}
+
+		// Respect the user's reduced-motion preference when scrolling back to the top.
+		const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+		scrollBtn.addEventListener("click", () => {
+			document.documentElement.scrollTo({
+				behavior: prefersReducedMotion ? "instant" : "smooth",
+				top: 0,
+			});
 		});
+
+		observer = new IntersectionObserver(callback);
+		observer.observe(targetHeader);
 	}
 
-	scrollBtn.addEventListener("click", () => {
-		document.documentElement.scrollTo({ behavior: "smooth", top: 0 });
-	});
+	initToTop();
 
-	const observer = new IntersectionObserver(callback);
-
-	observer.observe(targetHeader);
+	document.addEventListener("astro:page-load", initToTop);
 </script>

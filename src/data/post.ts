@@ -16,6 +16,22 @@ export async function getTagMeta(tag: string): Promise<CollectionEntry<"tag"> | 
 	return tagEntries[0];
 }
 
+/** Maximum posts rendered per paginated listing page */
+export const MAX_POSTS_PER_PAGE = 10;
+
+/** Maximum number of pinned posts rendered */
+export const MAX_PINNED_POSTS = 3;
+
+/** returns up to max pinned posts, preserving the given order
+ *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  */
+export function getPinnedPosts(
+	posts: CollectionEntry<"post">[],
+	max = MAX_PINNED_POSTS,
+): CollectionEntry<"post">[] {
+	return posts.filter((post) => post.data.pinned).slice(0, max);
+}
+
 /** groups posts by year (based on option siteConfig.sortPostsByUpdatedDate), using the year as the key
  *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
  */

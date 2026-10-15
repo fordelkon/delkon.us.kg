@@ -1,0 +1,226 @@
+/* Printer housing chrome and the shared geometry of the paper sheet.
+   Components: .page-grid (workbench desk backdrop), .thermal-texture,
+   .paper-edge-bottom, .printer-header-border, .printer-btn, .printer-led,
+   the paper-feed / printer-led-pulse keyframes, and the geometry/shadow
+   tokens below. Consumed by Base.astro (desk + housing composition),
+   PrinterHousing.astro (feed-slit clip-path), PaperViewport.astro (paper sheet)
+   and BlogPost.astro's back-to-top button. */
+
+/* Shared geometry + shadow tokens. --paper-inset is the paper's responsive
+   horizontal inset from the viewport edge; PrinterHousing.astro's clip-path feed
+   opening must match PaperViewport's margin so the sheet's edges always
+   align with the slit it feeds out of. Declared on :root inside the
+   components layer: no other rule competes for these property names, so
+   the layer placement has no cascade effect. */
+:root {
+	--paper-inset: 12px;
+
+	/* Drop shadow of the paper sheet (PaperViewport.astro). The housing and
+	   the back-to-top button reuse subsets of these layers, so the values
+	   are composed from this token instead of duplicated. */
+	--paper-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.1);
+	/* Single-layer variant for small floating paper controls (BlogPost.astro's
+	   back-to-top button): the sheet's outermost drop layer only. */
+	--paper-shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.15);
+	/* Housing chrome (printer-header-border): the paper's drop layers plus a
+	   top inset highlight that reads as the housing catching overhead light. */
+	--housing-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), var(--paper-shadow);
+}
+
+@media (min-width: 640px) {
+	:root {
+		--paper-inset: 40px;
+	}
+}
+
+/* Industrial workbench grid background with a soft top glow. Used both as
+   the full-page desk (Base.astro) and as the opaque backdrop behind the
+   rounded housing that masks the scrolling paper. */
+.page-grid {
+	/* A shared viewport origin makes the housing backdrop match the desk. */
+	background-color: var(--printer-desk);
+	background-attachment: fixed;
+	background-image:
+		radial-gradient(at 50% 0%, rgba(255, 255, 255, 0.4) 0%, transparent 80%),
+		linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+	background-size:
+		100% 100%,
+		40px 40px,
+		40px 40px;
+	/* Offset grid to prevent it from looking too rigid */
+	background-position:
+		0 0,
+		13px 13px,
+		13px 13px;
+}
+html[data-theme="dark"] .page-grid {
+	background-image:
+		radial-gradient(at 50% 0%, rgba(255, 140, 90, 0.04) 0%, transparent 60%),
+		linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+}
+
+/* Dot matrix / thermal print texture on the paper */
+.thermal-texture {
+	background-image: radial-gradient(circle, rgba(0, 0, 0, 0.04) 0.6px, transparent 0.6px);
+	background-size: 5px 5px;
+}
+html[data-theme="dark"] .thermal-texture {
+	background-image: radial-gradient(circle, rgba(255, 255, 255, 0.03) 0.6px, transparent 0.6px);
+}
+
+/* Torn/zigzag perforated edge at the bottom of the paper. The colour
+   follows the swapped --color-printer-paper token, so it works in dark. */
+.paper-edge-bottom {
+	position: relative;
+}
+.paper-edge-bottom::after {
+	content: "";
+	position: absolute;
+	bottom: -3px;
+	left: 0;
+	right: 0;
+	height: 3px;
+	background:
+		linear-gradient(
+			315deg,
+			transparent 33.33%,
+			currentColor 33.33%,
+			currentColor 66.67%,
+			transparent 66.67%
+		),
+		linear-gradient(
+			45deg,
+			transparent 33.33%,
+			currentColor 33.33%,
+			currentColor 66.67%,
+			transparent 66.67%
+		);
+	background-size: 12px 6px;
+	background-position: 0 0;
+	color: var(--color-printer-paper);
+}
+
+/* Printer header housing shadow */
+.printer-header-border {
+	box-shadow: var(--housing-shadow);
+}
+html[data-theme="dark"] .printer-header-border {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.04),
+		0 4px 20px rgba(0, 0, 0, 0.5),
+		0 8px 40px rgba(255, 140, 90, 0.03),
+		0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Multi-layer inset plastic button */
+.printer-btn {
+	@apply border-printer-ink/10 bg-printer-shell text-printer-ink relative flex h-9 cursor-pointer items-center justify-center rounded-md border px-4 font-mono text-[10px] tracking-widest uppercase select-none sm:text-[11px];
+	transition:
+		transform 100ms,
+		box-shadow 100ms,
+		background-color 100ms,
+		border-color 100ms;
+	box-shadow:
+		inset 0 1px 0.5px rgba(255, 255, 255, 0.5),
+		inset 0 -3px 0 rgba(0, 0, 0, 0.08),
+		inset 0 -4px 6px rgba(0, 0, 0, 0.04),
+		0 1px 1px rgba(0, 0, 0, 0.08);
+}
+html[data-theme="dark"] .printer-btn {
+	box-shadow:
+		inset 0 1px 0.5px rgba(255, 255, 255, 0.05),
+		inset 0 -3px 0 rgba(0, 0, 0, 0.38),
+		inset 0 -4px 8px rgba(0, 0, 0, 0.24),
+		0 1px 1px rgba(0, 0, 0, 0.4);
+}
+.printer-btn:active,
+.printer-btn.active,
+.printer-btn[aria-current="page"] {
+	transform: translateY(1.5px);
+	box-shadow:
+		inset 0 1px 2px rgba(0, 0, 0, 0.2),
+		inset 0 -1px 0 rgba(0, 0, 0, 0.05),
+		0 0 0 rgba(0, 0, 0, 0);
+}
+html[data-theme="dark"] .printer-btn:active,
+html[data-theme="dark"] .printer-btn.active,
+html[data-theme="dark"] .printer-btn[aria-current="page"] {
+	background: rgba(255, 255, 255, 0.04);
+	box-shadow:
+		inset 0 1px 3px rgba(0, 0, 0, 0.55),
+		inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+		0 0 0 rgba(0, 0, 0, 0);
+}
+@media (max-width: 639px) {
+	.printer-btn {
+		@apply h-[30px] px-2.5;
+	}
+}
+
+/* Green ON indicator light with a decorative pulse. */
+.printer-led {
+	background-color: rgb(34 197 94 / 0.9);
+	box-shadow:
+		0 0 8px rgba(34, 197, 94, 0.6),
+		inset 0 -1px 2px rgba(0, 0, 0, 0.3);
+	animation: printer-led-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	/* Paper feed entry: slides out of the slit with a small paper-jam stutter.
+	   Repeat navigations in the same session print instantly (the inline
+	   script in PaperViewport.astro sets .paper-fed), so switching pages does
+	   not replay the entry animation. */
+	.paper-feed {
+		animation: paper-feed 450ms linear both;
+	}
+	html.paper-fed .paper-feed {
+		animation: none;
+	}
+}
+
+@keyframes paper-feed {
+	0% {
+		transform: translateY(-60px);
+	}
+	25% {
+		transform: translateY(-38px);
+	}
+	38% {
+		transform: translateY(-42px);
+	}
+	62% {
+		transform: translateY(-8px);
+	}
+	74% {
+		transform: translateY(-12px);
+	}
+	100% {
+		transform: translateY(0);
+	}
+}
+
+@keyframes printer-led-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.55;
+	}
+}
+
+/* Motion-sensitive users get static paper and a steady LED. The colour
+   transitions are kept: they are non-vestibular and support the data-theme
+   contract. */
+@media (prefers-reduced-motion: reduce) {
+	.paper-feed,
+	.printer-led {
+		animation: none;
+	}
+	.printer-btn {
+		transition: none;
+	}
+}

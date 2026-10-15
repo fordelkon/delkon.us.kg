@@ -3,11 +3,26 @@ import "@/styles/blocks/search.css";
 ---
 
 <script>
+	import type { PagefindModal } from "@pagefind/component-ui";
+
 	(() => {
 		if (import.meta.env.DEV) return;
 		const onIdle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
 		onIdle(async () => {
 			await import("@pagefind/component-ui");
+			// Persisted modals re-render during a ClientRouter swap, replacing
+			// the dialog without a close event. Notify the new closed dialog
+			// so Pagefind resets its open flag, shortcuts, and trigger state.
+			// Closing before the swap races the queued native close event.
+			document.addEventListener("astro:after-swap", () => {
+				for (const modal of document.querySelectorAll<PagefindModal>("pagefind-modal")) {
+					const dialog = modal.querySelector("dialog");
+
+					if (modal.isOpen && dialog && !dialog.open) {
+						dialog.dispatchEvent(new Event("close"));
+					}
+				}
+			});
 		});
 	})();
 </script>
@@ -15,5 +30,7 @@ import "@/styles/blocks/search.css";
 <pagefind-config
 	baseUrl={`${import.meta.env.BASE_URL}`}
 	bundle-path={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/pagefind/`}></pagefind-config>
-<pagefind-modal-trigger id="search" class="ms-auto" hide-shortcut compact></pagefind-modal-trigger>
-<pagefind-modal></pagefind-modal>
+<!-- persist: these components cache internal references at upgrade time, so
+     keep the original instances alive across client-side navigations. -->
+<pagefind-modal-trigger id="search" transition:persist class="ms-auto shrink-0" hide-shortcut compact></pagefind-modal-trigger>
+<pagefind-modal transition:persist></pagefind-modal>

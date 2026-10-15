@@ -11,7 +11,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { WebmentionsCache, WebmentionsChildren, WebmentionsFeed } from "@/types";
+import type {
+	WebmentionsCache,
+	WebmentionsChildren,
+	WebmentionsFeed,
+} from "@/utils/webmentions.types";
 
 const DOMAIN = import.meta.env.SITE;
 const CACHE_DIR = fileURLToPath(cacheDir);

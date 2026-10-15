@@ -1,12 +1,12 @@
 ---
 import { render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
-import { Icon } from "astro-icon/components";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
-import { getAllPosts, getTagMeta, getUniqueTags } from "@/data/post";
+import { getAllPosts, getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
 import PageLayout from "@/layouts/Base.astro";
 import { collectionDateSort } from "@/utils/date";
+import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const allPosts = await getAllPosts();
@@ -17,7 +17,7 @@ export const getStaticPaths = (async ({ paginate }) => {
 		const postsWithTag = sortedPosts.filter((post) => post.data.tags.includes(tag));
 
 		return paginate(postsWithTag, {
-			pageSize: 10,
+			pageSize: MAX_POSTS_PER_PAGE,
 			params: { tag },
 		});
 	});
@@ -36,41 +36,42 @@ const meta = {
 	title: tagMeta?.data.title ?? `Posts about ${tag}`,
 };
 
-const paginationProps = {
-	...(page.url.prev && {
-		prevUrl: {
-			text: "← Previous Tags",
-			url: page.url.prev,
-		},
-	}),
-	...(page.url.next && {
-		nextUrl: {
-			text: "Next Tags →",
-			url: page.url.next,
-		},
-	}),
-};
+const paginationProps = getPaginationProps(page, {
+	next: "Next Tags →",
+	prev: "← Previous Tags",
+});
 ---
 
 <PageLayout meta={meta}>
-	<nav class="mb-8" aria-label="Breadcrumbs">
-		<ul class="flex items-center">
-			<li class="flex items-center">
-				<a class="text-accent" href="/tags/">Tags</a>
-				<Icon aria-hidden="true" name="mdi:chevron-right" class="mx-1.5" />
+	<nav aria-label="Breadcrumbs" class="mb-6 print-label">
+		<ul class="flex items-center gap-1.5">
+			<li>
+				<a class="text-printer-ink-light transition-colors hover:text-printer-accent" href="/tags/">
+					Tags
+				</a>
 			</li>
-			<li aria-current="page" class=""><span aria-hidden="true">#</span>{tag}</li>
+			<li aria-hidden="true" class="text-printer-ink-light">/</li>
+			<li aria-current="page" class="text-printer-ink">
+				<span aria-hidden="true">#</span>
+				{tag}
+			</li>
 		</ul>
 	</nav>
-	<h1 class="title capitalize">{tagMeta?.data.title ?? `Posts about ${tag}`}</h1>
-	<div class="prose prose-sm prose-cactus mb-16 max-w-none">
-		{tagMeta?.data.description && <p>{tagMeta.data.description}</p>}
-		{TagContent && <TagContent />}
-	</div>
-	<ul class="space-y-4">
+	<h1 class="font-serif text-2xl font-bold tracking-tight capitalize sm:text-3xl">
+		{tagMeta?.data.title ?? `Posts about ${tag}`}
+	</h1>
+	{
+		tagMeta?.data.description && (
+			<p class="mt-2 max-w-prose font-serif text-sm leading-relaxed text-printer-ink/80">
+				{tagMeta.data.description}
+			</p>
+		)
+	}
+	{TagContent && <div class="prose prose-sm mt-4 max-w-none font-serif"><TagContent /></div>}
+	<ul class="mt-8 divide-y divide-dotted divide-printer-ink/10" role="list">
 		{
 			page.data.map((p) => (
-				<li class="grid gap-1 sm:grid-cols-[auto_1fr]">
+				<li class="py-2">
 					<PostPreview as="h2" post={p} />
 				</li>
 			))

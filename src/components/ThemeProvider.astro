@@ -39,6 +39,13 @@
 		}
 	});
 
+	// Client-side navigation: stamp the stored theme onto the incoming
+	// document before it is swapped in, so the first paint after a
+	// navigation already has the right theme (no light-mode flash).
+	document.addEventListener("astro:before-swap", (e) => {
+		e.newDocument.documentElement.setAttribute("data-theme", getUserPref());
+	});
+
 	// listen for theme-change custom event, fired in src/components/ThemeToggle.astro
 	document.addEventListener("theme-change", (e) => {
 		setTheme(e.detail.theme);

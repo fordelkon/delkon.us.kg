@@ -1,0 +1,18 @@
+---
+interface Props {
+	style?: "solid" | "dashed" | "dotted";
+}
+
+const { style = "dashed" } = Astro.props;
+
+const styleClasses = {
+	solid: "border-solid",
+	dashed: "border-dashed",
+	dotted: "border-dotted",
+} satisfies Record<string, string>;
+---
+
+<div
+	class:list={["my-6 border-t border-printer-ink/10", styleClasses[style]]}
+	aria-hidden="true"
+/>

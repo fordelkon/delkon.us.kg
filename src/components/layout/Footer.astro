@@ -1,23 +1,42 @@
 ---
 import { menuLinks, siteConfig } from "@/site.config";
 
+interface Props {
+	showStamp?: boolean;
+}
+
+const { showStamp = false } = Astro.props;
 const year = new Date().getFullYear();
+const printDate = new Date().toISOString().slice(0, 10);
+const domain = new URL(siteConfig.url).hostname;
 ---
 
 <footer
-	class="text-muted mt-auto flex w-full flex-col items-center justify-center gap-y-2 pt-20 pb-4 text-center align-top font-semibold sm:flex-row sm:justify-between sm:text-xs"
+	class="relative z-10 mt-4 border-t border-dashed border-printer-ink/10 px-6 py-6 print-label text-printer-ink-light sm:px-10"
 >
-	<div class="me-0 sm:me-4">
-		&copy; {siteConfig.author}
-		{year}.<span class="inline-block">&nbsp;🚀&nbsp;{siteConfig.title}&nbsp;🌵&nbsp;</span>
+	<div class="flex flex-col items-center justify-between gap-4 sm:flex-row">
+		<div class="print-label">
+			&copy; {siteConfig.author}&nbsp;{year}
+		</div>
+		<nav
+			aria-label="Footer"
+			class="flex items-center gap-4 print-label"
+		>
+			{
+				menuLinks.map((link) => (
+					<a class="transition-colors hover:text-printer-accent" href={link.path}>
+						{link.title}
+					</a>
+				))
+			}
+		</nav>
 	</div>
-	<nav aria-label="Footer" class="sm:divide-muted flex gap-x-2 sm:gap-x-0 sm:divide-x">
-		{
-			menuLinks.map((link) => (
-				<a class="hover:text-global-text px-4 py-2 hover:underline sm:py-0" href={link.path}>
-					{link.title}
-				</a>
-			))
-		}
-	</nav>
+	{
+		showStamp && (
+			<div class="mt-8 flex items-center justify-between border-t border-dotted border-printer-ink/10 pt-4">
+				<span>Printed on {printDate}</span>
+				<span>{domain}</span>
+			</div>
+		)
+	}
 </footer>

@@ -1,5 +1,25 @@
-<theme-toggle class="ms-2 sm:ms-4">
-	<button class="hover:text-accent relative h-9 w-9 cursor-pointer p-2" type="button">
+---
+/**
+ * "cluster" = the toggle sits in the header's uniform icon-button cluster:
+ * a 40px touch target at mobile widths (matching the search trigger and
+ * burger) and no extra start margin — the cluster's gap alone spaces it.
+ */
+interface Props {
+	size?: "default" | "cluster";
+}
+
+const { size = "default" } = Astro.props;
+const cluster = size === "cluster";
+---
+
+<theme-toggle class:list={[cluster ? "ms-0 sm:ms-4" : "ms-2 sm:ms-4"]}>
+	<button
+		class:list={[
+			"hover:text-printer-accent relative cursor-pointer p-2",
+			cluster ? "cluster-button" : "h-9 w-9",
+		]}
+		type="button"
+	>
 		<span class="sr-only">Dark Theme</span>
 		<svg
 			aria-hidden="true"
@@ -51,6 +71,25 @@
 		</svg>
 	</button>
 </theme-toggle>
+
+<style>
+	/* Cluster sizing: 36px target like the default button, grown to a 40px
+	   touch target at mobile widths so the header's icon-button cluster
+	   (search trigger, theme toggle, burger) stays uniform. Raw media query
+	   (not a Tailwind max-* variant) to match the header's exact 639px
+	   breakpoint. */
+	.cluster-button {
+		width: 2.25rem;
+		height: 2.25rem;
+	}
+
+	@media (max-width: 639px) {
+		.cluster-button {
+			width: 2.5rem;
+			height: 2.5rem;
+		}
+	}
+</style>
 
 <script>
 	// Note that if you fire the theme-change event outside of this component, it will not be reflected in the button's aria-checked attribute. You will need to add an event listener if you want that.

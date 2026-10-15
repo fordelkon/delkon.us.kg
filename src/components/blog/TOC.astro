@@ -12,11 +12,17 @@ const { headings } = Astro.props;
 const toc = generateToc(headings);
 ---
 
-<details open class="lg:sticky lg:top-12 lg:order-2 lg:-me-32 lg:basis-64">
-	<summary class="title hover:marker:text-accent cursor-pointer text-lg">Table of Contents</summary>
-	<nav class="ms-4 lg:w-full">
-		<ol class="mt-4">
-			{toc.map((heading) => <TOCHeading heading={heading} />)}
+<!-- Layout context is supplied by the consumer: a sticky column at lg, or the
+     page-margin gutter at xl (see Base.astro's gutter slot). -->
+<details open class="min-w-0">
+	<summary class="print-label-wide text-printer-ink-light transition-colors hover:text-printer-accent focus-visible:text-printer-accent">
+		Contents
+	</summary>
+	<nav aria-label="Table of contents" class="mt-3 lg:w-full">
+		<ol class="border-s border-dashed border-printer-ink/10 ps-4">
+			{toc.map((heading) => (
+				<TOCHeading heading={heading} />
+			))}
 		</ol>
 	</nav>
 </details>

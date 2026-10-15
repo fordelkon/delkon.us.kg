@@ -1,0 +1,36 @@
+/* Receipt micro-typography. Call sites keep their local colour, borders, and
+   extras; these classes cover only the genuinely shared idiom. */
+
+/* Small mono chip label: font, size, tracking, and case in one class.
+   (The tracking-[0.3em] variant lives in .print-label-wide below.) */
+.print-label {
+	@apply font-mono text-[10px] tracking-widest uppercase;
+}
+
+/* Same idiom with the wider 0.3em tracking used by section labels, year
+   headings, and the TOC summary. */
+.print-label-wide {
+	@apply font-mono text-[10px] tracking-[0.3em] uppercase;
+}
+
+/* Receipt link: thin ink underline that thickens on hover, for standalone
+   elements tagged .printer-link (tag chips, GitHub cards). Prose anchors are
+   styled by the typography plugin's `a` entry in tailwind.config.ts instead:
+   deleting that entry makes the plugin re-emit its own default anchor rule
+   (font-weight 500, --tw-prose-links colour, bare underline) into the
+   utilities layer, which outranks any components-layer equivalent here — so
+   the two seams cannot share one CSS rule set. Keep them in sync by hand. */
+.printer-link {
+	text-decoration-line: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+	text-decoration-color: color-mix(in oklab, var(--color-printer-ink) 30%, transparent);
+	transition-property: text-decoration-color, text-decoration-thickness, text-underline-offset;
+	transition-duration: 150ms;
+}
+.printer-link:hover,
+.printer-link:focus-visible {
+	text-decoration-thickness: 2px;
+	text-underline-offset: 4px;
+	text-decoration-color: color-mix(in oklab, var(--color-printer-ink) 85%, transparent);
+}

@@ -1,36 +1,45 @@
 @import "@pagefind/component-ui/css" layer(pagefind);
 
 :root {
-	--pf-text-muted: var(--color-global-text);
-	--pf-background: var(--color-global-bg);
-	--pf-border-focus: var(--color-accent-2);
-	--pf-outline-focus: var(--color-accent);
+	--pf-text-muted: var(--color-printer-ink);
+	--pf-background: var(--color-printer-paper);
+	--pf-border-focus: var(--color-printer-ink);
+	--pf-outline-focus: var(--color-printer-accent);
 	--pf-outline-offset: none;
 	--pf-font: var(--font-mono);
-	--pf-text: var(--color-global-text);
-	--pf-text-secondary: var(--color-muted);
-	--pf-skeleton: var(--color-global-bg);
+	--pf-text: var(--color-printer-ink);
+	--pf-text-secondary: var(--color-printer-ink-light);
+	--pf-skeleton: var(--color-printer-paper);
 	--pf-icon-search: url("data:image/svg+xml,%3Csvg fill='none' height='16' width='16' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg' %3E%3Cpath d='M0 0h24v24H0z' stroke='none'%3E%3C/path%3E%3Cpath d='M3 10a7 7 0 1 0 14 0 7 7 0 1 0-14 0M21 21l-6-6'%3E%3C/path%3E%3C/svg%3E");
 }
 
 .pf-trigger-btn {
 	--pf-background: #0000;
 	--pf-border-focus: #0000;
-	--pf-hover: var(--color-accent);
+	--pf-hover: var(--color-printer-accent);
 	display: flex;
 	justify-content: center;
 	align-items: center;
 	width: calc(var(--spacing) * 9);
 	height: calc(var(--spacing) * 9);
 	padding: 8px;
-	accent-color: var(--color-accent);
+	accent-color: var(--color-printer-accent);
 	border: 0;
 	border-radius: 0;
 
+	/* Mobile header control row: match the 40px touch target the theme
+	   toggle and burger use in the header's icon-button cluster. The
+	   trigger button is rendered by the Pagefind library, so this skin is
+	   the single owner of the trigger's dimensions. */
+	@media (max-width: 639px) {
+		width: 2.5rem;
+		height: 2.5rem;
+	}
+
 	&:hover {
 		@media (hover: hover) {
-			--pf-text-muted: var(--color-accent);
-			color: var(--color-accent);
+			--pf-text-muted: var(--color-printer-accent);
+			color: var(--color-printer-accent);
 		}
 	}
 	&:focus-visible {
@@ -48,7 +57,7 @@ dialog.pf-modal::backdrop {
 }
 
 .pf-modal-body {
-	--pf-hover: var(--color-global-bg);
+	--pf-hover: var(--color-printer-paper);
 
 	.pf-result-link,
 	.pf-heading-link {
@@ -58,8 +67,8 @@ dialog.pf-modal::backdrop {
 		background-image: linear-gradient(
 			transparent,
 			transparent 5px,
-			var(--color-global-text) 5px,
-			var(--color-global-text)
+			var(--color-printer-ink) 5px,
+			var(--color-printer-ink)
 		);
 
 		&:hover {
@@ -67,8 +76,8 @@ dialog.pf-modal::backdrop {
 			background-image: linear-gradient(
 				transparent,
 				transparent 4px,
-				var(--color-link) 4px,
-				var(--color-link)
+				var(--color-printer-accent) 4px,
+				var(--color-printer-accent)
 			);
 		}
 	}
@@ -79,7 +88,7 @@ dialog.pf-modal::backdrop {
 
 	.pf-heading-excerpt {
 		mark {
-			--pf-mark: var(--color-accent-2);
+			--pf-mark: var(--color-printer-ink);
 			font-weight: var(--font-weight-semibold);
 		}
 	}
@@ -87,6 +96,6 @@ dialog.pf-modal::backdrop {
 
 .pf-keyboard-hints {
 	kbd {
-		color: var(--color-zinc-800);
+		color: var(--color-printer-ink);
 	}
 }

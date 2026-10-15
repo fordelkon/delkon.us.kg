@@ -1,0 +1,170 @@
+/* Printer palette tokens: registered custom properties, Tailwind theme
+   mappings, dark-mode swaps, and the colour-mode transition. This file is the
+   canonical source for the light palette; build-time TS consumers read the
+   matching constants from ./printer-palette.ts — change both together.
+
+   It is imported by global.css immediately after the Tailwind layer imports,
+   which reproduces the previous inline position in the cascade. */
+
+/* Register each colour token so the theme switch can animate it: a custom
+   property only transitions when its type and initial value are known. */
+@property --color-printer-body {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #eeefeb;
+}
+@property --color-printer-shell {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #d1d4cc;
+}
+@property --color-printer-accent {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #ff6b35;
+}
+@property --color-printer-button {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #dfe1dc;
+}
+@property --color-printer-button-active {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #d3d6d0;
+}
+@property --color-printer-paper {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #faf8f1;
+}
+@property --color-printer-ink {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #292824;
+}
+@property --color-printer-ink-light {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #66635c;
+}
+@property --color-printer-tape {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #eceae2;
+}
+@property --color-admonition-note {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: oklch(52% 0.05 250);
+}
+@property --color-admonition-tip {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: oklch(52% 0.08 145);
+}
+@property --color-admonition-important {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: oklch(52% 0.09 310);
+}
+@property --color-admonition-caution {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: oklch(53% 0.11 70);
+}
+@property --color-admonition-warning {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: oklch(52% 0.13 27);
+}
+
+/* Expose the light defaults as Tailwind colour tokens (bg-printer-*,
+   text-printer-*, ...). The values repeat the @property initial values above
+   because @theme serves utility generation while @property drives the
+   animated swap; Tailwind cannot read @property registrations. */
+@theme {
+	--color-printer-body: #eeefeb;
+	--color-printer-shell: #d1d4cc;
+	--color-printer-accent: #ff6b35;
+	--color-printer-button: #dfe1dc;
+	--color-printer-button-active: #d3d6d0;
+	--color-printer-paper: #faf8f1;
+	--color-printer-ink: #292824;
+	--color-printer-ink-light: #66635c;
+	--color-printer-tape: #eceae2;
+
+	/* Admonition ink stamps (light values; dark variants live in @layer base). */
+	--color-admonition-note: oklch(52% 0.05 250);
+	--color-admonition-tip: oklch(52% 0.08 145);
+	--color-admonition-important: oklch(52% 0.09 310);
+	--color-admonition-caution: oklch(53% 0.11 70);
+	--color-admonition-warning: oklch(52% 0.13 27);
+}
+
+/* Light defaults and dark-mode var swaps. Palette C (material study): neutral
+   low-saturation housing, warm paper, near-neutral ink. Dark theme separates
+   surfaces by lightness: desk is darkest, housing and shell sit above it,
+   paper stays recognisable. */
+@layer base {
+	html {
+		--printer-desk: #d9dad6;
+
+		&[data-theme="dark"] {
+			--printer-desk: #141615;
+
+			/* var-swapped dark values: desk darkest, then paper, housing and
+			   shell rise above it so the printer reads as a lit object */
+			--color-printer-body: #292c29;
+			--color-printer-shell: #353932;
+			--color-printer-accent: #efa479;
+			--color-printer-button: #2f322e;
+			--color-printer-button-active: #383c37;
+			--color-printer-paper: #20211e;
+			--color-printer-ink: #e6e2d8;
+			/* no upstream dark counterpart; keeps muted text legible on dark */
+			--color-printer-ink-light: #a7a69b;
+			--color-printer-tape: #1c1e1b;
+
+			/* warm-tinted dark admonition inks */
+			--color-admonition-note: oklch(75% 0.05 250);
+			--color-admonition-tip: oklch(76% 0.09 145);
+			--color-admonition-important: oklch(76% 0.09 310);
+			--color-admonition-caution: oklch(78% 0.1 70);
+			--color-admonition-warning: oklch(74% 0.12 27);
+		}
+
+		--color-mode-transition-duration: 300ms;
+		--color-mode-transition-easing: ease-in-out;
+
+		/* The transition must enumerate every registered token: a custom
+		   property only animates when listed here, and a missing entry makes
+		   that colour snap instead of cross-fading on theme switch. */
+		transition:
+			--color-printer-body var(--color-mode-transition-duration) var(--color-mode-transition-easing),
+			--color-printer-shell var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-accent var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-button var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-button-active var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-paper var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-ink var(--color-mode-transition-duration) var(--color-mode-transition-easing),
+			--color-printer-ink-light var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-printer-tape var(--color-mode-transition-duration) var(--color-mode-transition-easing),
+			--color-admonition-note var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-admonition-tip var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-admonition-important var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-admonition-caution var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing),
+			--color-admonition-warning var(--color-mode-transition-duration)
+			var(--color-mode-transition-easing);
+	}
+}

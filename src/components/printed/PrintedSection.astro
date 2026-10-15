@@ -1,0 +1,21 @@
+---
+interface Props {
+	label?: string;
+}
+
+const { label } = Astro.props;
+---
+
+{
+	label && (
+		<div class="mb-8">
+			<div class="flex items-center gap-3">
+				<span class="rounded-sm bg-printer-ink/5 px-2 py-[3px] print-label-wide text-printer-ink/70">
+					{label}
+				</span>
+				<div class="h-px flex-1 bg-printer-ink/5" />
+				<slot />
+			</div>
+		</div>
+	)
+}
