@@ -1,0 +1,41 @@
+---
+export interface Skill {
+	name: string;
+	/** 1 = 了解, 2 = 熟悉, 3 = 熟练, 4 = 掌握 */
+	level: 1 | 2 | 3 | 4;
+}
+
+interface Props {
+	skills: Skill[];
+}
+
+const { skills } = Astro.props;
+const LEVEL_LABELS = ["了解", "熟悉", "熟练", "掌握"];
+---
+
+<ul class="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+	{
+		skills.map((skill) => (
+			<li class="flex items-center gap-3 px-2 py-1.5">
+				<span class="w-24 shrink-0 font-mono text-[13px] text-printer-ink sm:w-28">
+					{skill.name}
+				</span>
+				<span class="flex shrink-0 gap-1" aria-hidden="true">
+					{[1, 2, 3, 4].map((bar) => (
+						<span
+							class:list={[
+								"h-[9px] w-3.5 border",
+								bar <= skill.level
+									? "border-printer-ink bg-printer-ink"
+									: "border-printer-ink/30",
+							]}
+						/>
+					))}
+				</span>
+				<span class="whitespace-nowrap font-mono text-[11px] text-printer-ink-light">
+					{LEVEL_LABELS[skill.level - 1]}
+				</span>
+			</li>
+		))
+	}
+</ul>

@@ -24,19 +24,16 @@ const latestNotes = allNotes.sort(collectionDateSort).slice(0, MAX_NOTES);
 
 const works = [
 	{
-		href: "/posts/why-static-blog/",
-		name: "Why static?",
-		summary: "为什么我把博客重写成静态站",
+		href: "https://github.com/fordelkon/mico",
+		name: "mico",
+		summary: "Electron + React 桌面 AI 工作区，内置事件日志式 agent 运行时",
+		icon: "/icons/mico.png",
 	},
 	{
-		href: "/posts/astro-tailwind-theming/",
-		name: "Theming notes",
-		summary: "Astro + Tailwind 主题化的经验",
-	},
-	{
-		href: "https://github.com/fordelkon",
-		name: "GitHub",
-		summary: "fordelkon — 这个站点的源码与实验",
+		href: "https://github.com/fordelkon/tauri-eeg",
+		name: "tauri-eeg",
+		summary: "Tauri 2 + React 桌面应用，用于情绪诱发、音乐/视频调控与实验记录",
+		icon: "/icons/tauri-eeg.png",
 	},
 ] as const;
 
@@ -46,11 +43,11 @@ const meta = { title: "Home" };
 <PageLayout meta={meta}>
 	<section>
 		<h1 class="font-serif text-2xl font-bold tracking-tight text-printer-ink sm:text-3xl">
-			Delkon
+			delkon
 		</h1>
 		<p class="mt-2 max-w-prose font-serif text-[13px] leading-relaxed text-printer-ink-light">
-			Hi, I'm Delkon — 一个还在折腾静态博客的学生。这里用一台「热敏打印机」打印我关于
-			Astro、Markdown 工具链和日常工作流的文章与便签。
+			西安电子科技大学人工智能学院在读硕士。这里是一台「热敏打印机」，打印我关于技术与生活的文章与便签。更多
+			<a class="printer-link" href="/about/">关于我</a>。
 		</p>
 		<div class="mt-4">
 			<SocialList />
@@ -62,30 +59,33 @@ const meta = { title: "Home" };
 	<section>
 		<PrintedSection label="Works" />
 		<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-4">
-			{
-				works.map(({ href, name, summary }) => (
-					<a
-						class="group -mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-printer-ink/3 focus-within:bg-printer-ink/3"
-						href={href}
-						{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
-					>
-						<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-printer-accent/10 font-mono text-lg font-bold text-printer-accent">
-							{name.charAt(0)}
+			{works.map(({ href, name, summary, icon }) => (
+				<a
+					class="group -mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3"
+					href={href}
+					{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+				>
+					<img
+						alt=""
+						class="h-10 w-10 shrink-0 rounded-lg bg-printer-ink/5 object-contain p-1"
+						height="40"
+						loading="lazy"
+						src={icon}
+						width="40"
+					/>
+					<div class="min-w-0 flex-1">
+						<div class="font-mono text-sm font-medium text-printer-ink transition-colors group-hover:text-printer-accent">
+							{name}
 						</div>
-						<div class="min-w-0 flex-1">
-							<div class="font-mono text-sm font-medium text-printer-ink transition-colors group-hover:text-printer-accent">
-								{name}
-							</div>
-							<div class="mt-0.5 line-clamp-1 font-mono text-[10px] text-printer-ink-light">
-								{summary}
-							</div>
+						<div class="mt-0.5 line-clamp-1 font-mono text-[10px] text-printer-ink-light">
+							{summary}
 						</div>
-						<span class="shrink-0 font-mono text-[10px] text-printer-ink-light transition-colors group-hover:text-printer-accent">
-							→
-						</span>
-					</a>
-				))
-			}
+					</div>
+					<span class="shrink-0 font-mono text-[10px] text-printer-ink-light transition-colors group-hover:text-printer-accent">
+						→
+					</span>
+				</a>
+			))}
 		</div>
 	</section>
 
@@ -95,23 +95,23 @@ const meta = { title: "Home" };
 		<PrintedSection label="Posts">
 			<a
 				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
-				href="/posts/">View all →</a
+				href="/posts/"
 			>
+				View all →
+			</a>
 		</PrintedSection>
-		{
-			pinnedPosts.length > 0 && (
-				<section class="mb-8">
-					<h2 class="sr-only">Pinned posts</h2>
-					<ul role="list" class="-mx-2 space-y-1">
-						{pinnedPosts.map((p) => (
-							<li>
-								<PostPreview post={p} />
-							</li>
-						))}
-					</ul>
-				</section>
-			)
-		}
+		{pinnedPosts.length > 0 && (
+			<section class="mb-8">
+				<h2 class="sr-only">Pinned posts</h2>
+				<ul role="list" class="-mx-2 space-y-1">
+					{pinnedPosts.map((p) => (
+						<li>
+							<PostPreview post={p} />
+						</li>
+					))}
+				</ul>
+			</section>
+		)}
 		<ul role="list" class="-mx-2 space-y-1">
 			{latestPosts.map((p) => (
 				<li>
@@ -127,8 +127,10 @@ const meta = { title: "Home" };
 		<PrintedSection label="Notes">
 			<a
 				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
-				href="/notes/">View all →</a
+				href="/notes/"
 			>
+				View all →
+			</a>
 		</PrintedSection>
 		<ul role="list" class="-mx-2 space-y-1">
 			{latestNotes.map((note) => (

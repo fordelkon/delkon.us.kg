@@ -4,7 +4,8 @@ import { Icon } from "astro-icon/components";
 /**
 	Uses https://www.astroicon.dev/getting-started/
 	Find icons via guide: https://www.astroicon.dev/guides/customization/#open-source-icon-sets
-	Only installed pack is: @iconify-json/mdi
+	Installed packs: @iconify-json/mdi, @iconify-json/simple-icons
+	(the X logo lives in simple-icons; MDI only has the old Twitter bird).
 */
 const socialLinks: {
 	friendlyName: string;
@@ -16,6 +17,21 @@ const socialLinks: {
 		friendlyName: "GitHub",
 		link: "https://github.com/fordelkon",
 		name: "mdi:github",
+	},
+	{
+		friendlyName: "X",
+		link: "https://x.com/fordelkon",
+		name: "simple-icons:x",
+	},
+	{
+		friendlyName: "Telegram",
+		link: "https://t.me/fordelkon",
+		name: "mdi:telegram",
+	},
+	{
+		friendlyName: "Email",
+		link: "mailto:2799388816@qq.com",
+		name: "mdi:email",
 	},
 ];
 ---

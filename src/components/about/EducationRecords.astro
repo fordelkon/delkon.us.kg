@@ -1,0 +1,40 @@
+---
+export interface EducationRecord {
+	period: string;
+	school: string;
+	degree: string;
+	academy: string;
+	major: string;
+	status?: string;
+}
+
+interface Props {
+	records: EducationRecord[];
+}
+
+const { records } = Astro.props;
+---
+
+<ol class="-mx-2">
+	{
+		records.map((record) => (
+			<li class="border-b border-dashed border-printer-ink/10 px-2 py-3 first:pt-0 last:border-0 last:pb-0 sm:grid sm:grid-cols-[9rem_1fr] sm:gap-x-4">
+				<span class="block font-mono text-[11px] tabular-nums text-printer-ink-light sm:pt-[3px]">
+					{record.period}
+				</span>
+				<div class="mt-1 sm:mt-0">
+					<div class="font-mono text-sm font-medium text-printer-ink">
+						{record.school}
+						<span class="font-normal text-printer-ink-light">· {record.degree}</span>
+						{record.status && (
+							<span class="ml-2 print-label text-printer-ink-light">{record.status}</span>
+						)}
+					</div>
+					<div class="mt-0.5 font-mono text-[11px] text-printer-ink-light">
+						{record.academy} · {record.major}
+					</div>
+				</div>
+			</li>
+		))
+	}
+</ol>

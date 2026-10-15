@@ -1,0 +1,24 @@
+---
+import SocialList from "@/components/SocialList.astro";
+
+interface Props {
+	quote: string;
+}
+
+const { quote } = Astro.props;
+---
+
+<div>
+	<p class="font-serif text-sm leading-relaxed text-printer-ink">
+		我是 delkon，西安电子科技大学人工智能学院在读硕士（本科也在西电读的人工智能专业）。
+		目前关注前端界面与桌面端工具，做 AI 工作区和 EEG 实验应用。
+	</p>
+	<blockquote
+		class="mt-4 border-l-2 border-printer-ink/20 pl-4 font-serif text-[13px] italic leading-relaxed text-printer-ink-light sm:text-sm"
+	>
+		{quote}
+	</blockquote>
+	<div class="mt-5">
+		<SocialList />
+	</div>
+</div>
