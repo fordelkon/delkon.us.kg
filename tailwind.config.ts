@@ -86,15 +86,30 @@ export default {
 							paddingInline: "1rem",
 							paddingBlock: "0.75rem",
 						},
+						/* Inline-code chip: a faint ink block with a dashed border,
+						   echoing the receipt look of pre blocks and table rules.
+						   Excludes code inside pre so Expressive Code blocks keep
+						   their own background. */
 						code: {
 							fontWeight: "400",
 							color: "inherit",
-							"&::before": {
-								content: "none",
+							"&:not(pre code)": {
+								backgroundColor: "color-mix(in oklab, var(--color-printer-ink) 6%, transparent)",
+								border: "1px solid color-mix(in oklab, var(--color-printer-ink) 15%, transparent)",
+								borderRadius: "0.375rem",
+								paddingInline: "0.375em",
+								paddingBlock: "0.125em",
+								fontSize: "0.875em",
 							},
-							"&::after": {
-								content: "none",
-							},
+						},
+						/* Removing the plugin's decorative backticks requires these
+						   keys at the top level: nested "&::before" inside the code
+						   key does not outrank the plugin's own code::before rule. */
+						"code::before": {
+							content: "none",
+						},
+						"code::after": {
+							content: "none",
 						},
 						img: {
 							marginTop: "1.5rem",
