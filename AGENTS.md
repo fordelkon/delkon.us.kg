@@ -75,6 +75,7 @@ Manage the background server with `astro dev stop`, `astro dev status`, and `ast
 Read the relevant local sources before editing:
 
 - **Tests**: Before writing, changing, reviewing, or deleting tests, read [docs/testing.md](docs/testing.md) for test value, boundary ownership, deterministic dependencies, regression evidence, and coverage standards.
+- **Writing conventions**: Before writing or changing posts, notes, or tags, read [docs/writing.md](docs/writing.md) for tag naming and reuse rules, tag definition files, and post/note slug and title conventions.
 - **Content or frontmatter**: [src/content.config.ts](src/content.config.ts) for collection loaders and schemas; [src/data/post.ts](src/data/post.ts) for post selection and ordering.
 - **Site identity, navigation, dates, or code themes**: [src/site.config.ts](src/site.config.ts) for shared configuration; trace affected rendering and metadata consumers.
 - **Styling or themes**: [src/styles/global.css](src/styles/global.css) and the affected component styles for existing tokens and theme behavior.
