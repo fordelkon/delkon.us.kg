@@ -11,36 +11,32 @@ const { quote } = Astro.props;
 
 <div>
 	<p class="font-serif text-sm leading-relaxed text-printer-ink">
-		我是 delkon，西安电子科技大学人工智能学院的在读硕士，研究方向是脑电信号与视觉图像的表征对齐——探索如何从
-		EEG
-		中检索出人眼所见的图像，并让模型泛化到不同的被试。目前围绕这一方向开发实验框架
+		我是
+		delkon，西安电子科技大学人工智能学院的在读硕士，研究方向是脑电信号与视觉图像的表征对齐——探索如何从
+		EEG 中检索出人眼所见的图像，并让模型泛化到不同的被试。目前围绕这一方向开发实验框架
 		KGee（尚未公开），并复现{" "}
-		<ProjectLink href="https://arxiv.org/abs/2308.13234" icon="/icons/arxiv.png" name="NICE" />、<ProjectLink
-			href="https://arxiv.org/abs/2403.07721"
-			icon="/icons/arxiv.png"
-			name="ATMS"
-		/>、<ProjectLink href="https://arxiv.org/abs/2603.22721" icon="/icons/arxiv.png" name="HyFI" />
-		{" "}等已发表方法作为对照。
+		<ProjectLink href="https://arxiv.org/abs/2308.13234" icon="/icons/arxiv.png" name="NICE" />、
+		<ProjectLink href="https://arxiv.org/abs/2403.07721" icon="/icons/arxiv.png" name="ATMS" />、
+		<ProjectLink href="https://arxiv.org/abs/2603.22721" icon="/icons/arxiv.png" name="HyFI" />{" "}
+		等已发表方法作为对照。
 	</p>
 	<p class="mt-3 font-serif text-sm leading-relaxed text-printer-ink">
-		平时喜欢用 Electron 和 Tauri
-		做跨平台软件——EEG 范式调控软件{" "}
+		也是个动漫爱好者，一直幻想能做出真正的数字动漫人，为此研究过各种动漫 3D
+		模型的渲染和实现，还用 C++ 和 OpenGL 从零适配过各个平台，最后因为工作量和底层实现的难度无疾而终。
+	</p>
+	<p class="mt-3 font-serif text-sm leading-relaxed text-printer-ink">
+		真正带我走进网页开发和跨平台软件开发的，是{" "}
+		<ProjectLink href="https://github.com/moeru-ai/airi" icon="/icons/airi.png" name="airi" />
+		，一个 3D 模型聊天桌宠项目——偶然发现它时，它已经用 Web 技术把我一直想做的事做了出来，我也在里面贡献了自己的第一个
+		commit。现在平时就用 Electron 和 Tauri 做跨平台软件，EEG 范式调控软件{" "}
 		<ProjectLink
 			href="https://github.com/fordelkon/tauri-eeg"
 			icon="/icons/tauri-eeg.png"
 			name="tauri-eeg"
-		/>
-		{" "}就是我目前的横向项目。也是个动漫爱好者，一直幻想能做出真正的数字动漫人，为此研究过各种动漫 3D
-		模型的渲染和实现。
-	</p>
-	<p class="mt-3 font-serif text-sm leading-relaxed text-printer-ink">
-		真正带我进入网页世界的是{" "}
-		<ProjectLink href="https://github.com/moeru-ai/airi" icon="/icons/airi.png" name="airi" />
-		，一个 3D 模型聊天桌宠项目。这个想法我早就有过，当时没考虑跨平台的问题，用 C++ 和 OpenGL
-		去适配各个平台，最后因为工作量和底层实现无疾而终；后来偶然发现了这个项目，也在里面贡献了自己的第一个
-		commit。现在对 Agent 开发也很感兴趣，目前也在实现{" "}
+		/>{" "}
+		就是我目前的横向项目；对 Agent 开发也很感兴趣，正在实现{" "}
 		<ProjectLink href="https://github.com/fordelkon/mico" icon="/icons/mico.png" name="mico" />
-		，后续希望它能真正和数字人结合起来，顺便也学习agent开发。
+		，希望它后续能真正与数字人结合起来，顺便学习 agent 开发。
 	</p>
 	<p class="mt-3 font-serif text-sm leading-relaxed text-printer-ink">
 		目前日常使用的 Agent 是{" "}
@@ -50,8 +46,7 @@ const { quote } = Astro.props;
 			name="Claude Code"
 		/>
 		，模型搭配{" "}
-		<ProjectLink href="https://openai.com" icon="/icons/openai.png" name="GPT 6.1 Sol medium" />
-		{" "}和{" "}
+		<ProjectLink href="https://openai.com" icon="/icons/openai.png" name="GPT 6.1 Sol medium" /> 和{" "}
 		<ProjectLink href="https://chat.z.ai" icon="/icons/glm.png" name="GLM 5.3 flash" />
 		，供应商代理用{" "}
 		<ProjectLink href="https://github.com/yetone/magpie" icon="/icons/magpie.png" name="magpie" />
