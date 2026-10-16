@@ -5,7 +5,9 @@ import Note from "@/components/note/Note.astro";
 import PrintedDivider from "@/components/printed/PrintedDivider.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SocialList from "@/components/SocialList.astro";
+import WorksGrid from "@/components/work/WorksGrid.astro";
 import { getAllPosts, getPinnedPosts } from "@/data/post";
+import { works } from "@/data/works";
 import PageLayout from "@/layouts/Base.astro";
 import { collectionDateSort } from "@/utils/date";
 
@@ -21,21 +23,6 @@ const pinnedPosts = getPinnedPosts(allPostsByDate);
 const MAX_NOTES = 4;
 const allNotes = await getCollection("note");
 const latestNotes = allNotes.sort(collectionDateSort).slice(0, MAX_NOTES);
-
-const works = [
-	{
-		href: "https://github.com/fordelkon/mico",
-		name: "mico",
-		summary: "Electron + React 桌面 AI 工作区，内置事件日志式 agent 运行时",
-		icon: "/icons/mico.png",
-	},
-	{
-		href: "https://github.com/fordelkon/tauri-eeg",
-		name: "tauri-eeg",
-		summary: "Tauri 2 + React 桌面应用，用于情绪诱发、音乐/视频调控与实验记录",
-		icon: "/icons/tauri-eeg.png",
-	},
-] as const;
 
 const meta = { title: "Home" };
 ---
@@ -58,35 +45,7 @@ const meta = { title: "Home" };
 
 	<section>
 		<PrintedSection label="Works" />
-		<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-4">
-			{works.map(({ href, name, summary, icon }) => (
-				<a
-					class="group -mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3"
-					href={href}
-					{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
-				>
-					<img
-						alt=""
-						class="h-10 w-10 shrink-0 rounded-lg bg-printer-ink/5 object-contain p-1"
-						height="40"
-						loading="lazy"
-						src={icon}
-						width="40"
-					/>
-					<div class="min-w-0 flex-1">
-						<div class="font-mono text-sm font-medium text-printer-ink transition-colors group-hover:text-printer-accent">
-							{name}
-						</div>
-						<div class="mt-0.5 line-clamp-1 font-mono text-[10px] text-printer-ink-light">
-							{summary}
-						</div>
-					</div>
-					<span class="shrink-0 font-mono text-[10px] text-printer-ink-light transition-colors group-hover:text-printer-accent">
-						→
-					</span>
-				</a>
-			))}
-		</div>
+		<WorksGrid records={works} />
 	</section>
 
 	<PrintedDivider style="dashed" />

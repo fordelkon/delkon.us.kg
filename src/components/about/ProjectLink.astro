@@ -1,0 +1,23 @@
+---
+interface Props {
+	href: string;
+	name: string;
+	icon: string;
+}
+
+const { href, name, icon } = Astro.props;
+---
+
+<a
+	href={href}
+	class="printer-link inline-block whitespace-nowrap"
+	{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+>
+	<img
+		alt=""
+		class="mr-[0.25em] inline-block h-[1em] w-[1em] align-[-0.125em] object-contain"
+		height="14"
+		src={icon}
+		width="14"
+	/>{name}
+</a>

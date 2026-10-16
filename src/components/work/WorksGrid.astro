@@ -1,0 +1,44 @@
+---
+export interface Work {
+	href: string;
+	name: string;
+	summary: string;
+	icon: string;
+}
+
+interface Props {
+	records: Work[];
+}
+
+const { records } = Astro.props;
+---
+
+<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-4">
+	{records.map(({ href, name, summary, icon }) => (
+		<a
+			class="group -mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3"
+			href={href}
+			{...(href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})}
+		>
+			<img
+				alt=""
+				class="h-10 w-10 shrink-0 rounded-lg bg-printer-ink/5 object-contain p-1"
+				height="40"
+				loading="lazy"
+				src={icon}
+				width="40"
+			/>
+			<div class="min-w-0 flex-1">
+				<div class="font-mono text-sm font-medium text-printer-ink transition-colors group-hover:text-printer-accent">
+					{name}
+				</div>
+				<div class="mt-0.5 line-clamp-1 font-mono text-[10px] text-printer-ink-light">
+					{summary}
+				</div>
+			</div>
+			<span class="shrink-0 font-mono text-[10px] text-printer-ink-light transition-colors group-hover:text-printer-accent">
+				→
+			</span>
+		</a>
+	))}
+</div>
