@@ -57,9 +57,36 @@ export default {
 								},
 							},
 						},
+						/* Internal cross-references: wavy accent underline, like a
+						   hand-drawn pen squiggle on the paper — visually distinct
+						   from the straight ink underline of external citations.
+						   Selector excludes absolute http(s) and same-page anchors,
+						   so every relative or root-relative href counts as internal. */
+						'a:not([href^="http"]):not([href^="#"])': {
+							textDecorationStyle: "wavy",
+							textDecorationColor:
+								"color-mix(in oklab, var(--color-printer-accent) 55%, transparent)",
+							textUnderlineOffset: "3px",
+							"&:hover": {
+								"@media (hover: hover)": {
+									textDecorationColor: "var(--color-printer-accent)",
+									textDecorationThickness: "2px",
+								},
+							},
+						},
 						strong: {
 							fontWeight: "700",
 							color: "var(--color-printer-ink)",
+							/* Highlighter band behind key text (half-height accent
+							   strip). `box-decoration-break: clone` repeats the band
+							   per line when a strong phrase wraps, instead of only
+							   highlighting the last fragment. */
+							backgroundImage: "linear-gradient(var(--prose-highlight), var(--prose-highlight))",
+							backgroundRepeat: "no-repeat",
+							backgroundSize: "100% 45%",
+							backgroundPosition: "left bottom",
+							borderRadius: "0.125em",
+							boxDecorationBreak: "clone",
 						},
 						"ul, ol": {
 							marginTop: "1.25rem",

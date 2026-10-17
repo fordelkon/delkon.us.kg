@@ -110,6 +110,14 @@
 	html {
 		--printer-desk: #d9dad6;
 
+		/* Derived (not registered) prose highlighter-band tints: they mix
+		   --color-printer-accent at a fixed alpha, so they keep animating on
+		   theme switch through the accent token's own transition. The dark
+		   alphas are higher because a light tint over dark paper needs more
+		   coverage to stay visible (20% there reads as nearly nothing). */
+		--prose-highlight: color-mix(in oklab, var(--color-printer-accent) 20%, transparent);
+		--prose-highlight-heading: color-mix(in oklab, var(--color-printer-accent) 24%, transparent);
+
 		&[data-theme="dark"] {
 			--printer-desk: #141615;
 
@@ -125,6 +133,10 @@
 			/* no upstream dark counterpart; keeps muted text legible on dark */
 			--color-printer-ink-light: #a7a69b;
 			--color-printer-tape: #1c1e1b;
+
+			/* prose highlighter bands need a much stronger tint on dark paper */
+			--prose-highlight: color-mix(in oklab, var(--color-printer-accent) 45%, transparent);
+			--prose-highlight-heading: color-mix(in oklab, var(--color-printer-accent) 32%, transparent);
 
 			/* warm-tinted dark admonition inks */
 			--color-admonition-note: oklch(75% 0.05 250);
