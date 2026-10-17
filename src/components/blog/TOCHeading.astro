@@ -12,16 +12,23 @@ const {
 
 <li class={`${depth > 2 ? "ms-2" : ""}`}>
 	<a
-		class={`line-clamp-2 font-mono text-[11px] leading-relaxed text-printer-ink-light transition-colors hover:text-printer-accent focus-visible:text-printer-accent ${depth <= 2 ? "mt-2.5" : "mt-2"}`}
-		href={`#${slug}`}><span aria-hidden="true" class="me-0.5">#</span>{text}</a
+		class={`line-clamp-2 rounded-xs font-mono text-xs leading-relaxed text-printer-ink-light transition-colors hover:text-printer-ink hover:underline focus-visible:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink aria-[current=true]:text-printer-ink motion-reduce:transition-none ${depth <= 2 ? "mt-2.5" : "mt-2"}`}
+		href={`#${slug}`}
 	>
-	{
-		!!children.length && (
+		<span aria-hidden="true" class="me-0.5">
+			#
+		</span>
+		{text}
+	</a>
+	{!!children.length && (
+		/* Reveal only the next level when its parent becomes active. Immediate
+			   disclosure keeps marker geometry stable and hidden links out of focus. */
+		<div class="hidden data-[open=true]:block" data-toc-branch>
 			<ol>
 				{children.map((subheading) => (
 					<Astro.self heading={subheading} />
 				))}
 			</ol>
-		)
-	}
+		</div>
+	)}
 </li>

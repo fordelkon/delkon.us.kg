@@ -54,7 +54,8 @@ const hasGutter = Astro.slots.has("gutter");
 				</PaperViewport>
 				{
 					/* Page-margin gutter: sticky content anchored outside the paper's
-					   end edge on wide screens, so it never squeezes the printed page. */
+					   end edge on wide screens, so it never squeezes the printed page.
+					   The slot owner handles its own scrolling within the viewport. */
 					hasGutter && (
 						<div class="pointer-events-none absolute inset-y-0 start-full hidden xl:block">
 							<div class="pointer-events-auto sticky top-48 w-48 ps-8">

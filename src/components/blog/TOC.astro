@@ -8,22 +8,218 @@ interface Props {
 }
 
 const { headings } = Astro.props;
-
 const toc = generateToc(headings);
 ---
 
-<!-- Layout context is supplied by the consumer: Base.astro's page-margin
-     gutter at xl. It never renders inside the paper — the sheet's
-     overflow-hidden breaks position: sticky (see BlogPost.astro). -->
-<details open class="min-w-0">
-	<summary class="print-label-wide text-printer-ink-light transition-colors hover:text-printer-accent focus-visible:text-printer-accent">
+<!-- Base positions this outside the paper; TOC owns its bounded scroll region. -->
+<details open class="min-w-0" data-toc-details>
+	<summary class="print-label-wide cursor-pointer text-printer-ink-light hover:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink">
 		Contents
 	</summary>
-	<nav aria-label="Table of contents" class="mt-3 w-full">
-		<ol class="border-s border-dashed border-printer-ink/10 ps-4">
-			{toc.map((heading) => (
-				<TOCHeading heading={heading} />
-			))}
-		</ol>
-	</nav>
+	<div class="toc-scroll mt-3 max-h-[calc(100dvh-18rem)] overflow-y-auto" data-toc-scroll>
+		<nav aria-label="Table of contents" class="relative w-full pb-1 ps-1" data-toc>
+			<div
+				aria-hidden="true"
+				class="pointer-events-none absolute top-0 start-1 h-2 w-0.5 origin-top bg-printer-accent opacity-0 transition-[transform,opacity] duration-300 motion-reduce:transition-none"
+				data-toc-marker
+			></div>
+			<ol class="border-s border-dashed border-printer-ink/20 ps-3">
+				{toc.map((heading) => (
+					<TOCHeading heading={heading} />
+				))}
+			</ol>
+		</nav>
+	</div>
 </details>
+
+<style>
+	.toc-scroll {
+		scrollbar-width: none;
+	}
+
+	.toc-scroll::-webkit-scrollbar {
+		display: none;
+	}
+</style>
+
+<script>
+	// Section observation follows Starlight's MIT-licensed TOC implementation:
+	// https://github.com/withastro/starlight/blob/main/packages/starlight/src/components-internals/TableOfContents/starlight-toc.ts
+	const tocHeadingSelector = ":where(h2, h3, h4)[id]";
+	let cleanup: (() => void) | undefined;
+
+	function stop(): void {
+		cleanup?.();
+		cleanup = undefined;
+	}
+
+	function initToc(): void {
+		stop();
+
+		const nav = document.querySelector<HTMLElement>("nav[data-toc]");
+		const scrollRegion = nav?.closest<HTMLElement>("[data-toc-scroll]");
+		const details = nav?.closest<HTMLDetailsElement>("details[data-toc-details]");
+
+		if (!nav || !scrollRegion || !details) return;
+
+		const links = [...nav.querySelectorAll<HTMLAnchorElement>("a[href^='#']")];
+
+		if (!links.length) return;
+
+		const marker = nav.querySelector<HTMLElement>("[data-toc-marker]");
+		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const bindings = new AbortController();
+		let observer: IntersectionObserver | undefined;
+		let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+		let frame: number | undefined;
+		let current: HTMLAnchorElement | undefined;
+
+		const measureActive = (): void => {
+			if (!current || !details.open || !nav.getClientRects().length) return;
+			const linkRect = current.getBoundingClientRect();
+
+			if (!linkRect.height) return;
+
+			if (marker && marker.offsetHeight) {
+				const navRect = nav.getBoundingClientRect();
+				marker.style.transform = `translateY(${linkRect.top - navRect.top}px) scaleY(${linkRect.height / marker.offsetHeight})`;
+				marker.style.opacity = "1";
+			}
+
+			// Pointer and keyboard interaction take priority over automatic scrolling.
+			if (scrollRegion.matches(":hover, :focus-within")) return;
+			const regionRect = scrollRegion.getBoundingClientRect();
+
+			if (linkRect.top < regionRect.top || linkRect.bottom > regionRect.bottom) {
+				scrollRegion.scrollTo({
+					behavior: motion.matches ? "instant" : "smooth",
+					top:
+						scrollRegion.scrollTop +
+						linkRect.top -
+						regionRect.top -
+						regionRect.height / 2 +
+						linkRect.height / 2,
+				});
+			}
+		};
+
+		const scheduleMeasure = (): void => {
+			if (frame !== undefined) cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => {
+				frame = undefined;
+				measureActive();
+			});
+		};
+
+		const activate = (link: HTMLAnchorElement): void => {
+			if (link !== current) {
+				current?.removeAttribute("aria-current");
+				link.setAttribute("aria-current", "true");
+				current = link;
+
+				// Reveal the next level, plus ancestors for direct jumps to deep headings.
+				const children = link.parentElement?.querySelector<HTMLElement>(
+					":scope > [data-toc-branch]",
+				);
+
+				if (children) children.dataset.open = "true";
+
+				let scope = link.parentElement;
+
+				while (scope && scope !== nav) {
+					if (scope.matches("[data-toc-branch]")) scope.dataset.open = "true";
+					scope = scope.parentElement;
+				}
+			}
+
+			// Geometry can change even when the active heading stays the same.
+			scheduleMeasure();
+		};
+
+		const headingFor = (element: Element | null): HTMLElement | null => {
+			let el = element;
+
+			while (el && !el.matches("article, main")) {
+				if (el instanceof HTMLElement && el.matches(tocHeadingSelector)) return el;
+				const childHeading = el.querySelector<HTMLElement>(tocHeadingSelector);
+
+				if (childHeading) return childHeading;
+				let previous = el.previousElementSibling;
+
+				while (previous?.lastElementChild) previous = previous.lastElementChild;
+				el = previous ?? el.parentElement;
+			}
+
+			return null;
+		};
+
+		const setCurrent: IntersectionObserverCallback = (entries) => {
+			for (const { isIntersecting, target } of entries) {
+				if (!isIntersecting) continue;
+				const heading = headingFor(target);
+
+				if (!heading) continue;
+
+				const link = links.find(
+					(candidate) => candidate.hash === `#${encodeURIComponent(heading.id)}`,
+				);
+
+				if (link) {
+					activate(link);
+					break;
+				}
+			}
+		};
+
+		const observe = (): void => {
+			observer?.disconnect();
+			const headerHeight = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+			const top = headerHeight + 32;
+			// A narrow band below the pinned housing tracks sections across long paragraphs.
+			observer = new IntersectionObserver(setCurrent, {
+				rootMargin: `-${top}px 0% ${top + 53 - document.documentElement.clientHeight}px`,
+			});
+
+			const targets = document.querySelectorAll(
+				[
+					`article :where(${tocHeadingSelector})`,
+					`article :where(${tocHeadingSelector}) ~ *:not(:has(${tocHeadingSelector}))`,
+					`article > *:not(:has(${tocHeadingSelector}))`,
+				].join(","),
+			);
+
+			for (const target of targets) observer.observe(target);
+			scheduleMeasure();
+		};
+
+		const onResize = (): void => {
+			observer?.disconnect();
+			clearTimeout(resizeTimer);
+			resizeTimer = setTimeout(observe, 200);
+			scheduleMeasure();
+		};
+
+		window.addEventListener("resize", onResize, { signal: bindings.signal });
+		details.addEventListener("toggle", scheduleMeasure, { signal: bindings.signal });
+		// Container size changes include breakpoint visibility and font reflow.
+		const geometry = new ResizeObserver(scheduleMeasure);
+		geometry.observe(nav);
+		geometry.observe(scrollRegion);
+		observe();
+
+		cleanup = () => {
+			bindings.abort();
+			observer?.disconnect();
+			geometry.disconnect();
+			clearTimeout(resizeTimer);
+
+			if (frame !== undefined) cancelAnimationFrame(frame);
+		};
+	}
+
+	initToc();
+
+	document.addEventListener("astro:page-load", initToc);
+
+	document.addEventListener("astro:before-swap", stop);
+</script>
