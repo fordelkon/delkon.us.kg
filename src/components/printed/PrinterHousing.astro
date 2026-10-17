@@ -1,5 +1,6 @@
 ---
 import { siteConfig } from "@/site.config";
+import BrandOrbit from "./BrandOrbit.astro";
 
 // Offset the decorative LED pulse using the static page's build time, so the
 // housing's LED does not start every page at the same pulse phase.
@@ -20,17 +21,12 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 		<!-- Brand plate -->
 		<div class="relative mb-8 flex items-start justify-between">
 			<div class="flex items-center gap-4">
-				<div class="relative">
-					{siteConfig.showLogo && (
-						<div
-							class="absolute -inset-2 rounded-full bg-black/5 shadow-inner dark:bg-white/[0.08]"
-							aria-hidden="true"
-						/>
-					)}
+				<div class="brand-avatar relative">
+					{siteConfig.showLogo && <BrandOrbit />}
 					<a
 						aria-current={Astro.url.pathname === "/" ? "page" : false}
 						aria-label={siteConfig.title}
-						class="relative z-10 block h-8 w-8 overflow-hidden rounded-full bg-printer-paper shadow-sm ring-1 ring-black/10 dark:ring-white/15"
+						class="relative z-10 ml-2 block h-8 w-8 overflow-hidden rounded-full bg-printer-paper shadow-sm ring-1 ring-black/10 dark:ring-white/15"
 						href="/"
 					>
 						<img alt="" class="h-full w-full object-cover" decoding="sync" src="/icon.svg" />
@@ -88,6 +84,17 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 </header>
 
 <style>
+	.brand-avatar {
+		flex: 0 0 3rem;
+		width: 3rem;
+		height: 2rem;
+	}
+
+	.brand-avatar a:focus-visible {
+		outline: 2px solid var(--color-printer-accent);
+		outline-offset: 3px;
+	}
+
 	/* Cut the paper opening out of the housing while retaining its outer
 	   shadow. The opening shares the paper's responsive horizontal inset
 	   (--paper-inset, defined in printer-housing.css) so it aligns with
