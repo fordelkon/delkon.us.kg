@@ -13,9 +13,11 @@ const staticPath = `${Array.from({ length: 121 }, (_, index) => {
 	<svg viewBox="0 0 100 100" fill="none" focusable="false">
 		<g>
 			<path d={staticPath} stroke="currentColor" stroke-width="1.7" opacity="0.22" />
-			{Array.from({ length: 62 }, () => (
-				<circle fill="currentColor" r="0" />
-			))}
+			<g data-orbit-particles>
+				{Array.from({ length: 62 }, () => (
+					<circle fill="currentColor" r="0" />
+				))}
+			</g>
 		</g>
 	</svg>
 </brand-orbit>
@@ -47,15 +49,19 @@ const staticPath = `${Array.from({ length: 121 }, (_, index) => {
 		connectedCallback() {
 			const group = this.querySelector("g");
 			const path = this.querySelector("path");
+			const trail = this.querySelector("[data-orbit-particles]");
 			const particles = [...this.querySelectorAll("circle")];
 
-			if (!group || !path) return;
+			if (!group || !path || !trail) return;
 
 			const initialPath = path.getAttribute("d") ?? "";
 			const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 			let frame = 0;
 			let elapsed = 0;
 			let previous = 0;
+			// Limit the decoration to eight seconds of visible playback. Background
+			// time does not consume the budget; a finished orbit never restarts.
+			const playbackDuration = 8000;
 
 			const point = (progress: number, amplitude: number): [number, number] => {
 				const t = progress * Math.PI * 2;
@@ -90,6 +96,20 @@ const staticPath = `${Array.from({ length: 121 }, (_, index) => {
 
 				elapsed += previous ? now - previous : 0;
 				previous = now;
+
+				if (elapsed >= playbackDuration) {
+					cancelAnimationFrame(frame);
+					trail.setAttribute("opacity", "0");
+
+					return;
+				}
+
+				// Fade the particles during the final 600ms, leaving the current
+				// contour in place so completion does not snap to another shape.
+				if (elapsed > playbackDuration - 600) {
+					trail.setAttribute("opacity", String((playbackDuration - elapsed) / 600));
+				}
+
 				const amplitude = 7 * (0.76 + 0.24 * Math.sin((elapsed / 4200) * Math.PI * 2 + 0.55));
 
 				const contour = contourSamples.map(([baseX, baseY, detailX, detailY], index) => {
@@ -113,6 +133,9 @@ const staticPath = `${Array.from({ length: 121 }, (_, index) => {
 			const sync = () => {
 				cancelAnimationFrame(frame);
 				previous = 0;
+
+				if (elapsed >= playbackDuration) return;
+
 				particles.forEach((particle) => {
 					particle.style.display = reducedMotion.matches ? "none" : "";
 				});
