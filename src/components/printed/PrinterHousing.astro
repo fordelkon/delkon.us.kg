@@ -1,4 +1,5 @@
 ---
+import siteIconUrl from "@/icons/icon.svg?url";
 import { siteConfig } from "@/site.config";
 import BrandOrbit from "./BrandOrbit.astro";
 
@@ -29,7 +30,7 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 						class="relative z-10 ml-2 block h-8 w-8 overflow-hidden rounded-full bg-printer-paper shadow-sm ring-1 ring-black/10 dark:ring-white/15"
 						href="/"
 					>
-						<img alt="" class="h-full w-full object-cover" decoding="sync" src="/icon.svg" />
+						<img alt="" class="h-full w-full object-cover" decoding="sync" src={siteIconUrl} />
 					</a>
 				</div>
 				<div>

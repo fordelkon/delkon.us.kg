@@ -1,5 +1,6 @@
 ---
 import { WEBMENTION_PINGBACK, WEBMENTION_URL } from "astro:env/client";
+import siteIconUrl from "@/icons/icon.svg?url";
 import { siteConfig } from "@/site.config";
 import type { SiteMeta } from "@/types";
 import "@/styles/global.css";
@@ -28,7 +29,7 @@ const socialImageURL = ogImage ? new URL(ogImage, Astro.url).href : undefined;
 />
 
 {/* Icons */}
-<link href="/icon.svg" rel="icon" type="image/svg+xml" />
+<link href={siteIconUrl} rel="icon" type="image/svg+xml" />
 {import.meta.env.PROD && (
 	<>
 		{/* Favicon & Apple Icon, Generated at build */}
