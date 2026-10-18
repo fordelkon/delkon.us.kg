@@ -1,0 +1,43 @@
+/* Footnote markers and the generated references section. Sätteri's GFM
+   footnotes emit <sup><a data-footnote-ref>…</a></sup> markers, a
+   <section data-footnotes> list with a per-citation ↩ backref
+   (<a data-footnote-backref>), and localize their heading through
+   features.gfm.footnotes in astro.config.ts. Background:
+   docs/footnote-backlink-research.md. */
+
+/* The superscript number is a weak touch/click target at its natural size;
+   paint extra padding around it and cancel the horizontal growth with
+   negative margins so the line layout does not shift. */
+.prose sup a[data-footnote-ref] {
+	padding: 0.5em 0.3em;
+	margin: 0 -0.3em;
+}
+
+/* Footnote entries read like the small print under a receipt. */
+.prose section[data-footnotes] {
+	font-size: 0.875em;
+}
+
+/* Backref arrows are quiet trailing glyphs: no underline, and room around
+   the arrow so repeated backrefs (↩ ↩²) do not fuse into one blob. */
+.prose a[data-footnote-backref] {
+	@apply no-underline;
+	padding: 0.3em;
+	margin-inline-start: 0.25em;
+}
+
+/* Flash the destination with the same accent tint the bold highlighter
+   band uses, then fade so the highlight does not linger while the reader
+   scrolls on (Kitty Giraudel's :target technique). Reduced motion keeps
+   the static highlight but skips the fade. */
+.prose section[data-footnotes] li:target,
+.prose sup:has(a:target) {
+	background-color: var(--prose-highlight);
+	animation: footnote-flash 1.5s 4s ease-in-out forwards;
+}
+
+@keyframes footnote-flash {
+	to {
+		background-color: transparent;
+	}
+}

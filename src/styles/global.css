@@ -130,6 +130,7 @@
 	@import "./components/admonition.css";
 	@import "./components/github-card.css";
 	@import "./components/receipt.css";
+	@import "./components/footnotes.css";
 
 	/* Warm-faded filter for images inside printed prose */
 	.prose img {

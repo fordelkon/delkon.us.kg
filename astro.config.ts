@@ -76,7 +76,18 @@ export default defineConfig({
 	],
 	markdown: {
 		processor: satteri({
-			features: { directive: true },
+			features: {
+				directive: true,
+				// Footnotes are on by default; only the labels are localized here.
+				// Keep clobberPrefix at its "user-content-" default — it guards
+				// footnote ids against DOM clobbering (docs/footnote-backlink-research.md §1.3).
+				gfm: {
+					footnotes: {
+						label: "参考文献",
+						backLabel: "返回正文第 {reference} 处引用",
+					},
+				},
+			},
 			mdastPlugins: [
 				satteriUnwrapImagesPlugin(),
 				satteriReadingTimePlugin(),
@@ -84,7 +95,12 @@ export default defineConfig({
 				satteriAdmonitionsPlugin(),
 			],
 			hastPlugins: [
-				satteriHeadingIdsPlugin(),
+				// Factory form: the plugin closes over a Slugger, so it must be
+				// instantiated once per compile. Passed as an instance its Slugger
+				// would persist across documents and suffix duplicate heading ids
+				// with cross-page counters (-1, -2 …). Sätteri calls plugin
+				// factories once per compile (satteri/dist/plugin.d.ts).
+				() => satteriHeadingIdsPlugin(),
 				satteriAutolinkHeadingsPlugin(),
 				satteriFootnoteLabelPlugin(),
 				satteriExternalLinksPlugin(),
