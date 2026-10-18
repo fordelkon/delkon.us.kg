@@ -35,6 +35,31 @@ Frontmatter schema (see src/content.config.ts):
 - updatedDate:  optional; rendered alongside publishDate as an "Updated"
                 badge, and used instead of publishDate for
                 article:published_time and the OG image date
+
+Concrete content rules (high-level rationale: docs/writing.md):
+- Tags:        give each post 3–4 tags naming its topic areas and language
+                ecosystems; use the singular form (`tag`, `database`); slugs
+                are lowercase ASCII with hyphens (`machine-learning`); reuse
+                an existing tag instead of creating a synonym.
+- Title/slug:  title max 60 chars (schema above); filename slug is
+                kebab-case naming the topic
+                (`concurrency-task-scheduling-collaboration`), not the date.
+- Term         write **中文**（English）— bold covers only the Chinese term,
+annotations:   the English gloss sits outside the bold. Never end a bold span
+                on a fullwidth punctuation mark when CJK text follows:
+                CommonMark's right-flanking rule makes `**中文（English）**汉字`
+                render as literal `**`, and the CJK-friendly remark plugin
+                cannot be used here because the site's Rust-based markdown
+                processor (Sätteri) is incompatible with it.
+- Cross-       link every titled mention of a sibling post as
+references:    [《并发编程（二）：…》](/posts/<slug>/). Ordinal mentions
+                ("第二篇讲了…") stay plain text.
+- Footnotes:   place the `[^n]` marker immediately before the sentence's
+                closing punctuation (`……结论[^1]。`); define it as
+                `[^n]: [Title](URL)——annotation` stating which claims the
+                source backs. Never hand-write a `## 参考文献` heading — the
+                pipeline renders it. Entries with no natural citation site in
+                the body go into a hand-written `## 延伸阅读` list.
 -->
 
 ---
@@ -103,7 +128,7 @@ GitHub 仓库卡片（leaf 指令，**两个冒号**）：`repo`（owner/name）
 
 带脚注的句子[^1]。
 
-[^1]: 脚注内容。
+[^1]: [来源标题](https://example.com)——说明该来源支持正文中的哪个论点。
 
 ---
 
