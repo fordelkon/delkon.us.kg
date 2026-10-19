@@ -18,7 +18,7 @@ tags: ["concurrency", "synchronization", "rust", "cpp"]
 - **保护共享状态**：哪些访问需要互斥，怎样维护一个操作涉及的数据不变量？Mutex、RwLock 是常用答案。
 - **协调线程推进**：什么时候可以继续，什么时候应当等待？条件变量用于等待状态满足条件，屏障用于阶段会合。
 
-这是按主要用途划分的讲解视角，并不是互不重叠的分类。锁除了互斥，还建立线程之间的同步顺序：一个线程在持锁期间做出的修改，对之后获得同一把锁的线程可见——这一保证的机制属于内存模型，第三篇展开。协调机制则经常与锁组合，才能构成完整协议。
+这是按主要用途划分的讲解视角，并不是互不重叠的分类。锁除了互斥，还建立线程之间的同步顺序：一个线程在持锁期间做出的修改，对之后获得同一把锁的线程可见——这一保证的机制属于内存模型，第三篇用[happens-before](/posts/atomics-memory-model/#跨线程同步与-happens-before)展开。协调机制则经常与锁组合，才能构成完整协议。
 
 | 工具     | 核心机制                           | 本篇中的用途           |
 | -------- | ---------------------------------- | ---------------------- |
@@ -27,7 +27,7 @@ tags: ["concurrency", "synchronization", "rust", "cpp"]
 | 条件变量 | 释放锁并等待通知，返回前重新获取锁 | 等待队列非空或生产结束 |
 | Barrier  | 等待约定数量的参与者到达           | 在阶段之间会合         |
 
-原子操作与一次性初始化留到[《并发编程（三）：原子操作与内存模型》](/posts/atomics-memory-model/)；管理资源许可的**信号量**（Semaphore）留到[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/)。信号量既可用于限制并发数量，也可用于互斥或事件排序，并不只属于“协调”一侧[^1]。
+原子操作与一次性初始化留到[《并发编程（三）：原子操作与内存模型》](/posts/atomics-memory-model/)；管理资源许可的**信号量**（Semaphore）留到[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/#信号量与资源并发数)。信号量既可用于限制并发数量，也可用于互斥或事件排序，并不只属于“协调”一侧[^1]。
 
 ## 保护共享状态
 
@@ -71,7 +71,7 @@ fn main() {
 
 这也限定了锁的保证：C++ 中一把独立的 `std::mutex` 不会自动拦住绕过它的读写，所有相关访问都必须遵守同一协议。Rust 的 `Mutex<T>` 则把数据和锁放在一起，通过 guard 暴露访问入口。示例用 `unwrap()` 简化错误处理；实际程序还需决定如何处理线程 panic 后的锁中毒。
 
-还要注意，这两类锁都**不可重入**：C++ 中同一线程对已持有的 `std::mutex` 再次 `lock()` 是未定义行为，需要可重入语义时应使用 `std::recursive_mutex`；Rust 的 `Mutex` 在同一线程重复加锁则会死锁或 panic，标准库未指定具体行为。后文的 Java monitor 相反，允许持有者重复进入。重入并不是免费的便利：它会让“保护哪些访问”的协议更难看清；同线程重复加锁造成的死锁，留到第四篇分析。
+还要注意，这两类锁都**不可重入**：C++ 中同一线程对已持有的 `std::mutex` 再次 `lock()` 是未定义行为，需要可重入语义时应使用 `std::recursive_mutex`；Rust 的 `Mutex` 在同一线程重复加锁则会死锁或 panic，标准库未指定具体行为。后文的 Java monitor 相反，允许持有者重复进入。重入并不是免费的便利：它会让“保护哪些访问”的协议更难看清；同线程重复加锁的等待依赖，见第四篇的[死锁与加锁顺序](/posts/deadlock-livelock-correctness/#死锁与加锁顺序)。
 
 ### RwLock：并发读与独占写
 
@@ -125,7 +125,120 @@ RwLock 背后是经典的**读者-写者问题**（readers/writers）：读与�
 
 **时间维度：缩短持锁时间，但保留完整操作。** OSTEP 把锁保护下的临界区描述为近似一条原子指令的执行：对于遵守同一加锁协议的线程，它们不会看到这段操作执行到一半的状态[^6]。与不变量无关的工作，例如日志、网络 I/O、耗时计算，应尽量移到锁外。但不能把必须整体完成的检查和更新拆成两个临界区，否则即使每次访问都加了锁，组合起来仍可能出错。
 
+例如，银行里 Alice 有 1000 分，Bob 有 500 分，要从 Alice 向 Bob 转账。这里用整数表示分，只讨论内存中的余额更新：成功时不能透支，两个账户的总额保持不变；失败时两边都不修改。先用一把锁保护整个银行状态，启动两个线程，各向 Bob 转账 200 分。与前面的计数器一样，`Arc` 负责在线程间共享所有权，`Mutex` 负责互斥访问：
+
+```rust
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+struct Bank {
+    alice: u64,
+    bob: u64,
+}
+
+fn transfer(bank: &Mutex<Bank>, amount: u64) -> bool {
+    let mut state = bank.lock().unwrap();
+    if amount == 0 || state.alice < amount {
+        return false;
+    }
+    let Some(bob_after) = state.bob.checked_add(amount) else {
+        return false;
+    };
+
+    // Validate both balances before changing either one.
+    state.alice -= amount;
+    state.bob = bob_after;
+    true
+}
+
+fn main() {
+    let bank = Arc::new(Mutex::new(Bank {
+        alice: 1000,
+        bob: 500,
+    }));
+    let mut handles = Vec::new();
+
+    for _ in 0..2 {
+        let bank = Arc::clone(&bank);
+        handles.push(thread::spawn(move || {
+            assert!(transfer(&bank, 200));
+        }));
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let state = bank.lock().unwrap();
+    assert_eq!((state.alice, state.bob), (600, 900));
+    assert_eq!(state.alice + state.bob, 1500);
+    println!("Alice = {}, Bob = {}", state.alice, state.bob);
+}
+```
+
+两个线程都结束后，程序必须输出 `Alice = 600, Bob = 900`，总额仍为 1500 分；不要求哪个线程先完成，也不保证某次运行一定发生锁争用。余额检查、扣款和入账都在同一个 guard 的生命周期内；`checked_add` 也在修改前排除收款余额溢出。读取这两个余额的线程只要同样持有银行锁，就只能看到转账前或转账后的状态。这里的原子性是相对于遵守锁协议的访问而言，锁并不提供持久化或故障回滚。
+
+如果先加锁检查余额，解锁后再加锁扣款，其他转账就可能在间隙里花掉已经检查过的钱；如果扣款后解锁，再加锁入账，读取者又可能看到“钱已扣、尚未到账”的中间状态。两种拆法都可能没有数据竞争，却破坏完整操作的要求。日志可以放到函数返回以后，决定转账能否成功的检查则必须留在临界区里。
+
 **空间维度：选择合适的锁粒度。** 一把大锁保护多份状态是粗粒度锁（coarse-grained locking），协议简单，但无关操作也会互相等待；按数据划分多把锁是细粒度锁（fine-grained locking），允许更多操作并行，却增加了维护跨数据不变量的难度[^6]。一个操作需要多把锁时，一致的获取顺序是避免循环等待的常用办法。
+
+把银行改成每个账户一把锁，转账仍然需要同时保护付款和收款账户。下面保留相同的初始余额和两个转账线程，给出可单独运行的完整版本，固定先锁 Alice，再锁 Bob：
+
+```rust
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+struct Bank {
+    alice: Mutex<u64>,
+    bob: Mutex<u64>,
+}
+
+fn transfer(bank: &Bank, amount: u64) -> bool {
+    let mut alice = bank.alice.lock().unwrap();
+    let mut bob = bank.bob.lock().unwrap();
+    if amount == 0 || *alice < amount {
+        return false;
+    }
+    let Some(bob_after) = bob.checked_add(amount) else {
+        return false;
+    };
+
+    // Hold both guards until both balances have been updated.
+    *alice -= amount;
+    *bob = bob_after;
+    true
+}
+
+fn main() {
+    let bank = Arc::new(Bank {
+        alice: Mutex::new(1000),
+        bob: Mutex::new(500),
+    });
+    let mut handles = Vec::new();
+
+    for _ in 0..2 {
+        let bank = Arc::clone(&bank);
+        handles.push(thread::spawn(move || {
+            assert!(transfer(&bank, 200));
+        }));
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Use the same lock order when reading a consistent snapshot.
+    let alice = bank.alice.lock().unwrap();
+    let bob = bank.bob.lock().unwrap();
+    assert_eq!((*alice, *bob), (600, 900));
+    assert_eq!(*alice + *bob, 1500);
+    println!("Alice = {}, Bob = {}", *alice, *bob);
+}
+```
+
+这个版本也必须输出 `Alice = 600, Bob = 900`。`Arc<Bank>` 共享银行对象，两个账户各自由内部的 Mutex 保护。这里有两把锁，但扣款和入账发生在两个持锁区间重叠的部分，不能按“每个账户各加一次锁”就把转账拆开。读取两账户总额也必须先锁 Alice、再锁 Bob，同时持有两把锁后读取；分别加锁读取再相加，可能拼出来自转账前后两个时刻的余额，得不到一致快照。反向转账同样应先锁 Alice、再锁 Bob，而不是跟着转账方向改变顺序，否则可能形成循环等待；第四篇的[固定加锁顺序](/posts/deadlock-livelock-correctness/#固定加锁顺序)会给出完整示例。
+
+如果只有这两个账户，而且每次操作都要同时访问它们，两把锁没有增加这类操作的并发机会，反而多了一次加解锁。细化的收益要看是否存在互不冲突的访问：例如银行再有 Charlie 和 David，Alice 向 Bob 转账时，Charlie 向 David 转账只需另外两把账户锁，两笔操作便不必因同一把银行锁而互相等待。推广到多个账户时，可以按稳定且唯一的账户 ID 从小到大获取所需的锁，并单独处理付款与收款为同一账户的情况，避免重复锁住同一个 Mutex。
 
 实践中可以先用简单的锁协议保证正确，再根据测量定位争用、逐步细化。锁的成本不仅来自等待，也包括加解锁、缓存一致性等开销；没有必要为了缩短几行临界区就引入更复杂的协议。
 
@@ -217,12 +330,12 @@ int main() {
 读懂这段代码，关键是三个约束：
 
 1. **条件存在于状态里。** `tasks` 和 `done` 都在同一把锁下检查、修改。通知不会累积为可供以后领取的事件；如果通知发生在等待之前，消费者仍能通过状态判断自己无需等待。避免丢失唤醒依赖两个前提配合：谓词在持有互斥锁时检查；修改谓词所依赖状态的线程（这里是生产者）也必须先拿同一把锁。假如状态不受这把锁保护，一次通知就可能落在“检查完条件”与“进入等待”之间，被永远错过；`wait` 原子地解锁并进入等待，正是在锁的保护下封住了这段窗口。
-2. **唤醒后必须重新检查。** 线程可能虚假唤醒，也可能在重新获得锁之前被其他消费者取走任务。`while` 检查的是能否继续的谓词：队列非空，或者生产已经结束。C++ 的 `condition.wait(lock, predicate)` 也能表达同样的循环；Rust 的对等写法是 `Condvar::wait_while(guard, predicate)`[^7]。
+2. **唤醒后必须重新检查。** 线程可能虚假唤醒，也可能在重新获得锁之前被其他消费者取走任务。`while` 检查的是能否继续的谓词：队列非空，或者生产已经结束。C++ 的 `condition.wait(lock, predicate)` 在谓词为假时等待，本例的谓词是 `!tasks.empty() || done`。Rust 的 `Condvar::wait_while(guard, predicate)` 则在谓词为真时继续等待：若状态含有相同的 `tasks` 和 `done` 字段，闭包应检查 `state.tasks.is_empty() && !state.done`。两者表达同一等待协议时，谓词方向相反[^7]。
 3. **结束不等于立即退出。** 主线程先等待全部生产者结束，再设置 `done` 并唤醒所有消费者。消费者只有在生产结束且队列已空时退出，才能处理完剩余任务，并让没有任务可取的线程也结束等待。
 
 生产者先在锁下更新状态，再解锁通知，在这个协议中是合法的。通知让等待者有机会继续，不保证它立即运行，也不保证它获得锁时条件仍然成立。OSTEP 的条件变量章节用生产者-消费者问题详细分析了这些边界[^9]。
 
-这里使用无界队列，生产者不会因为队列已满而等待；容量限制与背压是第五篇的主题。
+这里使用无界队列，生产者不会因为队列已满而等待；[容量限制与背压](/posts/message-passing-workers-backpressure/#背压与队列容量)是第五篇的主题。
 
 :::note[Monitor：封装状态、互斥与条件等待]
 上面的互斥锁与条件变量，是构造**管程**（monitor）的基础。monitor 把受保护的状态、操作入口和条件等待封装起来，让调用者通过约定的接口访问状态；上面的全局队列示例展示了组成机制，还没有做这层封装。Java 的 `synchronized` 方法或代码块获取对应对象的 monitor，`wait` 释放它并等待，返回前重新获取；只有遵守同一 monitor 协议的访问才受其保护，并非对象所有方法天然互斥[^10]。
@@ -264,11 +377,11 @@ fn main() {
 
 ## 减少共享可变状态
 
-前面讨论怎样保护和协调共享状态。在选择工具之前，还可以先问：哪些数据根本不需要被多方修改？构造完成后不再变化的数据，在正确发布给其他线程后（什么叫“正确发布”，第三篇用 happens-before 展开），可以让多个读者共享，而不必为内容的读取反复加锁。Java 官方教程把不可变对象作为简化并发程序的一种策略[^12]。
+前面讨论怎样保护和协调共享状态。在选择工具之前，还可以先问：哪些数据根本不需要被多方修改？构造完成后不再变化的数据，在正确发布给其他线程后（什么叫“正确发布”，第三篇用[happens-before](/posts/atomics-memory-model/#跨线程同步与-happens-before)展开），可以让多个读者共享，而不必为内容的读取反复加锁。Java 官方教程把不可变对象作为简化并发程序的一种策略[^12]。
 
 不可变性要覆盖对象可观察到的状态，而不只是字段名或引用本身。Java 的简单构造策略包括限制修改入口、使用 `private final` 字段、防止子类改变行为，以及对可变成员做防御性复制；仅仅给一个指向可变列表的字段加上 `final`，并不会让列表内容不可变[^12]。
 
-Rust 的所有权与借用规则提供了另一种约束：普通共享引用限制修改，可变借用要求独占。哪些类型允许通过共享引用修改内部状态（`Mutex<T>`、原子类型可以，`Cell`、`RefCell` 不行），由 `Send`、`Sync` 这类标记约束决定；这组约束的职责，第三篇展开[^13]。
+Rust 的所有权与借用规则提供了另一种约束：普通共享引用限制修改，可变借用要求独占。`Cell<T>`、`RefCell<T>`、`Mutex<T>` 与原子类型都能提供内部可变性，允许通过共享引用修改内部状态。但内部可变性不等于跨线程共享安全：`Cell<T>`、`RefCell<T>` 不实现 `Sync`，而锁与原子类型为跨线程访问提供相应的同步协议。`Send`、`Sync` 约束值或引用能否安全地跨线程传递；这组约束的职责，第三篇的[Send / Sync](/posts/atomics-memory-model/#send--sync跨线程传递与共享)展开[^13]。
 
 计数器、缓存、连接池仍需要变化。对这些状态，可以集中所有权，让其他任务通过消息请求更新，而不是共同修改；也可以让线程处理互不重叠的数据，最后汇总结果。[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/)会沿着这个方向继续。
 
@@ -286,7 +399,7 @@ Rust 的所有权与借用规则提供了另一种约束：普通共享引用限
 
 - [Berkeley CS162：Semaphores, Monitors, and Readers/Writers](https://cs162.org/static/lectures/9-1up.pdf)——用操作系统课程中的经典问题继续理解这些机制如何组合
 - 不想在本机配置环境的话，Rust 代码可以放到 [Rust Playground](https://play.rust-lang.org) 运行，C++ 代码可以放到 [C++ Playground](https://programiz.pro/ide/cpp) 运行
-- 本文没有覆盖定时等待：C++ 的 `condition_variable::wait_for`/`wait_until` 与 `timed_mutex::try_lock_for`，Rust 的 `Condvar::wait_timeout` 与 `Mutex::try_lock` 也是常用组件，用法见各标准库文档
+- 本文没有覆盖定时等待：C++ 提供 `condition_variable::wait_for`/`wait_until` 与 `timed_mutex::try_lock_for`，Rust 提供 `Condvar::wait_timeout`。另一个不同的接口是 Rust 的 `Mutex::try_lock`：它立即返回加锁结果，不阻塞等待，也不接收超时参数；用法见各标准库文档
 
 [^1]: [OSTEP ch31: Semaphores](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-sema.pdf)——§31.2–31.3 展示互斥与事件排序，§31.5 讨论读写锁、饥饿与额外开销
 
@@ -302,7 +415,7 @@ Rust 的所有权与借用规则提供了另一种约束：普通共享引用限
 
 [^7]: [C++ 标准草案：`condition_variable`](https://eel.is/c++draft/thread.condition.condvar)与[Rust `Condvar`](https://doc.rust-lang.org/std/sync/struct.Condvar.html)——原子解锁与等待、返回前重新加锁、虚假唤醒与谓词循环
 
-[^8]: [Modern C++：7.4 条件变量](https://changkun.de/modern-cpp/zh-cn/07-thread/#74-条件变量)——C++ 生产者-消费者示例的参考资料
+[^8]: [Modern C++：7.4 条件变量](https://changkun.de/modern-cpp/zh-cn/07-thread/#7-4-条件变量)——C++ 生产者-消费者示例的参考资料
 
 [^9]: [OSTEP ch30: Condition Variables](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-cv.pdf)——状态变量、错过通知的风险，以及生产者-消费者协议中重新检查条件的必要性
 

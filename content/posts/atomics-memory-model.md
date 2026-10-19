@@ -15,7 +15,7 @@ tags: ["concurrency", "synchronization", "rust"]
 
 **原子操作**（atomic operation）保证一次访问不被任何并发访问观察到部分完成状态：读写不会撕裂，读改写也不会在中间插入另一次修改。例如，`fetch_add` 把读取旧值、加一、写回合成一次原子操作[^1]。
 
-把第二篇的计数器换成 `AtomicUsize`，仍然让四个线程各加 1000 次：
+把第二篇的[锁保护的计数器](/posts/locks-condvars-shared-memory-sync/#mutex独占访问)换成 `AtomicUsize`，仍然让四个线程各加 1000 次：
 
 ```rust
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -71,7 +71,7 @@ Rust 在支持相应原子类型的平台上保证其操作是 lock-free（无�
 
 ### 原子标志与数据发布
 
-先回忆第一篇给出的判定条件。对于本文讨论的普通线程读写，两次访问指向可能重叠的内存位置，至少一方写入、至少一方非原子，且两次访问之间没有 happens-before 顺序（这一概念下文正式定义），就构成数据竞争。C++ 与 Rust 都将这种数据竞争视为未定义行为[^4]。这里的“并发”不要求两条机器指令恰好同时执行；即使某次调度让它们先后运行，没有建立规定的同步顺序，也不能据此证明访问安全。
+先回忆第一篇给出的[数据竞争判定条件](/posts/concurrency-parallelism-execution-units/#数据竞争一个可以精确定义的问题)。对于本文讨论的普通线程读写，两次访问指向可能重叠的内存位置，至少一方写入、至少一方非原子，且两次访问之间没有 happens-before 顺序（这一概念下文正式定义），就构成数据竞争。C++ 与 Rust 都将这种数据竞争视为未定义行为[^4]。这里的“并发”不要求两条机器指令恰好同时执行；即使某次调度让它们先后运行，没有建立规定的同步顺序，也不能据此证明访问安全。
 
 带着这个条件看一个典型的发布场景：生产者写数据、设置标志，消费者等到标志就绪后读取。下面让两个变量的所有访问都用 `Relaxed`：
 
@@ -104,7 +104,7 @@ fn main() {
 
 这段程序经常能通过测试。但测试通过不是证明：内存模型允许消费者退出循环之后仍然读到 0。`READY` 上的读取与 `PAYLOAD` 上的写入属于不同对象，两个对象各自的原子性不会自动合成跨对象的顺序；断言是否成立，需要另外的依据。
 
-这里没有数据竞争：所有访问都是原子的，最坏结果也只是读到旧值 0。缺的不是原子性，而是跨对象的顺序。后果的边界值得对照：若被发布的是普通非原子数据，同样的写法就不只是读到旧值——标志位读取与数据写入之间没有 happens-before，按开头的判定条件，这已经构成数据竞争，行为未定义。Release/Acquire 要补的正是这个缺口。**没有数据竞争，是正确性的基础，不是完整证明**——第一篇的丢失更新与这里的例子都在说明这一点。`spin_loop()` 只是忙等提示，不会让线程睡眠，也不提供同步保证；实际需要长时间等待时，应考虑条件变量等阻塞工具[^7]。
+这里没有数据竞争：所有访问都是原子的，最坏结果也只是读到旧值 0。缺的不是原子性，而是跨对象的顺序。后果的边界值得对照：若被发布的是普通非原子数据，同样的写法就不只是读到旧值——标志位读取与数据写入之间没有 happens-before，按开头的判定条件，这已经构成数据竞争，行为未定义。Release/Acquire 要补的正是这个缺口。**没有数据竞争，是正确性的基础，不是完整证明**——第一篇的丢失更新与这里的例子都在说明这一点。`spin_loop()` 只是忙等提示，不会让线程睡眠，也不提供同步保证；实际需要长时间等待时，应考虑[条件变量](/posts/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)等阻塞工具[^7]。
 
 ### Release / Acquire：发布与接收
 
@@ -146,7 +146,7 @@ READY.store(true, Release) ────────→ READY.load(Acquire) 读�
 内存模型规定哪些观察结果合法。它不是要求每个操作都“立即刷新到主存”，也不承诺读到某个值所需的时间。
 
 :::note[`volatile` 不是原子操作]
-C++ 的 `volatile` 只阻止编译器省略或合并这些访问，既不提供原子性，也不建立 synchronizes-with 边；用它做标志位发布数据，会遇到与本节 `Relaxed` 示例相同的顺序问题，还叠加数据竞争。Java 与 C# 的 `volatile` 关键字同名却携带内存序语义，跨语言阅读时最容易混淆。Rust 没有等价原语，跨线程通信一律要求原子类型或锁[^14]。
+C++ 的 `volatile` 访问有必须保留的可观察副作用，但既不提供线程间原子性，也不建立 synchronizes-with 边；用普通 `volatile` 标志位发布数据，仍可能构成数据竞争[^14]。Java 的 `volatile` 写与后续对同一变量的读建立 happens-before；C# 的 volatile 读、写分别具有 acquire、release 语义。同名关键字不能跨语言套用同一保证[^15]。Rust 没有这样的 volatile 同步关键字；它提供 `read_volatile`、`write_volatile`，但这些操作同样不是原子操作，也不建立线程间同步。跨线程共享可变数据应使用原子类型、锁或封装了同步协议的接口[^16]。
 :::
 
 ### 一次性发布的保证与边界
@@ -312,7 +312,7 @@ fn config() -> &'static str {
 
 使用原子操作之前，值得把下面几个问题当成证明清单逐一回答：
 
-- 原子性需要覆盖的完整操作是什么？单次访问或读改写可以交给原子类型；多字段不变量通常适合用锁保护。
+- 原子性需要覆盖的完整操作是什么？单次访问或读改写可以交给原子类型；多字段不变量通常适合用锁保护，参见第二篇的[临界区范围与锁的粒度](/posts/locks-condvars-shared-memory-sync/#临界区范围与锁的粒度)。
 - Acquire 读到的是哪一次写入？只有读到对应的发布值，同步边才成立。
 - 同步链如何抵达最终的数据访问？从发布到消费，每一步的边都要接得上；最终读取即使使用 `Relaxed`，也受前面的链保护。
 - 是否依赖跨对象的共同顺序？使用弱内存序时，仅凭没有数据竞争，不能把程序直接当成顺序一致的全局交错。
@@ -352,4 +352,8 @@ fn config() -> &'static str {
 
 [^13]: [Rust Reference：求值顺序](https://doc.rust-lang.org/reference/expressions.html#evaluation-order-of-operands)与[赋值表达式](https://doc.rust-lang.org/reference/expressions/operator-expr.html#assignment-expressions)——多数运算符的运算对象从左到右求值，赋值先求被赋予的值；`sequenced-before` 是 C++ 内存模型的术语，这里沿用其语义
 
-[^14]: [C++ 标准草案：volatile](https://eel.is/c++draft/dcl.type.cv)——volatile 访问不建立线程间顺序；Rust 不提供等价原语，跨线程通信使用原子类型或锁
+[^14]: [C++ 标准草案：volatile](https://eel.is/c++draft/dcl.type.cv)与[Data races](https://eel.is/c++draft/intro.races)——volatile 访问的可观察语义，以及其不替代原子操作或线程间同步的边界
+
+[^15]: [Java Language Specification §17.4.5](https://docs.oracle.com/javase/specs/jls/se25/html/jls-17.html#jls-17.4.5)与[C# 规范：Volatile fields](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/classes#1554-volatile-fields)——Java volatile 的 happens-before 保证与 C# volatile 读写的 acquire/release 语义
+
+[^16]: [Rust `read_volatile`](https://doc.rust-lang.org/std/ptr/fn.read_volatile.html)与[`write_volatile`](https://doc.rust-lang.org/std/ptr/fn.write_volatile.html)——volatile 读写不提供原子性，也不能用于线程间同步

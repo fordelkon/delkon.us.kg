@@ -5,7 +5,7 @@ publishDate: "17 Oct 2026"
 tags: ["concurrency", "async", "rust", "go"]
 ---
 
-上一篇[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/)讨论了消息流动与提前退出。本篇回到第一篇的协作式并发：等待中的异步任务由谁继续驱动，调用方放弃结果以后，任务又该怎样结束？示例以 Rust 和 Tokio 为主，取消部分用 Go context 作对照。
+上一篇[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/)讨论了消息流动与提前退出。本篇回到第一篇的[协作式并发](/posts/concurrency-parallelism-execution-units/#协作式并发)：等待中的异步任务由谁继续驱动，调用方放弃结果以后，任务又该怎样结束？示例以 Rust 和 Tokio 为主，取消部分用 Go context 作对照。
 
 ## Future、Waker 与执行器
 
@@ -85,7 +85,7 @@ async fn main() {
 }
 ```
 
-锁覆盖“检查完成状态并登记 Waker”，避免定时线程恰好在两步之间完成、造成遗漏唤醒。如果线程先完成，下一次 `poll` 直接看到 `done`；如果登记先完成，线程就取走 Waker 并唤醒。每次等待都保留最新的 Waker，因为同一 Future 后续可能由不同任务轮询。
+与第二篇的[条件变量等待协议](/posts/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)一样，这里也要把状态检查与登记等待放在同一把锁下。锁覆盖“检查完成状态并登记 Waker”，避免定时线程恰好在两步之间完成、造成遗漏唤醒。如果线程先完成，下一次 `poll` 直接看到 `done`；如果登记先完成，线程就取走 Waker 并唤醒。每次等待都保留最新的 Waker，因为同一 Future 后续可能由不同任务轮询。
 
 这只是展示协议的教学实现：每个定时器创建一个线程，不能代表运行时管理大量定时器的方式。丢弃 Timer 也不会中断已启动的睡眠线程；外部工作的生命周期与 Future 本身需要分别考虑。
 
@@ -101,7 +101,7 @@ async fn main() {
 
 任务可以在 `poll` 返回前就被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，不是保证每次 wake 都对应一次独立排队[^2][^4]。
 
-第一篇中的 `yield_now()` 会主动请求再次调度，但不保证下一次一定运行其他任务。尤其 `join!` 的多个分支仍属于同一个任务，不能把分支让出理解成创建了新的调度单位[^5]。
+第一篇[协作式并发示例中的 `yield_now()`](/posts/concurrency-parallelism-execution-units/#协作式并发) 会主动请求再次调度，但不保证下一次一定运行其他任务。尤其 `join!` 的多个分支仍属于同一个任务，不能把分支让出理解成创建了新的调度单位[^5]。
 
 ## I/O 就绪与完成通知
 
@@ -124,7 +124,7 @@ Mio 对外提供就绪事件抽象，在不同平台上适配底层机制；按�
 
 因此，“丢弃即取消”只描述这个 Future 的生命周期，不代表外部请求被撤回，更不代表已经提交的写入被回滚。需要异步收尾时，应显式发出停止信号，等待操作结束后再退出。
 
-Future 在首次轮询前也可以被丢弃——此时函数体从未执行，任何局部值都未构造，也无需清理。对正在执行一次 `poll` 的 Tokio 任务，取消不会强行切断同步代码；运行时需要等任务交还控制权，才能销毁它。取消也不必等任务再次被唤醒才发生[^10]。
+对于 `async fn` 返回的 Future，首次轮询前函数体尚未执行，因此函数体内部声明的局部值尚未初始化；但调用时传入并被 Future 捕获的参数已经存在，丢弃 Future 时仍需按析构规则清理[^21]。手写 Future 的构造过程还可能已经创建资源或启动外部工作，例如前面的 `Timer::new`。对正在执行一次 `poll` 的 Tokio 任务，取消不会强行切断同步代码；运行时需要等任务交还控制权，才能销毁它。取消也不必等任务再次被唤醒才发生[^10]。
 
 ### timeout 与 select
 
@@ -162,13 +162,13 @@ async fn main() {
 | `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` | 可能已部分读写，重新开始不能假定从未发生过       |
 | `Mutex::lock`、`Semaphore::acquire`                    | 会失去在公平等待队列中的位置                     |
 
-失去排队位置与丢掉消息不同：锁或许可本来就没有拿到，反复取消再重试可能让任务在公平队列中迟迟轮不到——这正是[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/)讨论的饥饿在取消协议下的形态。这里的取消语义也不同于第五篇的通道结束：发送端全部丢弃后 `recv()` 返回 `None` 是通道的结束，而 select 丢弃未完成分支只是让这个等待中的 Future 消亡。
+失去排队位置与丢掉消息不同：锁或许可本来就没有拿到，反复取消再重试可能让任务在公平队列中迟迟轮不到——这正是[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/#活锁与饥饿)讨论的饥饿在取消协议下的形态。这里的取消语义也不同于第五篇的[通道结束](/posts/message-passing-workers-backpressure/#提前退出与取消)：全部发送端丢弃且缓冲已取空后，Tokio 的 `mpsc::Receiver::recv()` 返回 `None` 表示通道结束，而 select 丢弃未完成分支只是让这个等待中的 Future 消亡。
 
 取消安全是具体操作的契约，不能只按方法名概括所有 `recv` 或 `read`。取消不安全也不等于绝不能取消：程序整体关停时，丢弃某些进度可能符合需求；重试支付或继续解析协议时，则需要更严格的处理。
 
 ### Go context：传播退出信号
 
-Go 的 context 用信号表达取消：第五篇手写的 `close(done)` 通道广播，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
+Go 的 context 用信号表达取消：第五篇手写的[`close(done)` 通道广播](/posts/message-passing-workers-backpressure/#提前退出与取消)，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
 
 下面让工作 goroutine 在模拟操作与超时信号之间选择。主线程等待工作结果，确认它已经走到退出路径：
 
@@ -204,7 +204,7 @@ func main() {
 }
 ```
 
-输出为 `context deadline exceeded`。与先执行不可取消的 `time.Sleep` 再检查信号相比，这里在等待期间就响应取消。若两个分支同时就绪，`select` 不保证优先处理取消，因此也不应把取消信号理解为“从此绝不发生任何后续操作”。
+通常会输出 `context deadline exceeded`；如果工作 goroutine 长时间未被调度，恢复时模拟操作与取消信号可能都已就绪，也可能选择操作分支并返回 `nil`。与先执行不可取消的 `time.Sleep` 再检查信号相比，这里在等待期间就响应取消。若两个分支同时就绪，`select` 不保证优先处理取消，因此也不应把取消信号理解为“从此绝不发生任何后续操作”。
 
 ## 结构化并发与任务收束
 
@@ -236,7 +236,7 @@ async fn main() {
 
 启动多个任务时，同样需要决定成功、失败与关停三条路径如何等待所有任务。只在正常路径逐个 `await`，还不足以保证父任务被取消时自动完成结构化清理。
 
-Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃，适合“一败俱停”的组合；`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时立即中止尚未结束的任务；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
+Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃，适合“一败俱停”的组合；`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
 
 ## 公平性与阻塞工作
 
@@ -244,18 +244,26 @@ Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `
 
 协作式执行器不能抢占一次长时间运行的 `poll`。同步 I/O 或长计算会占住所在 worker；即使其他 worker 还在运行，也可能造成延迟或依赖阻塞。
 
-`select!` 默认随机选择先检查的分支，`join!` 默认轮换先轮询的分支，以避免某一分支长期占先。使用 `biased;` 时则由调用方负责顺序，例如把关停信号放在繁忙消息流前面。与[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/)对公平性的提醒一致，这些策略不能为任意程序提供等待时间上界[^12][^15]。
+`select!` 默认随机选择先检查的分支，`join!` 默认轮换先轮询的分支，以避免某一分支长期占先。使用 `biased;` 时则由调用方负责顺序，例如把关停信号放在繁忙消息流前面。与[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/#活锁与饥饿)对公平性的提醒一致，这些策略不能为任意程序提供等待时间上界[^12][^15]。
 
 Tokio 的调度公平性保证本身也有条件，包括任务数量有界、每次 `poll` 在有界时间内返回；它不保证任务严格轮流运行[^16]。是否需要拆分计算或迁移阻塞工作，应根据任务耗时和服务延迟目标判断；Tokio 团队成员的文章曾以两次 `.await` 之间 10–100 微秒作为参考预算[^19]，但它同样不是所有应用都能直接套用的统一规范。
 
+### 持锁跨 `.await` 的等待依赖
+
+第四篇的[等待依赖分析](/posts/deadlock-livelock-correctness/#等待不只发生在锁上)同样适用于异步任务。例如任务 A 持有一把锁，向任务 B 发出请求后等待回复；B 必须取得同一把锁才能生成回复。A 等 B 回复，B 等 A 解锁，双方都无法完成。即使用异步 Mutex，让等锁只挂起任务、不阻塞线程，这个逻辑上的等待环仍然存在。
+
+使用同步 Mutex 还要检查执行器线程是否被阻塞：A 持锁后在 `.await` 处挂起，运行在同一线程上的 B 再调用阻塞式 `lock()`，就可能占住线程，使 A 无法恢复并释放锁。某些 `Send` 约束会在编译时拒绝持有同步 guard 的跨任务用法，但本地任务或同一任务内的分支不能依赖这层检查排除死锁。Tokio 的 Mutex 文档因此特别提醒同步 guard 跨 `.await` 的风险[^20]。
+
+可在进入等待前完成状态读写并结束 guard 的作用域，让 B 获取锁并继续处理；若业务确实要求跨 `.await` 持锁，可以使用支持这种用法的异步 Mutex，同时检查被等待的操作是否直接或间接需要同一资源。异步锁解决等待方式，不替调用方证明协议没有循环依赖[^20]。
+
 ### 异步与线程的分工
 
-| 工作类型               | 常见安排               | 需要注意的边界                    |
-| ---------------------- | ---------------------- | --------------------------------- |
-| 大量网络等待           | 异步任务配合非阻塞 I/O | 仍需限制任务与缓冲数量            |
-| 有限时长的同步阻塞操作 | `spawn_blocking`       | 启动后不能靠 abort 强行停止       |
-| 长期阻塞的常驻循环     | 独立线程与显式退出协议 | 退出时仍需等待与回收              |
-| 大量 CPU 计算          | 有界计算线程池         | 限制并行数量，避免占满异步 worker |
+| 工作类型               | 常见安排               | 需要注意的边界                                                                        |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| 大量网络等待           | 异步任务配合非阻塞 I/O | 仍需[限制任务与缓冲数量](/posts/message-passing-workers-backpressure/#背压与队列容量) |
+| 有限时长的同步阻塞操作 | `spawn_blocking`       | 启动后不能靠 abort 强行停止                                                           |
+| 长期阻塞的常驻循环     | 独立线程与显式退出协议 | 退出时仍需等待与回收                                                                  |
+| 大量 CPU 计算          | 有界计算线程池         | 限制并行数量，避免占满异步 worker                                                     |
 
 Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工作无约束地交给 `spawn_blocking`。已经开始执行的阻塞闭包也不会因句柄被 abort 而中断[^17]。
 
@@ -313,3 +321,7 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 [^18]: [Tokio `try_join!`](https://docs.rs/tokio/latest/tokio/macro.try_join.html)、[`JoinSet`](https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html)与[tokio-util 的 `TaskTracker`](https://docs.rs/tokio-util/latest/tokio_util/task/struct.TaskTracker.html)——一败俱停的分支组合、丢弃即中止的分组任务与优雅关停的等待接口
 
 [^19]: [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)——两次 `.await` 之间 10–100 微秒的参考预算，及其“取决于应用”的限定
+
+[^20]: [Tokio `Mutex`：Which kind of mutex should you use?](https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use)——同步 guard 跨 await 的死锁风险，以及异步 Mutex 允许跨 await 持有 guard 的用途
+
+[^21]: [Rust Reference：Async functions](https://doc.rust-lang.org/reference/items/functions.html#async-functions)——调用 async fn 时将参数捕获进 Future，轮询时才执行函数体

@@ -24,10 +24,15 @@ A tag is a reusable category that aggregates posts for retrieval, not a label de
 ## Cross-references
 
 - Link every titled mention of a sibling post; a mention rendered as plain text reads like a dead end. Ordinal mentions ("第二篇讲了…") stay plain text.
+- Link important conceptual dependencies at the point of use: a reused definition, a prerequisite for the argument, or a mechanism applied in a new setting. Review the body as well as series navigation; an ordinal mention can stay plain while the concept beside it carries the link.
+- Give each concept a primary explanatory home and link to the relevant section, using the concept or explanatory phrase as link text. Include forward references where an explanation is deliberately deferred, and confirm the target fulfills that promise.
+- Keep the local argument understandable with a short reminder; let the link provide depth. Connect related mechanisms while preserving differences in their guarantees, APIs, and abstraction levels.
+- Link at the first substantive use in a discussion; repeat when a later section creates a distinct need to revisit the explanation. Verify fragments against generated heading IDs after a build, including inbound links when headings change.
 
 ## References and footnotes
 
 - Cite sources with GFM footnotes: the marker sits at the claim the source supports, and the entry annotation states which claims the source backs. The markdown pipeline renders the reference section itself, one `↩` back-reference per citation site, so never hand-write that heading — exact syntax in [TEMPLATE-post.md](../content/TEMPLATE-post.md).
+- Match each source to the claim’s language, API, version, and scope. A source showing one version’s behavior does not establish when that behavior began; cross-language comparisons need evidence for each language.
 - Reuse the same marker label when one source supports several passages; each citation site still gets its own back-reference.
 - Entries with no natural citation site in the body (general further reading, course schedules, convenience tools) go into a hand-written further-reading section instead.
 
