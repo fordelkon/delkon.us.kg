@@ -19,7 +19,7 @@ Future 也不必对应一个独立任务。`join!` 可以在同一个任务里�
 
 ### Waker：请求再次轮询
 
-`poll` 的 `Context` 提供当前任务的 **Waker**。当等待条件发生变化时，调用 `wake()` 请求执行器再次轮询关联任务。唤醒不是“操作已经完成”的保证，再次轮询仍可能得到 `Pending`；多次唤醒也可能被合并[^2]。
+`poll` 的 `Context` 提供当前任务的 **Waker**。当等待条件发生变化时，调用 `wake()` 请求执行器再次轮询关联任务。唤醒不是“操作已经完成”的保证，再次轮询仍可能得到 `Pending`；多次唤醒也可能被合并[^2]。第三篇已[区分唤醒与内存同步](/posts/atomics-memory-model/#唤醒与同步以-park--unpark-为例)；本节的 Waker 是另一种接口，具体保证应以 Waker 的契约为准，不能套用 park/unpark 的 token 规则。
 
 下面的定时器改写自 Async Book。它用一个线程模拟定时事件，再通过 Waker 通知异步任务，完整程序可在 Tokio 中运行[^3]：
 
@@ -170,7 +170,7 @@ async fn main() {
 
 Go 的 context 用信号表达取消：第五篇手写的[`close(done)` 通道广播](/posts/message-passing-workers-backpressure/#提前退出与取消)，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
 
-下面让工作 goroutine 在模拟操作与超时信号之间选择。主线程等待工作结果，确认它已经走到退出路径：
+下面让工作 goroutine 在模拟操作与超时信号之间选择。主 goroutine 等待工作结果，确认它已经走到退出路径：
 
 ```go
 package main
@@ -236,7 +236,7 @@ async fn main() {
 
 启动多个任务时，同样需要决定成功、失败与关停三条路径如何等待所有任务。只在正常路径逐个 `await`，还不足以保证父任务被取消时自动完成结构化清理。
 
-Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃，适合“一败俱停”的组合；`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
+Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃。直接组合并拥有这些 Future 时，丢弃可以停止它们继续推进；若分支持有的是 JoinHandle，丢弃句柄不会中止后台任务，若借用外部 Future，也不会销毁被借用的计算[^10]。`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
 
 ## 公平性与阻塞工作
 

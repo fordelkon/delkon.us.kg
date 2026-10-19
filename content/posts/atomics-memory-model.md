@@ -59,7 +59,7 @@ fn main() {
 
 但 `load` 后再 `store` 是两次操作。即使两次都用最强的内存序，两个线程仍可能读到相同的旧值，再写回相同的新值，丢掉一次更新。需要整体完成的“读—改—写”，应使用 `fetch_add`，或后面会展开的**比较并交换**（compare-and-exchange，CAS），或直接用锁。
 
-Mutex、RwLock 保护遵守同一协议的一段访问，可以维护多个字段之间的不变量；原子类型直接约束单个值的访问。两个原子字段分别安全，不代表它们的组合会自动成为一致的快照。这也延续了第二篇的划分：**保护状态与协调推进是两类问题，不是工具的互斥分类。** 原子加一用于维护计数，原子标志位可以参与协调，CAS 也可以用于实现互斥锁。
+Mutex、RwLock 保护遵守同一协议的一段访问，可以维护多个字段之间的不变量；原子类型直接约束单个值的访问。两个原子字段分别安全，不代表它们的组合会自动成为一致的快照。这也延续了第二篇[保护状态与协调推进的划分](/posts/locks-condvars-shared-memory-sync/#共享内存保护状态与协调推进)：**保护状态与协调推进是两类问题，不是工具的互斥分类。** 原子加一用于维护计数，原子标志位可以参与协调，CAS 也可以用于实现互斥锁。
 
 :::note[原子不等于无等待]
 Rust 在支持相应原子类型的平台上保证其操作是 lock-free（无锁），但不保证 wait-free（无等待）：lock-free 只要求至少一个线程能取得进展，不保证每个线程都在有界步骤内完成。应用层的 CAS 重试和自旋等待也仍然可能持续等待[^1]。因此，不能从“用了 Atomic”推导出整个算法无锁、不会等待或一定比 Mutex 快。
@@ -154,6 +154,52 @@ C++ 的 `volatile` 访问有必须保留的可观察副作用，但既不提供�
 沿着图中的同步链，`PAYLOAD` 的写入 happens-before 消费者对它的读取。为什么最后这次读取用 `Relaxed` 也必须得到 42？原子对象的写—读一致性要求：如果一次写入 happens-before 一次读取，读取必须取得该次写入的值，或该对象修改顺序中更晚的写入值。本例在写入 42 后没有其他写入，因此只能读到 42，初始值 0 已被排除[^4]。
 
 这个协议只发布一次。反复重置 `READY`、覆盖 `PAYLOAD`，需要另外解决轮次识别与读写重叠，不能照搬本例。消费者的保证来自标志位本身；主线程的 `join` 只是等待两个线程结束，消费者并不是先等生产者结束再启动消费。
+
+### 同步边不只来自原子操作
+
+前面的发布示例显式使用 Release/Acquire，但跨线程顺序也可以由锁、线程等待、消息交接和一次性初始化建立。它们提供不同的使用接口，共同的推理方法是：先找到协议中的发布与接收，再把两端的数据访问接入 happens-before 链。同步约束的是访问之间的关系，范围不局限于充当同步点的那个变量；不过，链之外的其他冲突访问仍需单独证明安全。
+
+以第二篇的[互斥锁](/posts/locks-condvars-shared-memory-sync/#mutex独占访问)为例，一个线程先修改状态、再解锁，另一个线程成功获取同一把锁后读取状态。C++ 标准明确规定，同一互斥锁的解锁与后续取得所有权的加锁同步；Go 内存模型也规定了相应的解锁到加锁顺序[^24]。把线程内顺序接上去，才得到数据写入到读取的顺序：
+
+```text
+线程 A                            线程 B
+修改共享状态
+    │ 线程内顺序
+释放锁 ─────────────────────────→ 成功获取同一把锁
+                  同步关系           │ 线程内顺序
+                                  读取共享状态
+```
+
+**同步边的成立有条件，不能只看两端都调用了同步接口。** 不同机制需要核对的条件不同：
+
+| 机制                                                                        | 同步的依据                                                                                                                                          | 不能据此推出的结论                                               |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 锁                                                                          | 同一把锁上的释放与后续成功获取；读写锁还要区分独占与共享获取的规则[^24]                                                                             | 两把互不相关的锁自动交接数据；并行读者之间的访问都被排序         |
+| 条件等待                                                                    | 在第二篇的[条件变量协议](/posts/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)中，状态通过互斥锁发布，等待返回后重新持锁检查谓词[^19] | 收到通知就一定满足条件，或任意通知与等待返回都组成数据发布       |
+| 线程等待                                                                    | 被等待线程的完成与等待成功返回之间，存在接口规定的同步；C++ 和 Rust 的 join 都明确提供这一保证[^25][^2]                                             | 主线程分别等待 A、B，就使 A 与 B 的内部访问相互有序              |
+| [消息传递](/posts/message-passing-workers-backpressure/#消息交付与处理完成) | 按通道契约交付并接收同一条消息；例如 Go 明确规定发送与对应接收完成之间的同步[^26]                                                                   | 发送成功就已处理完成；某个发送者的消息排列了其他发送者的全部操作 |
+| [阶段会合](/posts/locks-condvars-shared-memory-sync/#barrier阶段之间的会合) | 核对同一轮参与者、到达与完成阶段的规则；C++ barrier 明确规定阶段完成与被解除等待的返回之间的顺序[^27]                                               | 同一阶段内部的冲突访问也已被排序                                 |
+| [一次性初始化](#oncelock把认领与完成封装在一起)                             | 初始化完成后，经接口取得已发布的结果；Go 的 Once 和 Rust 的 Once 都明确规定初始化到相应调用返回的顺序[^26][^21]                                     | 线程刚取得初始化资格，其他线程就能读取尚未完成的数据             |
+
+这些是分析协议的入口，并不是一份跨语言通用的 API 规范。尤其要区分“线程结束”与“有同步保证地等待结束”：Go 内存模型明确指出，goroutine 退出本身不保证同步到其他事件；需要通道、锁等同步机制才能观察其效果[^26]。[结构化的任务作用域](/posts/async-concurrency-task-lifecycle/#结果与生命周期的归属)则把等待纳入生命周期管理，仍应查清它等待哪些任务、覆盖哪些清理步骤。例如 Rust 的 `thread::scope` 自动 join 作用域线程，但当前文档特别说明，返回时线程局部变量的析构可能仍在运行[^20]。
+
+回到开头的 Rust 计数器：每个 `fetch_add(Relaxed)` 在线程完成之前，线程完成与主线程的 `join` 返回同步，最终 `load(Relaxed)` 又在所有 join 返回之后。于是所有加一都 happens-before 最终读取；结合原子读改写和写—读一致性，最终值是 4000。这里的 Relaxed 操作没有自行发布其他数据，顺序来自线程等待[^2][^4]。
+
+所有权与同步也要分开理解。允许某个值跨线程传递或共享，是类型约束；此前写入如何对接收方可见，是访问协议的保证。Rust 的 `Send`、`Sync` 属于前者，`Arc` 管理共享生命周期；它们不自动给内部数据的任意后续修改建立所需的同步顺序，详见后文的 [Send / Sync](#send--sync跨线程传递与共享)[^11][^12]。同样，[信号量](/posts/message-passing-workers-backpressure/#信号量与资源并发数)可用于资源计数，也可参与事件排序，但分析具体程序时，必须查明许可交接的同步契约；只证明同时进入的任务数受限，还没有证明特定写入已被发布。
+
+### 唤醒与同步：以 Park / Unpark 为例
+
+阻塞与唤醒描述线程能否继续运行，内存同步描述访问之间的顺序；分析等待协议时，需要分别回答这两个问题。第二篇的[条件变量等待协议](/posts/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)会在等待时释放锁、返回前重新获取锁，数据可见性由该协议中的锁同步链保证。更底层的等待接口可能另有内存顺序契约，不能只凭“被唤醒了”推断结果可读。
+
+例如 Rust 的 `park/unpark` 为每个线程提供一个至多保留一个的 token。文档明确规定：`unpark` 之前的内存操作，对消费该 token 并从 `park` 返回的线程可见；用原子内存序描述，`unpark` 是 Release，消费 token 的 `park` 是对应的 Acquire。同一目标线程的多次 `unpark` 还形成释放序列，不能把 token 当作每次通知都会累加的计数器[^23]。
+
+这个例子的关键条件是**消费 token**。`park` 允许不消费 token 就虚假返回，因此一次返回不能证明另一线程已执行 `unpark`。实际等待通常还需循环检查状态，并防止同一线程中的其他代码提前消费 token。如果状态检查本身使用 Release/Acquire 发布数据，证明中也必须保留这条同步链，不能把正确性全部归因于唤醒[^23]。
+
+画 happens-before 图时，应先标出“读到了哪次发布”“获取了哪把锁”“收到了哪条消息”或“完成了哪一轮会合”，再通过线程内顺序连接实际数据访问。接口是否阻塞、日志先后出现、一次运行是否成功，都不能代替这些配对条件。
+
+:::note[示例语言与规范边界]
+本文主要用 Rust 展示原子操作，但不把它视为所有语言的共同规范。Rust Reference 尚未完整定义 Rust 的内存模型；标准库对原子访问采用经 Rust 访问模型调整的 C++20 规则，不含 consume 内存序。高级同步原语仍以各自 API 的契约为准；同名接口也不能直接套用另一语言的全部条款[^17]。
+:::
 
 ## 内存序的选择
 
@@ -357,3 +403,21 @@ fn config() -> &'static str {
 [^15]: [Java Language Specification §17.4.5](https://docs.oracle.com/javase/specs/jls/se25/html/jls-17.html#jls-17.4.5)与[C# 规范：Volatile fields](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/classes#1554-volatile-fields)——Java volatile 的 happens-before 保证与 C# volatile 读写的 acquire/release 语义
 
 [^16]: [Rust `read_volatile`](https://doc.rust-lang.org/std/ptr/fn.read_volatile.html)与[`write_volatile`](https://doc.rust-lang.org/std/ptr/fn.write_volatile.html)——volatile 读写不提供原子性，也不能用于线程间同步
+
+[^17]: [Rust Reference：Memory model](https://doc.rust-lang.org/reference/memory-model.html)与[原子访问的内存模型](https://doc.rust-lang.org/std/sync/atomic/index.html#memory-model-for-atomic-accesses)——Rust 尚无完整定义的内存模型；原子访问采用 C++20 规则，存在访问模型调整且不含 consume
+
+[^19]: [Rust `Condvar::wait`](https://doc.rust-lang.org/std/sync/struct.Condvar.html#method.wait)——原子解锁并阻塞、返回前重新加锁，以及虚假唤醒与谓词复查
+
+[^20]: [Rust `thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html)——自动 join、借用生命周期与线程局部变量析构的等待边界
+
+[^21]: [Rust `Once::call_once`](https://doc.rust-lang.org/std/sync/struct.Once.html#method.call_once)——初始化闭包的写入与正常返回后的代码之间明确的 happens-before 保证
+
+[^23]: [Rust `thread::park`：Memory Ordering](https://doc.rust-lang.org/std/thread/fn.park.html#memory-ordering)及其等待协议与示例——token 消费的同步、Release/Acquire、释放序列、虚假返回，以及 token 被其他代码消费的风险
+
+[^24]: [C++ 标准草案：Mutex requirements](https://eel.is/c++draft/thread.mutex.requirements)与[Go 内存模型：Locks](https://go.dev/ref/mem#locks)——同一锁上解锁与后续成功加锁的同步；共享锁的获取模式需分别核对
+
+[^25]: [C++ 标准草案：thread members](https://eel.is/c++draft/thread.thread.member)——被等待线程完成与对应成功 join 返回之间的同步
+
+[^26]: [Go 内存模型：Synchronization](https://go.dev/ref/mem#sync)——goroutine 退出本身不提供同步、通道发送到对应接收完成的同步，以及 Once 初始化完成到调用返回的顺序
+
+[^27]: [C++ 标准草案：barrier](https://eel.is/c++draft/thread.barrier.class)——阶段完成步骤的结束 strongly happens-before 由该步骤解除阻塞的调用返回；此保证不排列阶段内部访问
