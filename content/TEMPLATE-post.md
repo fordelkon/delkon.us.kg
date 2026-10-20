@@ -110,6 +110,14 @@ draft: true
 const example = "hello";
 ```
 
+```diff lang="ts" title="改动前后"
+// diff 围栏：lang 属性写真实语言以保留语法高亮，+/- 前缀标记增删行，
+// title 提供文件名页签；直接粘贴 git diff 输出也可（---/+++/@@ 元数据不受破坏）。
+// 对改动的解释紧贴改动行上方写短注释，别夹在增删行中间或堆在围栏开头
+- const old = "before";
++ const next = "after";
+```
+
 :::note
 admonition 容器，支持 note / tip / important / caution / warning 五种类型。
 :::

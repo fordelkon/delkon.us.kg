@@ -1,0 +1,48 @@
+---
+import type { HTMLTag, Polymorphic } from "astro/types";
+import type { SeriesGroup } from "@/data/series";
+
+type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
+	group: SeriesGroup;
+};
+
+const { as: Tag = "div", group } = Astro.props;
+
+// Archive "folder" row: mirrors PostPreview's row format, but the whole entry
+// links to the series page. Single-entry series show one full date instead of
+// a degenerate "20 Oct – 20 Oct" range.
+const firstDate = group.entries[0].data.publishDate;
+const lastDate = group.entries.at(-1).data.publishDate;
+const shortFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+
+const fullFormat = new Intl.DateTimeFormat("en-GB", {
+	day: "numeric",
+	month: "short",
+	year: "numeric",
+});
+
+const dateRange =
+	group.entries.length === 1
+		? fullFormat.format(firstDate)
+		: firstDate.getFullYear() === lastDate.getFullYear()
+			? `${shortFormat.format(firstDate)} – ${shortFormat.format(lastDate)} ${firstDate.getFullYear()}`
+			: `${shortFormat.format(firstDate)} ${firstDate.getFullYear()} – ${shortFormat.format(lastDate)} ${lastDate.getFullYear()}`;
+---
+
+<a
+	href={`/series/${group.id}/`}
+	class="-mx-2 flex flex-col gap-1 rounded-md px-2 py-2.5 outline-hidden transition-colors group hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3 focus-visible:ring-2 focus-visible:ring-printer-accent/40"
+>
+	<p class="print-label text-printer-ink-light tabular-nums">{dateRange}</p>
+	<Tag class="font-serif text-base leading-snug tracking-tight text-printer-ink transition-colors group-hover:text-printer-accent sm:text-lg">
+		{group.title}
+		<span class="ms-2 print-label align-middle text-printer-ink-light">
+			{group.entries.length} 篇
+		</span>
+	</Tag>
+	{group.description && (
+		<q class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">
+			{group.description}
+		</q>
+	)}
+</a>

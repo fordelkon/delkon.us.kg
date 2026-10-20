@@ -1,0 +1,61 @@
+---
+import { getEntry, render } from "astro:content";
+import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
+import PostPreview from "@/components/blog/PostPreview.astro";
+import Note from "@/components/note/Note.astro";
+import { getSeriesGroups } from "@/data/series";
+import PageLayout from "@/layouts/Base.astro";
+
+export const getStaticPaths = (async () => {
+	const groups = await getSeriesGroups();
+
+	return groups.map((group) => ({ params: { slug: group.id }, props: { group } }));
+}) satisfies GetStaticPaths;
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>;
+
+const { group } = Astro.props;
+const definition = await getEntry("series", group.id);
+const Content = definition ? (await render(definition)).Content : null;
+---
+
+<PageLayout
+	meta={{ title: group.title, description: group.description ?? `按顺序阅读${group.title}。` }}
+>
+	<nav aria-label="Breadcrumbs" class="mb-6 print-label">
+		<a class="printer-link text-printer-ink-light" href="/series/">
+			Series
+		</a>
+		<span aria-hidden="true" class="mx-2 text-printer-ink-light">
+			/
+		</span>
+		<span aria-current="page">{group.title}</span>
+	</nav>
+	<header>
+		<h1 class="font-serif text-3xl leading-tight font-bold tracking-tight text-printer-ink sm:text-4xl">
+			{group.title}
+		</h1>
+		{group.description && (
+			<p class="mt-4 max-w-prose font-serif text-sm leading-relaxed text-printer-ink/80">
+				{group.description}
+			</p>
+		)}
+		<p class="mt-4 print-label text-printer-ink-light">{group.entries.length} 篇</p>
+	</header>
+	{Content && (
+		<div class="prose prose-sm mt-6 max-w-none font-serif">
+			<Content />
+		</div>
+	)}
+	<ol class="mt-8 divide-y divide-dotted divide-printer-ink/15">
+		{group.entries.map((entry) => (
+			<li>
+				{entry.collection === "post" ? (
+					<PostPreview as="h2" post={entry} withDesc />
+				) : (
+					<Note note={entry} as="h2" isPreview />
+				)}
+			</li>
+		))}
+	</ol>
+</PageLayout>

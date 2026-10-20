@@ -56,4 +56,12 @@ const tag = defineCollection({
 	}),
 });
 
-export const collections = { post, note, tag };
+const series = defineCollection({
+	loader: glob({ base: "./content/series", pattern: "*.md" }),
+	schema: z.object({
+		title: titleSchema.optional(),
+		description: z.string().optional(),
+	}),
+});
+
+export const collections = { post, note, tag, series };

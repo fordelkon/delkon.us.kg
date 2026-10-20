@@ -1,0 +1,27 @@
+---
+import SeriesPreview from "@/components/SeriesPreview.astro";
+import type { SeriesGroup } from "@/data/series";
+
+interface Props {
+	groups: SeriesGroup[];
+}
+
+const { groups } = Astro.props;
+
+// Newest activity first, matching the archive's chronological ordering of
+// standalone entries. A folder's sort date is its latest member publish date.
+const latestPublish = (group: SeriesGroup) =>
+	Math.max(...group.entries.map((entry) => entry.data.publishDate.getTime()));
+
+const orderedGroups = [...groups].toSorted((a, b) => latestPublish(b) - latestPublish(a));
+---
+
+{orderedGroups.length > 0 && (
+	<ul class="mb-8 divide-y divide-dotted divide-printer-ink/10" role="list">
+		{orderedGroups.map((group) => (
+			<li>
+				<SeriesPreview as="h2" group={group} />
+			</li>
+		))}
+	</ul>
+)}

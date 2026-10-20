@@ -5,6 +5,7 @@ import { Icon } from "astro-icon/components";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
+import SeriesArchive from "@/components/SeriesArchive.astro";
 import {
 	getAllPosts,
 	getPinnedPosts,
@@ -12,30 +13,45 @@ import {
 	groupPostsByYear,
 	MAX_POSTS_PER_PAGE,
 } from "@/data/post";
+import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { collectionDateSort } from "@/utils/date";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_TAGS = 7;
-	const allPosts = await getAllPosts();
-	const allPostsByDate = allPosts.sort(collectionDateSort);
-	const uniqueTags = getUniqueTags(allPosts).slice(0, MAX_TAGS);
-	const pinnedPosts = getPinnedPosts(allPostsByDate);
+	const allPostsByDate = (await getAllPosts()).sort(collectionDateSort);
+	const uniqueTags = getUniqueTags(allPostsByDate).slice(0, MAX_TAGS);
 
-	return paginate(allPostsByDate, {
-		pageSize: MAX_POSTS_PER_PAGE,
-		props: { uniqueTags, pinnedPosts },
-	});
+	// Folders scoped to posts: only series with post members become folders, so
+	// members are paginated neither directly nor through an empty folder page.
+	const seriesGroups = await getSeriesGroups("post");
+
+	const seriesPostIds = new Set(
+		seriesGroups.flatMap((group) => group.entries.map((entry) => entry.id)),
+	);
+
+	return paginate(
+		allPostsByDate.filter((post) => !seriesPostIds.has(post.id)),
+		{
+			pageSize: MAX_POSTS_PER_PAGE,
+			props: {
+				uniqueTags,
+				pinnedPosts: getPinnedPosts(allPostsByDate).filter((post) => !seriesPostIds.has(post.id)),
+				seriesGroups,
+			},
+		},
+	);
 }) satisfies GetStaticPaths;
 
 interface Props {
 	page: Page<CollectionEntry<"post">>;
 	uniqueTags: string[];
 	pinnedPosts: CollectionEntry<"post">[];
+	seriesGroups: SeriesGroup[];
 }
 
-const { page, uniqueTags, pinnedPosts } = Astro.props;
+const { page, uniqueTags, pinnedPosts, seriesGroups } = Astro.props;
 
 const meta = {
 	description: "Read my collection of posts and the things that interest me",
@@ -62,22 +78,49 @@ const descYearKeys = Object.keys(groupedByYear).sort((a, b) => +b - +a);
 	{uniqueTags.length > 0 && (
 		<nav aria-label="Post topics" class="mb-8 border-b border-dashed border-printer-ink/10 pb-6">
 			<ul class="flex flex-wrap gap-2" role="list">
-				{uniqueTags.map((tag) => <li><a class="printer-link font-mono text-[10px] tracking-wider text-printer-ink-light hover:text-printer-accent" href={`/tags/${tag}/`}>#{tag}</a></li>)}
-				<li><a class="font-mono text-[10px] text-printer-accent hover:underline" href="/tags/">All tags →</a></li>
+				{uniqueTags.map((tag) => (
+					<li>
+						<a
+							class="printer-link font-mono text-[10px] tracking-wider text-printer-ink-light hover:text-printer-accent"
+							href={`/tags/${tag}/`}
+						>
+							#{tag}
+						</a>
+					</li>
+				))}
+				<li>
+					<a class="font-mono text-[10px] text-printer-accent hover:underline" href="/tags/">
+						All tags →
+					</a>
+				</li>
 			</ul>
 		</nav>
 	)}
 	{pinnedPosts.length > 0 && (
 		<section class="mb-8" aria-label="Pinned posts">
 			<PrintedSection label="Pinned" />
-			<ul role="list">{pinnedPosts.map((post) => <li><PostPreview as="h2" post={post} /></li>)}</ul>
+			<ul role="list">
+				{pinnedPosts.map((post) => (
+					<li>
+						<PostPreview as="h2" post={post} />
+					</li>
+				))}
+			</ul>
 		</section>
 	)}
+	{page.currentPage === 1 && <SeriesArchive groups={seriesGroups} />}
 	{descYearKeys.map((yearKey) => (
 		<section class="mb-8" aria-labelledby={`year-${yearKey}`}>
-			<h2 id={`year-${yearKey}`} class="mb-3 print-label-wide text-printer-ink-light"><span class="sr-only">Posts in </span>{yearKey}</h2>
+			<h2 id={`year-${yearKey}`} class="mb-3 print-label-wide text-printer-ink-light">
+				<span class="sr-only">Posts in </span>
+				{yearKey}
+			</h2>
 			<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
-				{groupedByYear[yearKey]?.map((post) => <li><PostPreview as="h3" post={post} withDesc /></li>)}
+				{groupedByYear[yearKey]?.map((post) => (
+					<li>
+						<PostPreview as="h3" post={post} withDesc />
+					</li>
+				))}
 			</ul>
 		</section>
 	))}

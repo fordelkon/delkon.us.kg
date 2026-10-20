@@ -11,6 +11,15 @@ A tag is a reusable category that aggregates posts for retrieval, not a label de
 - Put a post's unique angle in its title or description instead of the tags: a one-off tag that no future post would reuse cannot aggregate anything.
 - Retire a tag by removing it from every post and deleting its definition file; a tag left with no published post generates no page in production.
 
+## Series
+
+- A series groups posts or notes into a reading sequence; tags remain reusable topic filters.
+- Place members under a matching top-level directory, such as `content/posts/concurrency/` or `content/notes/algorithm/`, and define that series in `content/series/<directory>.md`. Directories without a definition remain ordinary archive entries.
+- Definition frontmatter supports an optional `title` and `description`; its Markdown body introduces the series on `/series/<directory>/`. Empty series generate no page.
+- Members read in ascending publication-date order, with collection and ID breaking ties. Production series use the same draft filtering as posts; notes have no draft field.
+- Archives collapse each series into a single folder row (date range, title, entry count, description) linking to `/series/<directory>/`; members never appear in the year or standalone flows. A series can span archive pages; its dedicated page and member navigation always include the full visible sequence.
+- Post and note directories sharing a name belong to the same series. Custom slugs must retain the directory prefix to retain membership.
+
 ## Titles, Descriptions, and Slugs
 
 - Write a description that stands alone in RSS, archive previews, and meta tags: state what the post covers, not what it is about to do.
@@ -40,6 +49,7 @@ A tag is a reusable category that aggregates posts for retrieval, not a label de
 
 - Keep examples that demonstrate interleaving, timing, or lifecycle (races, deadlock, async wakeups) as complete, runnable programs; pure API-semantics examples work as function-level snippets.
 - Pick the language — C++, Rust, or Go on this site — that carries the concept most clearly, instead of forcing one language across the series; when an example switches languages, the text states why.
+- Show a fix or refactor as a `diff` fence with `+`/`-` line prefixes instead of re-pasting the whole file: `lang="…"` keeps syntax highlighting and `title="…"` names the file (exact syntax in [TEMPLATE-post.md](../content/TEMPLATE-post.md)). Keep context lines to what the change needs. Annotate the why as a short comment immediately above the changed line, not scattered mid-code.
 
 ## Sources
 

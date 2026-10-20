@@ -1,0 +1,50 @@
+---
+import { getEntryUrl, getSeriesContext, type SeriesEntry } from "@/data/series";
+
+interface Props {
+	entry: SeriesEntry;
+}
+
+const { entry } = Astro.props;
+const context = await getSeriesContext(entry);
+---
+
+{context && (
+	<nav
+		aria-label="Series navigation"
+		data-pagefind-ignore
+		class="my-6 border-y border-dashed border-printer-ink/15 py-4"
+	>
+		<div class="flex flex-wrap items-baseline justify-between gap-2">
+			<a
+				class="printer-link font-serif text-sm text-printer-accent"
+				href={`/series/${context.group.id}/`}
+			>
+				{context.group.title}
+			</a>
+			<span class="print-label text-printer-ink-light">
+				第 {context.index + 1} / {context.group.entries.length} 篇
+			</span>
+		</div>
+		<div class="mt-3 grid gap-3 font-serif text-xs sm:grid-cols-2">
+			{context.prev && (
+				<a
+					rel="prev"
+					class="printer-link text-printer-ink-light hover:text-printer-accent"
+					href={getEntryUrl(context.prev)}
+				>
+					← 上一篇 · {context.prev.data.title}
+				</a>
+			)}
+			{context.next && (
+				<a
+					rel="next"
+					class="printer-link text-printer-ink-light hover:text-printer-accent sm:col-start-2 sm:text-right"
+					href={getEntryUrl(context.next)}
+				>
+					下一篇 · {context.next.data.title} →
+				</a>
+			)}
+		</div>
+	</nav>
+)}

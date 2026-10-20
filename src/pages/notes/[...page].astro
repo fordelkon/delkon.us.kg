@@ -4,22 +4,39 @@ import type { GetStaticPaths, Page } from "astro";
 import { Icon } from "astro-icon/components";
 import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
+import SeriesArchive from "@/components/SeriesArchive.astro";
+import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { collectionDateSort } from "@/utils/date";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
-	const allNotes = await getCollection("note");
+	const allNotesByDate = (await getCollection("note")).sort(collectionDateSort);
 
-	return paginate(allNotes.sort(collectionDateSort), { pageSize: MAX_NOTES_PER_PAGE });
+	// Folders scoped to notes: only series with note members become folders, so
+	// members are paginated neither directly nor through an empty folder page.
+	const seriesGroups = await getSeriesGroups("note");
+
+	const seriesNoteIds = new Set(
+		seriesGroups.flatMap((group) => group.entries.map((entry) => entry.id)),
+	);
+
+	return paginate(
+		allNotesByDate.filter((note) => !seriesNoteIds.has(note.id)),
+		{
+			pageSize: MAX_NOTES_PER_PAGE,
+			props: { seriesGroups },
+		},
+	);
 }) satisfies GetStaticPaths;
 
 interface Props {
 	page: Page<CollectionEntry<"note">>;
+	seriesGroups: SeriesGroup[];
 }
 
-const { page } = Astro.props;
+const { page, seriesGroups } = Astro.props;
 
 const meta = {
 	description: "Read my collection of notes",
@@ -40,14 +57,15 @@ const paginationProps = getPaginationProps(page, {
 			<Icon aria-hidden="true" class="h-4 w-4" focusable="false" name="mdi:rss" />
 		</a>
 	</header>
-	<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
-		{
-			page.data.map((note) => (
+	{page.currentPage === 1 && <SeriesArchive groups={seriesGroups} />}
+	{page.data.length > 0 && (
+		<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
+			{page.data.map((note) => (
 				<li class="py-2">
 					<Note note={note} as="h2" isPreview />
 				</li>
-			))
-		}
-	</ul>
+			))}
+		</ul>
+	)}
 	<Pagination {...paginationProps} />
 </PageLayout>

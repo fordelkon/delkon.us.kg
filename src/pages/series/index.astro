@@ -1,0 +1,27 @@
+---
+import { getSeriesGroups } from "@/data/series";
+import PageLayout from "@/layouts/Base.astro";
+
+const groups = await getSeriesGroups();
+---
+
+<PageLayout meta={{ title: "Series", description: "按主题阅读文章与笔记。" }}>
+	<h1 class="font-serif text-2xl font-bold tracking-tight sm:text-3xl">Series</h1>
+	<ul class="mt-8 divide-y divide-dotted divide-printer-ink/15" role="list">
+		{groups.map((group) => (
+			<li class="py-6">
+				<div class="flex flex-wrap items-baseline justify-between gap-3">
+					<h2 class="font-serif text-lg">
+						<a class="printer-link text-printer-accent" href={`/series/${group.id}/`}>
+							{group.title}
+						</a>
+					</h2>
+					<span class="print-label text-printer-ink-light">{group.entries.length} 篇 →</span>
+				</div>
+				{group.description && (
+					<p class="mt-2 font-serif text-sm text-printer-ink-light">{group.description}</p>
+				)}
+			</li>
+		))}
+	</ul>
+</PageLayout>

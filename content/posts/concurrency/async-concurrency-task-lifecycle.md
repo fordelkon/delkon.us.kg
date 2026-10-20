@@ -5,7 +5,7 @@ publishDate: "17 Oct 2026"
 tags: ["concurrency", "async", "rust", "go"]
 ---
 
-上一篇[《并发编程（五）：消息传递、任务池与背压》](/posts/message-passing-workers-backpressure/)讨论了消息流动与提前退出。本篇回到第一篇的[协作式并发](/posts/concurrency-parallelism-execution-units/#协作式并发)：等待中的异步任务由谁继续驱动，调用方放弃结果以后，任务又该怎样结束？示例以 Rust 和 Tokio 为主，取消部分用 Go context 作对照。
+上一篇[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/)讨论了消息流动与提前退出。本篇回到第一篇的[协作式并发](/posts/concurrency/parallelism-execution-units/#协作式并发)：等待中的异步任务由谁继续驱动，调用方放弃结果以后，任务又该怎样结束？示例以 Rust 和 Tokio 为主，取消部分用 Go context 作对照。
 
 ## Future、Waker 与执行器
 
@@ -19,7 +19,7 @@ Future 也不必对应一个独立任务。`join!` 可以在同一个任务里�
 
 ### Waker：请求再次轮询
 
-`poll` 的 `Context` 提供当前任务的 **Waker**。当等待条件发生变化时，调用 `wake()` 请求执行器再次轮询关联任务。唤醒不是“操作已经完成”的保证，再次轮询仍可能得到 `Pending`；多次唤醒也可能被合并[^2]。第三篇已[区分唤醒与内存同步](/posts/atomics-memory-model/#唤醒与同步以-park--unpark-为例)；本节的 Waker 是另一种接口，具体保证应以 Waker 的契约为准，不能套用 park/unpark 的 token 规则。
+`poll` 的 `Context` 提供当前任务的 **Waker**。当等待条件发生变化时，调用 `wake()` 请求执行器再次轮询关联任务。唤醒不是“操作已经完成”的保证，再次轮询仍可能得到 `Pending`；多次唤醒也可能被合并[^2]。第三篇已[区分唤醒与内存同步](/posts/concurrency/atomics-memory-model/#唤醒与同步以-park--unpark-为例)；本节的 Waker 是另一种接口，具体保证应以 Waker 的契约为准，不能套用 park/unpark 的 token 规则。
 
 下面的定时器改写自 Async Book。它用一个线程模拟定时事件，再通过 Waker 通知异步任务，完整程序可在 Tokio 中运行[^3]：
 
@@ -85,7 +85,7 @@ async fn main() {
 }
 ```
 
-与第二篇的[条件变量等待协议](/posts/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)一样，这里也要把状态检查与登记等待放在同一把锁下。锁覆盖“检查完成状态并登记 Waker”，避免定时线程恰好在两步之间完成、造成遗漏唤醒。如果线程先完成，下一次 `poll` 直接看到 `done`；如果登记先完成，线程就取走 Waker 并唤醒。每次等待都保留最新的 Waker，因为同一 Future 后续可能由不同任务轮询。
+与第二篇的[条件变量等待协议](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)一样，这里也要把状态检查与登记等待放在同一把锁下。锁覆盖“检查完成状态并登记 Waker”，避免定时线程恰好在两步之间完成、造成遗漏唤醒。如果线程先完成，下一次 `poll` 直接看到 `done`；如果登记先完成，线程就取走 Waker 并唤醒。每次等待都保留最新的 Waker，因为同一 Future 后续可能由不同任务轮询。
 
 这只是展示协议的教学实现：每个定时器创建一个线程，不能代表运行时管理大量定时器的方式。丢弃 Timer 也不会中断已启动的睡眠线程；外部工作的生命周期与 Future 本身需要分别考虑。
 
@@ -101,7 +101,7 @@ async fn main() {
 
 任务可以在 `poll` 返回前就被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，不是保证每次 wake 都对应一次独立排队[^2][^4]。
 
-第一篇[协作式并发示例中的 `yield_now()`](/posts/concurrency-parallelism-execution-units/#协作式并发) 会主动请求再次调度，但不保证下一次一定运行其他任务。尤其 `join!` 的多个分支仍属于同一个任务，不能把分支让出理解成创建了新的调度单位[^5]。
+第一篇[协作式并发示例中的 `yield_now()`](/posts/concurrency/parallelism-execution-units/#协作式并发) 会主动请求再次调度，但不保证下一次一定运行其他任务。尤其 `join!` 的多个分支仍属于同一个任务，不能把分支让出理解成创建了新的调度单位[^5]。
 
 ## I/O 就绪与完成通知
 
@@ -162,13 +162,13 @@ async fn main() {
 | `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` | 可能已部分读写，重新开始不能假定从未发生过       |
 | `Mutex::lock`、`Semaphore::acquire`                    | 会失去在公平等待队列中的位置                     |
 
-失去排队位置与丢掉消息不同：锁或许可本来就没有拿到，反复取消再重试可能让任务在公平队列中迟迟轮不到——这正是[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/#活锁与饥饿)讨论的饥饿在取消协议下的形态。这里的取消语义也不同于第五篇的[通道结束](/posts/message-passing-workers-backpressure/#提前退出与取消)：全部发送端丢弃且缓冲已取空后，Tokio 的 `mpsc::Receiver::recv()` 返回 `None` 表示通道结束，而 select 丢弃未完成分支只是让这个等待中的 Future 消亡。
+失去排队位置与丢掉消息不同：锁或许可本来就没有拿到，反复取消再重试可能让任务在公平队列中迟迟轮不到——这正是[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/concurrency/deadlock-livelock-correctness/#活锁与饥饿)讨论的饥饿在取消协议下的形态。这里的取消语义也不同于第五篇的[通道结束](/posts/concurrency/message-passing-workers-backpressure/#提前退出与取消)：全部发送端丢弃且缓冲已取空后，Tokio 的 `mpsc::Receiver::recv()` 返回 `None` 表示通道结束，而 select 丢弃未完成分支只是让这个等待中的 Future 消亡。
 
 取消安全是具体操作的契约，不能只按方法名概括所有 `recv` 或 `read`。取消不安全也不等于绝不能取消：程序整体关停时，丢弃某些进度可能符合需求；重试支付或继续解析协议时，则需要更严格的处理。
 
 ### Go context：传播退出信号
 
-Go 的 context 用信号表达取消：第五篇手写的[`close(done)` 通道广播](/posts/message-passing-workers-backpressure/#提前退出与取消)，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
+Go 的 context 用信号表达取消：第五篇手写的[`close(done)` 通道广播](/posts/concurrency/message-passing-workers-backpressure/#提前退出与取消)，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
 
 下面让工作 goroutine 在模拟操作与超时信号之间选择。主 goroutine 等待工作结果，确认它已经走到退出路径：
 
@@ -244,13 +244,13 @@ Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `
 
 协作式执行器不能抢占一次长时间运行的 `poll`。同步 I/O 或长计算会占住所在 worker；即使其他 worker 还在运行，也可能造成延迟或依赖阻塞。
 
-`select!` 默认随机选择先检查的分支，`join!` 默认轮换先轮询的分支，以避免某一分支长期占先。使用 `biased;` 时则由调用方负责顺序，例如把关停信号放在繁忙消息流前面。与[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/deadlock-livelock-correctness/#活锁与饥饿)对公平性的提醒一致，这些策略不能为任意程序提供等待时间上界[^12][^15]。
+`select!` 默认随机选择先检查的分支，`join!` 默认轮换先轮询的分支，以避免某一分支长期占先。使用 `biased;` 时则由调用方负责顺序，例如把关停信号放在繁忙消息流前面。与[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/concurrency/deadlock-livelock-correctness/#活锁与饥饿)对公平性的提醒一致，这些策略不能为任意程序提供等待时间上界[^12][^15]。
 
 Tokio 的调度公平性保证本身也有条件，包括任务数量有界、每次 `poll` 在有界时间内返回；它不保证任务严格轮流运行[^16]。是否需要拆分计算或迁移阻塞工作，应根据任务耗时和服务延迟目标判断；Tokio 团队成员的文章曾以两次 `.await` 之间 10–100 微秒作为参考预算[^19]，但它同样不是所有应用都能直接套用的统一规范。
 
 ### 持锁跨 `.await` 的等待依赖
 
-第四篇的[等待依赖分析](/posts/deadlock-livelock-correctness/#等待不只发生在锁上)同样适用于异步任务。例如任务 A 持有一把锁，向任务 B 发出请求后等待回复；B 必须取得同一把锁才能生成回复。A 等 B 回复，B 等 A 解锁，双方都无法完成。即使用异步 Mutex，让等锁只挂起任务、不阻塞线程，这个逻辑上的等待环仍然存在。
+第四篇的[等待依赖分析](/posts/concurrency/deadlock-livelock-correctness/#等待不只发生在锁上)同样适用于异步任务。例如任务 A 持有一把锁，向任务 B 发出请求后等待回复；B 必须取得同一把锁才能生成回复。A 等 B 回复，B 等 A 解锁，双方都无法完成。即使用异步 Mutex，让等锁只挂起任务、不阻塞线程，这个逻辑上的等待环仍然存在。
 
 使用同步 Mutex 还要检查执行器线程是否被阻塞：A 持锁后在 `.await` 处挂起，运行在同一线程上的 B 再调用阻塞式 `lock()`，就可能占住线程，使 A 无法恢复并释放锁。某些 `Send` 约束会在编译时拒绝持有同步 guard 的跨任务用法，但本地任务或同一任务内的分支不能依赖这层检查排除死锁。Tokio 的 Mutex 文档因此特别提醒同步 guard 跨 `.await` 的风险[^20]。
 
@@ -260,7 +260,7 @@ Tokio 的调度公平性保证本身也有条件，包括任务数量有界、�
 
 | 工作类型               | 常见安排               | 需要注意的边界                                                                        |
 | ---------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
-| 大量网络等待           | 异步任务配合非阻塞 I/O | 仍需[限制任务与缓冲数量](/posts/message-passing-workers-backpressure/#背压与队列容量) |
+| 大量网络等待           | 异步任务配合非阻塞 I/O | 仍需[限制任务与缓冲数量](/posts/concurrency/message-passing-workers-backpressure/#背压与队列容量) |
 | 有限时长的同步阻塞操作 | `spawn_blocking`       | 启动后不能靠 abort 强行停止                                                           |
 | 长期阻塞的常驻循环     | 独立线程与显式退出协议 | 退出时仍需等待与回收                                                                  |
 | 大量 CPU 计算          | 有界计算线程池         | 限制并行数量，避免占满异步 worker                                                     |
