@@ -1,33 +1,36 @@
 ---
-import type { PaginationLink } from "@/types";
+import type { Page } from "astro";
 
 interface Props {
-	nextUrl?: PaginationLink;
-	prevUrl?: PaginationLink;
+	page: Pick<Page, "url">;
+	labels?: { next: string; prev: string };
 }
 
-const { nextUrl, prevUrl } = Astro.props;
+const {
+	page: {
+		url: { next, prev },
+	},
+	labels = { next: "Next Page →", prev: "← Previous Page" },
+} = Astro.props;
 ---
 
 {
-	(prevUrl || nextUrl) && (
+	(prev || next) && (
 		<nav class="mt-10 flex items-center justify-between gap-4 border-t border-dashed border-printer-ink/10 pt-4 print-label">
-			{prevUrl && (
+			{prev && (
 				<a
 					class="text-printer-ink-light transition-colors hover:text-printer-accent focus-visible:text-printer-accent"
-					href={prevUrl.url}
+					href={prev}
 				>
-					{prevUrl.srLabel && <span class="sr-only">{prevUrl.srLabel}</span>}
-					{prevUrl.text ? prevUrl.text : "Previous"}
+					{labels.prev}
 				</a>
 			)}
-			{nextUrl && (
+			{next && (
 				<a
 					class="text-printer-ink-light transition-colors hover:text-printer-accent focus-visible:text-printer-accent"
-					href={nextUrl.url}
+					href={next}
 				>
-					{nextUrl.srLabel && <span class="sr-only">{nextUrl.srLabel}</span>}
-					{nextUrl.text ? nextUrl.text : "Next"}
+					{labels.next}
 				</a>
 			)}
 		</nav>

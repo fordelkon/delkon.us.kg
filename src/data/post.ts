@@ -32,11 +32,15 @@ export function getPinnedPosts(
 	return posts.filter((post) => post.data.pinned).slice(0, max);
 }
 
-/** groups posts by year (based on option siteConfig.sortPostsByUpdatedDate), using the year as the key
- *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
- */
-export function groupPostsByYear(posts: CollectionEntry<"post">[]) {
-	return Object.groupBy(posts, (post) => post.data.publishDate.getFullYear().toString());
+/** Groups by publication year, newest year first, preserving entry order within each year. */
+export function groupPostsByYear(
+	posts: CollectionEntry<"post">[],
+): [string, CollectionEntry<"post">[]][] {
+	const groups = Object.groupBy(posts, (post) => post.data.publishDate.getFullYear().toString());
+
+	return Object.entries(groups)
+		.map(([year, entries]): [string, CollectionEntry<"post">[]] => [year, entries ?? []])
+		.toSorted(([a], [b]) => Number(b) - Number(a));
 }
 
 /** returns all tags created from posts (inc duplicate tags)

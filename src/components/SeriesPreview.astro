@@ -1,6 +1,8 @@
 ---
 import type { HTMLTag, Polymorphic } from "astro/types";
+import { seriesUrl } from "@/data/routes";
 import type { SeriesGroup } from "@/data/series";
+import { getFormattedDate } from "@/utils/date";
 
 type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 	group: SeriesGroup;
@@ -10,27 +12,26 @@ const { as: Tag = "div", group } = Astro.props;
 
 // Archive "folder" row: mirrors PostPreview's row format, but the whole entry
 // links to the series page. Single-entry series show one full date instead of
-// a degenerate "20 Oct – 20 Oct" range.
+// a degenerate "20 Oct – 20 Oct" range. `year: undefined` clears the site
+// default so short ranges stay year-less.
 const firstDate = group.entries[0].data.publishDate;
 const lastDate = group.entries.at(-1).data.publishDate;
-const shortFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
-const fullFormat = new Intl.DateTimeFormat("en-GB", {
-	day: "numeric",
-	month: "short",
-	year: "numeric",
-});
+const fullDate = getFormattedDate(firstDate);
+
+const shortDate = (date: Date) =>
+	getFormattedDate(date, { day: "numeric", month: "short", year: undefined });
 
 const dateRange =
 	group.entries.length === 1
-		? fullFormat.format(firstDate)
+		? fullDate
 		: firstDate.getFullYear() === lastDate.getFullYear()
-			? `${shortFormat.format(firstDate)} – ${shortFormat.format(lastDate)} ${firstDate.getFullYear()}`
-			: `${shortFormat.format(firstDate)} ${firstDate.getFullYear()} – ${shortFormat.format(lastDate)} ${lastDate.getFullYear()}`;
+			? `${shortDate(firstDate)} – ${shortDate(lastDate)} ${firstDate.getFullYear()}`
+			: `${shortDate(firstDate)} ${firstDate.getFullYear()} – ${shortDate(lastDate)} ${lastDate.getFullYear()}`;
 ---
 
 <a
-	href={`/series/${group.id}/`}
+	href={seriesUrl(group.id)}
 	class="-mx-2 flex flex-col gap-1 rounded-md px-2 py-2.5 outline-hidden transition-colors group hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3 focus-visible:ring-2 focus-visible:ring-printer-accent/40"
 >
 	<p class="print-label text-printer-ink-light tabular-nums">{dateRange}</p>

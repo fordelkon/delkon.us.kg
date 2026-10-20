@@ -8,7 +8,6 @@ import SeriesArchive from "@/components/SeriesArchive.astro";
 import { getStandaloneNotes } from "@/data/entries";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
-import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
@@ -34,11 +33,6 @@ const meta = {
 	description: "Read my collection of notes",
 	title: "Notes",
 };
-
-const paginationProps = getPaginationProps(page, {
-	next: "Next Page →",
-	prev: "← Previous Page",
-});
 ---
 
 <PageLayout meta={meta}>
@@ -59,5 +53,5 @@ const paginationProps = getPaginationProps(page, {
 			))}
 		</ul>
 	)}
-	<Pagination {...paginationProps} />
+	<Pagination page={page} />
 </PageLayout>

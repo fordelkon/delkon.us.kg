@@ -6,7 +6,6 @@ import Pagination from "@/components/Paginator.astro";
 import { getPublishedPosts } from "@/data/entries";
 import { getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
 import PageLayout from "@/layouts/Base.astro";
-import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	// Tags are topic filters: series members stay in tag listings (docs/writing.md).
@@ -35,11 +34,6 @@ const meta = {
 	description: tagMeta?.data.description ?? `View all posts with the tag - ${tag}`,
 	title: tagMeta?.data.title ?? `Posts about ${tag}`,
 };
-
-const paginationProps = getPaginationProps(page, {
-	next: "Next Tags →",
-	prev: "← Previous Tags",
-});
 ---
 
 <PageLayout meta={meta}>
@@ -77,5 +71,5 @@ const paginationProps = getPaginationProps(page, {
 			))
 		}
 	</ul>
-	<Pagination {...paginationProps} />
+	<Pagination page={page} labels={{ next: "Next Tags →", prev: "← Previous Tags" }} />
 </PageLayout>

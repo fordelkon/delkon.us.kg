@@ -11,7 +11,6 @@ import { getPinnedPosts, getUniqueTags, groupPostsByYear, MAX_POSTS_PER_PAGE } f
 import { tagUrl } from "@/data/routes";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
-import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_TAGS = 7;
@@ -49,11 +48,6 @@ const meta = {
 };
 
 const groupedByYear = groupPostsByYear(page.data);
-const descYearKeys = Object.keys(groupedByYear).sort((a, b) => Number(b) - Number(a));
-const paginationProps = getPaginationProps(page, {
-	next: "Next Page →",
-	prev: "← Previous Page",
-});
 ---
 
 <PageLayout meta={meta}>
@@ -98,14 +92,14 @@ const paginationProps = getPaginationProps(page, {
 		</section>
 	)}
 	{page.currentPage === 1 && <SeriesArchive groups={seriesGroups} />}
-	{descYearKeys.map((yearKey) => (
+	{groupedByYear.map(([yearKey, posts]) => (
 		<section class="mb-8" aria-labelledby={`year-${yearKey}`}>
 			<h2 id={`year-${yearKey}`} class="mb-3 print-label-wide text-printer-ink-light">
 				<span class="sr-only">Posts in </span>
 				{yearKey}
 			</h2>
 			<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
-				{groupedByYear[yearKey]?.map((post) => (
+				{posts.map((post) => (
 					<li>
 						<PostPreview as="h3" post={post} withDesc />
 					</li>
@@ -113,5 +107,5 @@ const paginationProps = getPaginationProps(page, {
 			</ul>
 		</section>
 	))}
-	<Pagination {...paginationProps} />
+	<Pagination page={page} />
 </PageLayout>
