@@ -8,7 +8,7 @@ description: "LeetCode Hot 100 的 LRU 缓存，用 OrderedDict 实现时我踩�
 
 第一版到修正版的完整改动：
 
-```diff lang="python" title="lru_cache.py"
+```diff lang="python"
   from collections import OrderedDict
 
   class LRUCache:
