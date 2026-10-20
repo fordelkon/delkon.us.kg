@@ -6,42 +6,31 @@ import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
-import { newestFirst } from "@/data/ordering";
-import {
-	getAllPosts,
-	getPinnedPosts,
-	getUniqueTags,
-	groupPostsByYear,
-	MAX_POSTS_PER_PAGE,
-} from "@/data/post";
+import { getPublishedPosts, getStandalonePosts } from "@/data/entries";
+import { getPinnedPosts, getUniqueTags, groupPostsByYear, MAX_POSTS_PER_PAGE } from "@/data/post";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_TAGS = 7;
-	const allPostsByDate = (await getAllPosts()).toSorted(newestFirst);
-	const uniqueTags = getUniqueTags(allPostsByDate).slice(0, MAX_TAGS);
+	// Tags are topic filters: series members stay in tag listings (docs/writing.md).
+	const publishedPosts = await getPublishedPosts();
+	const uniqueTags = getUniqueTags(publishedPosts).slice(0, MAX_TAGS);
 
-	// Folders scoped to posts: only series with post members become folders, so
-	// members are paginated neither directly nor through an empty folder page.
+	const standalonePosts = await getStandalonePosts();
+
+	// Folders scoped to posts: only series with post members become folders.
 	const seriesGroups = await getSeriesGroups("post");
 
-	const seriesPostIds = new Set(
-		seriesGroups.flatMap((group) => group.entries.map((entry) => entry.id)),
-	);
-
-	return paginate(
-		allPostsByDate.filter((post) => !seriesPostIds.has(post.id)),
-		{
-			pageSize: MAX_POSTS_PER_PAGE,
-			props: {
-				uniqueTags,
-				pinnedPosts: getPinnedPosts(allPostsByDate).filter((post) => !seriesPostIds.has(post.id)),
-				seriesGroups,
-			},
+	return paginate(standalonePosts, {
+		pageSize: MAX_POSTS_PER_PAGE,
+		props: {
+			uniqueTags,
+			pinnedPosts: getPinnedPosts(standalonePosts),
+			seriesGroups,
 		},
-	);
+	});
 }) satisfies GetStaticPaths;
 
 interface Props {

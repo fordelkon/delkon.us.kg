@@ -3,13 +3,14 @@ import { render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
-import { newestFirst } from "@/data/ordering";
-import { getAllPosts, getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
+import { getPublishedPosts } from "@/data/entries";
+import { getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
 import PageLayout from "@/layouts/Base.astro";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
-	const sortedPosts = (await getAllPosts()).toSorted(newestFirst);
+	// Tags are topic filters: series members stay in tag listings (docs/writing.md).
+	const sortedPosts = await getPublishedPosts();
 	const uniqueTags = getUniqueTags(sortedPosts);
 
 	return uniqueTags.flatMap((tag) => {

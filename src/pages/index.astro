@@ -1,26 +1,26 @@
 ---
-import { getCollection } from "astro:content";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Note from "@/components/note/Note.astro";
 import PrintedDivider from "@/components/printed/PrintedDivider.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SocialList from "@/components/SocialList.astro";
 import WorksGrid from "@/components/work/WorksGrid.astro";
-import { newestFirst } from "@/data/ordering";
-import { getAllPosts, getPinnedPosts } from "@/data/post";
+import { getStandaloneNotes, getStandalonePosts } from "@/data/entries";
+import { getPinnedPosts } from "@/data/post";
 import { works } from "@/data/works";
 import PageLayout from "@/layouts/Base.astro";
 
 // Posts
 const MAX_POSTS = 5;
-const allPostsByDate = (await getAllPosts()).toSorted(newestFirst);
-const latestPosts = allPostsByDate.slice(0, MAX_POSTS);
+const standalonePosts = await getStandalonePosts();
+const latestPosts = standalonePosts.slice(0, MAX_POSTS);
 
-const pinnedPosts = getPinnedPosts(allPostsByDate);
+// Series members surface through their series page, not the home page.
+const pinnedPosts = getPinnedPosts(standalonePosts);
 
 // Notes, set to a max of 4
 const MAX_NOTES = 4;
-const latestNotes = (await getCollection("note")).toSorted(newestFirst).slice(0, MAX_NOTES);
+const latestNotes = (await getStandaloneNotes()).slice(0, MAX_NOTES);
 
 const meta = { title: "Home" };
 ---

@@ -17,7 +17,7 @@ A tag is a reusable category that aggregates posts for retrieval, not a label de
 - Place members under a matching top-level directory, such as `content/posts/concurrency/` or `content/notes/algorithm/`, and define that series in `content/series/<directory>.md`. Directories without a definition remain ordinary archive entries.
 - Definition frontmatter supports an optional `title` and `description`; its Markdown body introduces the series on `/series/<directory>/`. Empty series generate no page.
 - Members read in ascending publication-date order, with collection and ID breaking ties. Production series use the same draft filtering as posts; notes have no draft field.
-- Archives collapse each series into a single folder row (date range, title, entry count, description) linking to `/series/<directory>/`; members never appear in the year or standalone flows. A series can span archive pages; its dedicated page and member navigation always include the full visible sequence.
+- Archives collapse each series into a single folder row (date range, title, entry count, description) linking to `/series/<directory>/`; members never appear in the year or standalone flows, nor in the home page's pinned and latest sections. A series can span archive pages; its dedicated page and member navigation always include the full visible sequence.
 - Post and note directories sharing a name belong to the same series. Custom slugs must retain the directory prefix to retain membership.
 
 ## Titles, Descriptions, and Slugs

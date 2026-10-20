@@ -23,7 +23,7 @@ export const MAX_POSTS_PER_PAGE = 10;
 export const MAX_PINNED_POSTS = 3;
 
 /** returns up to max pinned posts, preserving the given order
- *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
 export function getPinnedPosts(
 	posts: CollectionEntry<"post">[],
@@ -33,28 +33,28 @@ export function getPinnedPosts(
 }
 
 /** groups posts by year (based on option siteConfig.sortPostsByUpdatedDate), using the year as the key
- *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  */
 export function groupPostsByYear(posts: CollectionEntry<"post">[]) {
 	return Object.groupBy(posts, (post) => post.data.publishDate.getFullYear().toString());
 }
 
 /** returns all tags created from posts (inc duplicate tags)
- *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
 export function getAllTags(posts: CollectionEntry<"post">[]) {
 	return posts.flatMap((post) => [...post.data.tags]);
 }
 
 /** returns all unique tags created from posts
- *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
 export function getUniqueTags(posts: CollectionEntry<"post">[]) {
 	return [...new Set(getAllTags(posts))];
 }
 
 /** returns a count of each unique tag - [[tagName, count], ...]
- *  Note: This function doesn't filter draft posts, pass it the result of getAllPosts above to do so.
+ *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
 export function getUniqueTagsWithCount(posts: CollectionEntry<"post">[]): [string, number][] {
 	return [

@@ -45,7 +45,7 @@ site's lamp, snail, and draggable stickers are outside this version.
 
 Example English and Chinese writing lives in `content/posts/` and `content/notes/`. Replace it with your own writing. Both languages share the existing routes; this version does not introduce locale prefixes or translation dictionaries.
 
-[Content collection schemas](src/content.config.ts) are the source of truth for frontmatter. [Post selection](src/data/post.ts) owns draft filtering and ordering.
+[Content collection schemas](src/content.config.ts) are the source of truth for frontmatter. [Entry selection](src/data/entries.ts) provides published and standalone listings, backed by shared [ordering](src/data/ordering.ts) and [series membership](src/data/series.ts).
 
 - Posts: `content/posts/**/*.{md,mdx}`; required `title`, `description`, and `publishDate`. Optional tags, pinned status, draft status, cover image, update date, and custom social image.
 - Notes: `content/notes/`; required `title` and an ISO 8601 `publishDate` with timezone offset, for example `2026-10-02T14:05:00Z`.

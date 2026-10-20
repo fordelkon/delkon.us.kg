@@ -1,34 +1,26 @@
 ---
-import { type CollectionEntry, getCollection } from "astro:content";
+import { type CollectionEntry } from "astro:content";
 import type { GetStaticPaths, Page } from "astro";
 import { Icon } from "astro-icon/components";
 import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
-import { newestFirst } from "@/data/ordering";
+import { getStandaloneNotes } from "@/data/entries";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
-	const allNotesByDate = (await getCollection("note")).toSorted(newestFirst);
+	const standaloneNotes = await getStandaloneNotes();
 
-	// Folders scoped to notes: only series with note members become folders, so
-	// members are paginated neither directly nor through an empty folder page.
+	// Folders scoped to notes: only series with note members become folders.
 	const seriesGroups = await getSeriesGroups("note");
 
-	const seriesNoteIds = new Set(
-		seriesGroups.flatMap((group) => group.entries.map((entry) => entry.id)),
-	);
-
-	return paginate(
-		allNotesByDate.filter((note) => !seriesNoteIds.has(note.id)),
-		{
-			pageSize: MAX_NOTES_PER_PAGE,
-			props: { seriesGroups },
-		},
-	);
+	return paginate(standaloneNotes, {
+		pageSize: MAX_NOTES_PER_PAGE,
+		props: { seriesGroups },
+	});
 }) satisfies GetStaticPaths;
 
 interface Props {
