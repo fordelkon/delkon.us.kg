@@ -36,7 +36,7 @@ const meta = {
 ---
 
 <PageLayout meta={meta}>
-	<header class="mb-8 flex items-center gap-3">
+	<header class="mb-(--receipt-page-heading-gap) flex items-center gap-3">
 		<h1 class="font-serif text-2xl font-bold tracking-tight sm:text-3xl">Notes</h1>
 		<a class="text-printer-accent hover:text-printer-ink" href="/notes/rss.xml" target="_blank">
 			<span class="sr-only">RSS feed</span>
@@ -47,7 +47,7 @@ const meta = {
 	{page.data.length > 0 && (
 		<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
 			{page.data.map((note) => (
-				<li class="py-2">
+				<li>
 					<Note note={note} as="h2" isPreview />
 				</li>
 			))}

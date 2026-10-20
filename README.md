@@ -23,6 +23,7 @@ Search requires a production build. Run `pnpm build` before previewing search. R
 - [src/site.config.ts](src/site.config.ts): identity, navigation, date formatting, and code themes.
 - [src/styles/global.css](src/styles/global.css): style assembly. Imports Tailwind layers, the printer palette tokens, and component stylesheets, and carries fonts, view transitions, and motion. Dark colors override the same `--color-printer-*` variables under `html[data-theme="dark"]`.
 - [src/styles/tokens/printer-palette.css](src/styles/tokens/printer-palette.css): canonical light printer palette. Build-time TS consumers read the matching constants from [printer-palette.ts](src/styles/tokens/printer-palette.ts); change both together.
+- [src/styles/tokens/receipt-spacing.css](src/styles/tokens/receipt-spacing.css): shared spacing for receipt headings, sections, archive groups, and listing rows. Both palettes use the same rhythm; row geometry lives in `.receipt-row` in [receipt.css](src/styles/components/receipt.css).
 - [src/styles/components/printer-housing.css](src/styles/components/printer-housing.css): printer housing and paper mechanics (desk backdrop, thermal texture, paper edges, geometry tokens).
 - [src/styles/components/receipt.css](src/styles/components/receipt.css): shared receipt micro-typography for labels and links.
 - [src/layouts/Base.astro](src/layouts/Base.astro): shared printer shell and paper layout.

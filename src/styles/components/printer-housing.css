@@ -14,6 +14,9 @@
    the layer placement has no cascade effect. */
 :root {
 	--paper-inset: 12px;
+	/* Short receipts keep a visible sheet without stretching sparse archives
+	   to most of the viewport. svh stays steady as mobile browser chrome moves. */
+	--paper-min-height: 50svh;
 
 	/* Drop shadow of the paper sheet (PaperViewport.astro). The housing and
 	   the back-to-top button reuse subsets of these layers, so the values

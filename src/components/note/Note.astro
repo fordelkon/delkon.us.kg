@@ -7,16 +7,18 @@ import { entryUrl } from "@/data/routes";
 type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 	note: CollectionEntry<"note">;
 	isPreview?: boolean | undefined;
+	/** Row mode: title and timestamp only, matching PostPreview's listing rows. */
+	compact?: boolean | undefined;
 };
 
-const { as: Tag = "div", note, isPreview = false } = Astro.props;
+const { as: Tag = "div", note, isPreview = false, compact = false } = Astro.props;
 const { Content } = await render(note);
 ---
 
 <article
 	class:list={[
 		isPreview &&
-			"group -mx-2 flex flex-col gap-1 rounded-md px-2 py-2.5 transition-colors hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
+			"receipt-row group hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
 	]}
 	data-pagefind-body={isPreview ? false : true}
 >
@@ -52,10 +54,12 @@ const { Content } = await render(note);
 		}}
 		date={note.data.publishDate}
 	/>
-	<div
-		class="prose prose-sm mt-3 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:overflow-x-auto"
-		class:list={{ "line-clamp-6": isPreview }}
-	>
-		<Content />
-	</div>
+	{!compact && (
+		<div
+			class="prose prose-sm mt-3 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:overflow-x-auto"
+			class:list={{ "line-clamp-6": isPreview }}
+		>
+			<Content />
+		</div>
+	)}
 </article>

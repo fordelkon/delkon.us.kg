@@ -70,9 +70,9 @@ const meta = { title: "Home" };
 		</PrintedSection>
 		<SeriesArchive groups={postSeriesGroups} />
 		{pinnedPosts.length > 0 && (
-			<section class="mb-8">
+			<section class="mb-(--receipt-group-gap)">
 				<h2 class="sr-only">Pinned posts</h2>
-				<ul role="list" class="-mx-2 space-y-1">
+				<ul role="list" class="space-y-1">
 					{pinnedPosts.map((p) => (
 						<li>
 							<PostPreview post={p} />
@@ -81,7 +81,7 @@ const meta = { title: "Home" };
 				</ul>
 			</section>
 		)}
-		<ul role="list" class="-mx-2 space-y-1">
+		<ul role="list" class="space-y-1">
 			{latestPosts.map((p) => (
 				<li>
 					<PostPreview post={p} />
@@ -102,10 +102,10 @@ const meta = { title: "Home" };
 			</a>
 		</PrintedSection>
 		<SeriesArchive groups={noteSeriesGroups} />
-		<ul role="list" class="-mx-2 space-y-1">
+		<ul role="list" class="space-y-1">
 			{latestNotes.map((note) => (
 				<li>
-					<Note note={note} as="h2" isPreview />
+					<Note note={note} as="h2" isPreview compact />
 				</li>
 			))}
 		</ul>

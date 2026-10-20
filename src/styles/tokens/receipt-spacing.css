@@ -1,0 +1,9 @@
+/* Receipt rhythm is shared by both palettes. Keep spacing semantic so page
+   headings, section labels, and archive groups can be tuned independently. */
+:root {
+	--receipt-heading-gap: 0.75rem;
+	--receipt-page-heading-gap: 1.25rem;
+	--receipt-group-gap: 1rem;
+	--receipt-section-gap: 1.5rem;
+	--receipt-row-padding: 0.625rem;
+}

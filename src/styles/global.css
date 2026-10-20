@@ -7,6 +7,7 @@
    swaps, and the theme-switch transition. Imported here, unlayered after the
    Tailwind theme defaults, to keep the previous cascade order. */
 @import "./tokens/printer-palette.css";
+@import "./tokens/receipt-spacing.css" layer(theme);
 
 /* Native cross-document transition fallback for full page loads (e.g. when
    the ClientRouter script is unavailable). Keep this outside the cascade

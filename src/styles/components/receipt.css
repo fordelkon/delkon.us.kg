@@ -1,5 +1,12 @@
-/* Receipt micro-typography. Call sites keep their local colour, borders, and
-   extras; these classes cover only the genuinely shared idiom. */
+/* Receipt rows and micro-typography. Call sites keep their local colour,
+   borders, and interaction states. Spacing lives in tokens/receipt-spacing.css. */
+
+/* The negative inline margin expands the hit area without moving the ink
+   away from the paper's text edge. Rows own their padding; list items do not. */
+.receipt-row {
+	@apply -mx-2 flex flex-col gap-1 rounded-md px-2 transition-colors;
+	padding-block: var(--receipt-row-padding);
+}
 
 /* Small mono chip label: font, size, tracking, and case in one class.
    (The tracking-[0.3em] variant lives in .print-label-wide below.) */
