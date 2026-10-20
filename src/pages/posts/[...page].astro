@@ -6,6 +6,7 @@ import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
+import { newestFirst } from "@/data/ordering";
 import {
 	getAllPosts,
 	getPinnedPosts,
@@ -15,12 +16,11 @@ import {
 } from "@/data/post";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
-import { collectionDateSort } from "@/utils/date";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_TAGS = 7;
-	const allPostsByDate = (await getAllPosts()).sort(collectionDateSort);
+	const allPostsByDate = (await getAllPosts()).toSorted(newestFirst);
 	const uniqueTags = getUniqueTags(allPostsByDate).slice(0, MAX_TAGS);
 
 	// Folders scoped to posts: only series with post members become folders, so

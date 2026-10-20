@@ -1,9 +1,10 @@
 import { getCollection } from "astro:content";
 import rss from "@astrojs/rss";
+import { newestFirst } from "@/data/ordering";
 import { siteConfig } from "@/site.config";
 
 export const GET = async () => {
-	const notes = await getCollection("note");
+	const notes = (await getCollection("note")).toSorted(newestFirst);
 
 	return rss({
 		title: siteConfig.title,

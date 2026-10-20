@@ -1,9 +1,10 @@
 import rss from "@astrojs/rss";
+import { newestFirst } from "@/data/ordering";
 import { getAllPosts } from "@/data/post";
 import { siteConfig } from "@/site.config";
 
 export const GET = async () => {
-	const posts = await getAllPosts();
+	const posts = (await getAllPosts()).toSorted(newestFirst);
 
 	return rss({
 		title: siteConfig.title,

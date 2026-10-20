@@ -1,4 +1,5 @@
 import { type CollectionEntry, getCollection } from "astro:content";
+import { readingOrder } from "./ordering";
 import { getAllPosts } from "./post";
 
 export type SeriesEntry = CollectionEntry<"post"> | CollectionEntry<"note">;
@@ -46,11 +47,7 @@ export async function getSeriesGroups(collection?: "post" | "note"): Promise<Ser
 						entry.id.split("/")[0] === definition.id &&
 						(!collection || entry.collection === collection),
 				)
-				.toSorted(
-					(a, b) =>
-						a.data.publishDate.getTime() - b.data.publishDate.getTime() ||
-						`${a.collection}/${a.id}`.localeCompare(`${b.collection}/${b.id}`),
-				),
+				.toSorted(readingOrder),
 		}))
 		.filter((group) => group.entries.length > 0)
 		.toSorted((a, b) => a.id.localeCompare(b.id));

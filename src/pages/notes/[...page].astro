@@ -5,14 +5,14 @@ import { Icon } from "astro-icon/components";
 import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
+import { newestFirst } from "@/data/ordering";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
-import { collectionDateSort } from "@/utils/date";
 import { getPaginationProps } from "@/utils/pagination";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
-	const allNotesByDate = (await getCollection("note")).sort(collectionDateSort);
+	const allNotesByDate = (await getCollection("note")).toSorted(newestFirst);
 
 	// Folders scoped to notes: only series with note members become folders, so
 	// members are paginated neither directly nor through an empty folder page.
