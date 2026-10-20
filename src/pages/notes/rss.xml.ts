@@ -1,5 +1,6 @@
 import rss from "@astrojs/rss";
 import { getPublishedNotes } from "@/data/entries";
+import { entryPath } from "@/data/routes";
 import { siteConfig } from "@/site.config";
 
 export const GET = async () => {
@@ -12,7 +13,7 @@ export const GET = async () => {
 		items: notes.map((note) => ({
 			title: note.data.title,
 			pubDate: note.data.publishDate,
-			link: `notes/${note.id}/`,
+			link: entryPath(note),
 		})),
 	});
 };

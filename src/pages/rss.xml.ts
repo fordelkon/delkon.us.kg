@@ -1,5 +1,6 @@
 import rss from "@astrojs/rss";
 import { getPublishedPosts } from "@/data/entries";
+import { entryPath } from "@/data/routes";
 import { siteConfig } from "@/site.config";
 
 export const GET = async () => {
@@ -13,7 +14,7 @@ export const GET = async () => {
 			title: post.data.title,
 			description: post.data.description,
 			pubDate: post.data.publishDate,
-			link: `posts/${post.id}/`,
+			link: entryPath(post),
 		})),
 	});
 };

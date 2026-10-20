@@ -2,6 +2,7 @@
 import { Image } from "astro:assets";
 import type { CollectionEntry } from "astro:content";
 import FormattedDate from "@/components/FormattedDate.astro";
+import { tagUrl } from "@/data/routes";
 
 interface Props {
 	content: CollectionEntry<"post">;
@@ -54,7 +55,7 @@ const {
 				<a
 					class="inline-flex items-center rounded-sm border border-printer-ink/10 px-2 py-[3px] print-label text-printer-ink-light transition-colors hover:border-printer-accent/30 hover:text-printer-accent focus-visible:border-printer-accent/30 focus-visible:text-printer-accent"
 					data-pagefind-filter={`tag:${tag}`}
-					href={`/tags/${tag}/`}
+					href={tagUrl(tag)}
 				>
 					<span aria-hidden="true" class="me-0.5">#</span>
 					<span class="sr-only">View more blogs with the tag&nbsp;</span>

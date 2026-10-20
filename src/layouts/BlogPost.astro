@@ -1,10 +1,10 @@
 ---
 import { type CollectionEntry, render } from "astro:content";
-
 import Masthead from "@/components/blog/Masthead.astro";
 import TOC from "@/components/blog/TOC.astro";
 import WebMentions from "@/components/blog/webmentions/index.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
+import { ogImageUrl } from "@/data/routes";
 
 import BaseLayout from "./Base.astro";
 
@@ -14,7 +14,7 @@ interface Props {
 
 const { post } = Astro.props;
 const { ogImage, title, description, updatedDate, publishDate } = post.data;
-const socialImage = ogImage ?? `/og-image/${post.id}.png`;
+const socialImage = ogImage ?? ogImageUrl(post.id);
 const articleDate = updatedDate?.toISOString() ?? publishDate.toISOString();
 const { headings, remarkPluginFrontmatter } = await render(post);
 const readingTime: string = remarkPluginFrontmatter.readingTime;

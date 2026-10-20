@@ -2,6 +2,7 @@
 import { type CollectionEntry, render } from "astro:content";
 import type { HTMLTag, Polymorphic } from "astro/types";
 import FormattedDate from "@/components/FormattedDate.astro";
+import { entryUrl } from "@/data/routes";
 
 type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 	note: CollectionEntry<"note">;
@@ -31,7 +32,7 @@ const { Content } = await render(note);
 			isPreview ? (
 				<a
 					class="rounded-xs outline-hidden focus-visible:ring-2 focus-visible:ring-printer-accent/40"
-					href={`/notes/${note.id}/`}
+					href={entryUrl(note)}
 				>
 					{note.data.title}
 				</a>

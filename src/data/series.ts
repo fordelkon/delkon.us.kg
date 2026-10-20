@@ -53,10 +53,6 @@ export async function getSeriesGroups(collection?: "post" | "note"): Promise<Ser
 		.toSorted((a, b) => a.id.localeCompare(b.id));
 }
 
-export function getEntryUrl(entry: SeriesEntry): string {
-	return `/${entry.collection === "post" ? "posts" : "notes"}/${entry.id}/`;
-}
-
 export async function getSeriesContext(entry: SeriesEntry): Promise<SeriesContext | undefined> {
 	const groups = await getSeriesGroups();
 

@@ -1,6 +1,7 @@
 ---
 import { getPublishedPosts } from "@/data/entries";
 import { getUniqueTagsWithCount } from "@/data/post";
+import { tagUrl } from "@/data/routes";
 import PageLayout from "@/layouts/Base.astro";
 
 const allTags = getUniqueTagsWithCount(await getPublishedPosts());
@@ -21,7 +22,7 @@ const meta = {
 				<li class="group flex items-baseline justify-between gap-4 border-b border-dotted border-printer-ink/10 py-3">
 					<a
 						class="font-serif text-base transition-colors group-hover:text-printer-accent focus-visible:text-printer-accent"
-						href={`/tags/${tag}/`}
+						href={tagUrl(tag)}
 						title={`View posts with the tag: ${tag}`}
 					>
 						<span aria-hidden="true" class="me-0.5 font-mono text-xs text-printer-ink-light">#</span>

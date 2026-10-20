@@ -1,5 +1,6 @@
 ---
-import { getEntryUrl, getSeriesContext, type SeriesEntry } from "@/data/series";
+import { entryUrl, seriesUrl } from "@/data/routes";
+import { getSeriesContext, type SeriesEntry } from "@/data/series";
 
 interface Props {
 	entry: SeriesEntry;
@@ -18,7 +19,7 @@ const context = await getSeriesContext(entry);
 		<div class="flex flex-wrap items-baseline justify-between gap-2">
 			<a
 				class="printer-link font-serif text-sm text-printer-accent"
-				href={`/series/${context.group.id}/`}
+				href={seriesUrl(context.group.id)}
 			>
 				{context.group.title}
 			</a>
@@ -31,7 +32,7 @@ const context = await getSeriesContext(entry);
 				<a
 					rel="prev"
 					class="printer-link text-printer-ink-light hover:text-printer-accent"
-					href={getEntryUrl(context.prev)}
+					href={entryUrl(context.prev)}
 				>
 					← 上一篇 · {context.prev.data.title}
 				</a>
@@ -40,7 +41,7 @@ const context = await getSeriesContext(entry);
 				<a
 					rel="next"
 					class="printer-link text-printer-ink-light hover:text-printer-accent sm:col-start-2 sm:text-right"
-					href={getEntryUrl(context.next)}
+					href={entryUrl(context.next)}
 				>
 					下一篇 · {context.next.data.title} →
 				</a>

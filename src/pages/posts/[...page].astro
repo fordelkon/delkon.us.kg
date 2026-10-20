@@ -8,6 +8,7 @@ import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
 import { getPublishedPosts, getStandalonePosts } from "@/data/entries";
 import { getPinnedPosts, getUniqueTags, groupPostsByYear, MAX_POSTS_PER_PAGE } from "@/data/post";
+import { tagUrl } from "@/data/routes";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { getPaginationProps } from "@/utils/pagination";
@@ -47,13 +48,12 @@ const meta = {
 	title: "Posts",
 };
 
+const groupedByYear = groupPostsByYear(page.data);
+const descYearKeys = Object.keys(groupedByYear).sort((a, b) => Number(b) - Number(a));
 const paginationProps = getPaginationProps(page, {
 	next: "Next Page →",
 	prev: "← Previous Page",
 });
-
-const groupedByYear = groupPostsByYear(page.data);
-const descYearKeys = Object.keys(groupedByYear).sort((a, b) => +b - +a);
 ---
 
 <PageLayout meta={meta}>
@@ -71,7 +71,7 @@ const descYearKeys = Object.keys(groupedByYear).sort((a, b) => +b - +a);
 					<li>
 						<a
 							class="printer-link font-mono text-[10px] tracking-wider text-printer-ink-light hover:text-printer-accent"
-							href={`/tags/${tag}/`}
+							href={tagUrl(tag)}
 						>
 							#{tag}
 						</a>

@@ -1,4 +1,5 @@
 ---
+import { seriesUrl } from "@/data/routes";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
@@ -12,7 +13,7 @@ const groups = await getSeriesGroups();
 			<li class="py-6">
 				<div class="flex flex-wrap items-baseline justify-between gap-3">
 					<h2 class="font-serif text-lg">
-						<a class="printer-link text-printer-accent" href={`/series/${group.id}/`}>
+						<a class="printer-link text-printer-accent" href={seriesUrl(group.id)}>
 							{group.title}
 						</a>
 					</h2>
