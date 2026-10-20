@@ -1,0 +1,17 @@
+---
+import { seriesUrl } from "@/data/routes";
+import type { SeriesContext } from "@/data/series";
+
+interface Props {
+	series: SeriesContext;
+}
+
+const { series } = Astro.props;
+---
+
+<a
+	class="inline-flex items-center rounded-sm border border-printer-ink/10 px-2 py-0.5 tabular-nums transition-colors hover:border-printer-accent/30 hover:text-printer-accent focus-visible:border-printer-accent/30 focus-visible:text-printer-accent"
+	href={seriesUrl(series.group.id)}
+>
+	{series.group.title} · 第 {series.index + 1} / {series.group.entries.length} 篇
+</a>

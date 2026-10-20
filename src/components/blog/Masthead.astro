@@ -2,16 +2,20 @@
 import { Image } from "astro:assets";
 import type { CollectionEntry } from "astro:content";
 import FormattedDate from "@/components/FormattedDate.astro";
+import SeriesBadge from "@/components/SeriesBadge.astro";
 import { tagUrl } from "@/data/routes";
+import type { SeriesContext } from "@/data/series";
 
 interface Props {
 	content: CollectionEntry<"post">;
 	readingTime: string;
+	series?: SeriesContext | undefined;
 }
 
 const {
 	content: { data },
 	readingTime,
+	series,
 } = Astro.props;
 ---
 
@@ -39,6 +43,7 @@ const {
 	<p class="tabular-nums">
 		<FormattedDate date={data.publishDate} /> · {readingTime}
 	</p>
+	{series && <SeriesBadge series={series} />}
 	{
 		data.updatedDate && (
 			<span class="rounded-sm border border-printer-ink/10 px-2 py-0.5 tabular-nums">

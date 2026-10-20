@@ -11,8 +11,10 @@ type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 const { as: Tag = "div", group } = Astro.props;
 
 // Archive "folder" row: mirrors PostPreview's row format, but the whole entry
-// links to the series page. Single-entry series show one full date instead of
-// a degenerate "20 Oct – 20 Oct" range. `year: undefined` clears the site
+// links to the series page. A left dashed rule plus the "SERIES" marker set the
+// row apart from standalone posts, like an indented entry in a printed table
+// of contents. Single-entry series show one full date instead of a degenerate
+// "20 Oct – 20 Oct" range. `year: undefined` clears the site
 // default so short ranges stay year-less.
 const firstDate = group.entries[0].data.publishDate;
 const lastDate = group.entries.at(-1).data.publishDate;
@@ -32,9 +34,11 @@ const dateRange =
 
 <a
 	href={seriesUrl(group.id)}
-	class="receipt-row group outline-hidden hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3 focus-visible:ring-2 focus-visible:ring-printer-accent/40"
+	class="receipt-row group border-s border-dashed border-printer-ink/20 ps-(--receipt-series-indent) outline-hidden hover:bg-printer-ink/3 focus-visible:bg-printer-ink/3 focus-visible:ring-2 focus-visible:ring-printer-accent/40"
 >
-	<p class="print-label text-printer-ink-light tabular-nums">{dateRange}</p>
+	<p class="print-label text-printer-ink-light tabular-nums">
+		<span class="text-printer-accent" aria-hidden="true">Series</span> · {dateRange}
+	</p>
 	<Tag class="font-serif text-base leading-snug tracking-tight text-printer-ink transition-colors group-hover:text-printer-accent sm:text-lg">
 		{group.title}
 		<span class="ms-2 print-label align-middle text-printer-ink-light">

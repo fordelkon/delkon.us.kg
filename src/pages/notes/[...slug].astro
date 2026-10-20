@@ -3,6 +3,7 @@ import { getCollection } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import Note from "@/components/note/Note.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
+import { getSeriesContext } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 import { getFormattedDate } from "@/utils/date";
 
@@ -19,6 +20,7 @@ export const getStaticPaths = (async () => {
 export type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
 const { note } = Astro.props;
+const series = await getSeriesContext(note);
 
 const meta = {
 	description:
@@ -29,6 +31,6 @@ const meta = {
 ---
 
 <PageLayout meta={meta}>
-	<Note as="h1" note={note} />
+	<Note as="h1" note={note} series={series} />
 	<SeriesNav entry={note} />
 </PageLayout>
