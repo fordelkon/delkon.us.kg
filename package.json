@@ -12,8 +12,7 @@
 		"preview": "astro preview",
 		"check": "astro check && biome check && pnpm lint:anti-slop",
 		"lint": "biome check --write && pnpm lint:anti-slop",
-		"lint:anti-slop": "oxlint --deny-warnings",
-		"format": "prettier -w . --cache"
+		"lint:anti-slop": "oxlint --deny-warnings"
 	},
 	"dependencies": {
 		"@astrojs/markdown-satteri": "^0.4.1",
