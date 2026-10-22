@@ -34,7 +34,7 @@ B: b nodes -> shared tail (c nodes) -> None
 
 下面是从初版到修正版的改动。`ListNode` 和 `Optional` 沿用题目提供的定义：
 
-```diff lang="python" title="相交链表：先判断，再推进"
+```diff lang="python"
   class Solution:
       def getIntersectionNode(self, headA: ListNode, headB: ListNode) -> Optional[ListNode]:
 -         count = 0

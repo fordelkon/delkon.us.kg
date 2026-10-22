@@ -47,7 +47,7 @@ def reverse_linked_list(head: Optional[ListNode]) -> Optional[ListNode]:
 
 快指针每次走两步，慢指针每次走一步，但“找到中点”还不够精确。这份实现需要让 `slow.next` 指向待反转的后半段，所以非空链表使用下面的推进条件：
 
-```diff lang="python" title="切分条件与后半段起点配套"
+```diff lang="python"
 -         while fast and fast.next:
 +         # Keep slow at the node just before the second half.
 +         while fast.next and fast.next.next:

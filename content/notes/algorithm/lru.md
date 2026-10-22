@@ -39,7 +39,7 @@ description: "LeetCode Hot 100 的 LRU 缓存，用 OrderedDict 实现时关于�
 
 保留原来的淘汰写法，只为已有键增加一条提前返回的路径：
 
-```diff lang="python" title="LRU 缓存修正"
+```diff lang="python"
   from collections import OrderedDict
 
   class LRUCache:
