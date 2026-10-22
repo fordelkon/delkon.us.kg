@@ -47,13 +47,13 @@ const Content = definition ? (await render(definition)).Content : null;
 			<Content />
 		</div>
 	)}
-	<ol class="mt-8 divide-y divide-dotted divide-printer-ink/15">
+	<ol class="mt-6 divide-y divide-dashed divide-printer-ink/25 sm:mt-8">
 		{group.entries.map((entry) => (
 			<li>
 				{entry.collection === "post" ? (
-					<PostPreview as="h2" post={entry} withDesc />
+					<PostPreview as="h2" post={entry} />
 				) : (
-					<Note note={entry} as="h2" isPreview />
+					<Note note={entry} as="h2" isPreview compact />
 				)}
 			</li>
 		))}
