@@ -106,7 +106,7 @@ fn main() {
 
 这里没有数据竞争：所有访问都是原子的，最坏结果也只是读到旧值 0。缺的不是原子性，而是跨对象的顺序。后果的边界值得对照：若被发布的是普通非原子数据，同样的写法就不只是读到旧值——标志位读取与数据写入之间没有 happens-before，按开头的判定条件，这已经构成数据竞争，行为未定义。Release/Acquire 要补的正是这个缺口。**没有数据竞争，是正确性的基础，不是完整证明**——第一篇的丢失更新与这里的例子都在说明这一点。`spin_loop()` 只是忙等提示，不会让线程睡眠，也不提供同步保证；实际需要长时间等待时，应考虑[条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)等阻塞工具[^7]。
 
-### Release / Acquire：发布与接收
+### Release / Acquire：发布与接收的边界
 
 只改 `READY` 的两处内存序，让设置标志的一方用 `Release`、读取标志的一方用 `Acquire`：
 
@@ -145,15 +145,13 @@ READY.store(true, Release) ────────→ READY.load(Acquire) 读�
 
 内存模型规定哪些观察结果合法。它不是要求每个操作都“立即刷新到主存”，也不承诺读到某个值所需的时间。
 
-:::note[`volatile` 不是原子操作]
-C++ 的 `volatile` 访问有必须保留的可观察副作用，但既不提供线程间原子性，也不建立 synchronizes-with 边；用普通 `volatile` 标志位发布数据，仍可能构成数据竞争[^14]。Java 的 `volatile` 写与后续对同一变量的读建立 happens-before；C# 的 volatile 读、写分别具有 acquire、release 语义。同名关键字不能跨语言套用同一保证[^15]。Rust 没有这样的 volatile 同步关键字；它提供 `read_volatile`、`write_volatile`，但这些操作同样不是原子操作，也不建立线程间同步。跨线程共享可变数据应使用原子类型、锁或封装了同步协议的接口[^16]。
-:::
-
-### 一次性发布的保证与边界
-
 沿着图中的同步链，`PAYLOAD` 的写入 happens-before 消费者对它的读取。为什么最后这次读取用 `Relaxed` 也必须得到 42？原子对象的写—读一致性要求：如果一次写入 happens-before 一次读取，读取必须取得该次写入的值，或该对象修改顺序中更晚的写入值。本例在写入 42 后没有其他写入，因此只能读到 42，初始值 0 已被排除[^4]。
 
 这个协议只发布一次。反复重置 `READY`、覆盖 `PAYLOAD`，需要另外解决轮次识别与读写重叠，不能照搬本例。消费者的保证来自标志位本身；主线程的 `join` 只是等待两个线程结束，消费者并不是先等生产者结束再启动消费。
+
+:::note[`volatile` 不是原子操作]
+C++ 的 `volatile` 访问有必须保留的可观察副作用，但既不提供线程间原子性，也不建立 synchronizes-with 边；用普通 `volatile` 标志位发布数据，仍可能构成数据竞争[^14]。Java 的 `volatile` 写与后续对同一变量的读建立 happens-before；C# 的 volatile 读、写分别具有 acquire、release 语义。同名关键字不能跨语言套用同一保证[^15]。Rust 没有这样的 volatile 同步关键字；它提供 `read_volatile`、`write_volatile`，但这些操作同样不是原子操作，也不建立线程间同步。跨线程共享可变数据应使用原子类型、锁或封装了同步协议的接口[^16]。
+:::
 
 ### 同步边不只来自原子操作
 
@@ -203,7 +201,7 @@ C++ 的 `volatile` 访问有必须保留的可观察副作用，但既不提供�
 
 ## 内存序的选择
 
-到这里，发布协议用到了 `Relaxed`、`Release` 与 `Acquire`。选择依据是什么？Rust 的 `Ordering` 提供五种内存序，其文档以 C++20 的对应语义为参照[^6]。它们不是五级单向阶梯：Acquire 与 Release 分别约束读取和写入两端，不能简单说其中一个比另一个强。前面的发布示例已经展示了 Acquire 与 Release；本节补上 Relaxed 的保证与读改写操作的内存序，下一节再讨论 SeqCst 的共同全序。
+到这里，发布协议用到了 `Relaxed`、`Release` 与 `Acquire`。选择依据是什么？Rust 的 `Ordering` 提供五种内存序，其文档以 C++20 的对应语义为参照[^6]。它们不是五级单向阶梯：Acquire 与 Release 分别约束读取和写入两端，不能简单说其中一个比另一个强。前面的发布示例已经展示了 Acquire 与 Release；本节补上 Relaxed 的保证与读改写操作的内存序，再用一把自旋锁把这些选择组装成第二篇那种完整协议，下一节再讨论 SeqCst 的共同全序。
 
 ### Relaxed：只维护原子值本身
 
@@ -244,6 +242,54 @@ fn try_claim() -> bool {
 `compare_exchange_weak` 还允许虚假失败，通常用于能够重试的循环[^3]。
 
 这里的成功只表示取得了资格。如果后面还要初始化数据，其他线程不能把 `CLAIMED == true` 当成“初始化完成”。认领与完成是两个状态——后文的 OnceLock 正是为这个缺口准备的接口。
+
+### 自旋锁：CAS 为什么需要内存序
+
+把场景从 `try_claim` 的认领标志换成第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)：锁保护的正是共享状态，获取锁就意味着要接收上一任持有者发布的修改。这样一把最小的自旋锁可以用 CAS 写出：
+
+```rust
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static LOCKED: AtomicBool = AtomicBool::new(false);
+
+fn lock() {
+    while LOCKED
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        std::hint::spin_loop();
+    }
+}
+
+fn unlock() {
+    LOCKED.store(false, Ordering::Release);
+}
+```
+
+三个内存序各对应协议的一段：
+
+- 成功路径用 `Acquire`：CAS 成功意味着取得锁，这次读取拿到的 `false` 来自上一任持有者的 `unlock` 写入。按[发布协议](#release--acquire发布与接收的边界)，两个操作建立 synchronizes-with 边，此后对受保护数据的读取可以看见上一任在解锁前的全部修改。
+- 失败路径用 `Relaxed`：CAS 失败说明锁仍被占用，线程没有取得访问受保护数据的资格，这次读取也不需要接收任何发布，自旋重试即可。
+- `unlock` 用 `Release`：为临界区内的修改建立发布的一端。
+
+完整链路与[同步边不只来自原子操作](#同步边不只来自原子操作)里锁的那张图相同，只是两个端点现在有了具体实现：
+
+```text
+线程 A（持锁）                          线程 B（自旋）
+修改共享状态
+    │ 线程内顺序
+unlock: store(false, Release) ────────→ lock: CAS 成功，读到 false
+                   synchronizes-with       │ 线程内顺序
+                                           读取共享状态，可见 A 的修改
+```
+
+前文说“解锁的作用接近 `Release`、成功加锁接近 `Acquire`”——自旋锁里这两个“接近”就是字面本身：标准锁的解锁与后续成功加锁规定的正是这类同步边[^24]。如果 `lock` 与 `unlock` 都改成 `Relaxed`，互斥仍然成立——成功路径依然只有一个线程能把 `false` 换成 `true`——但受保护数据的可见性失去了依据，这正是[原子标志与数据发布](#原子标志与数据发布)那类缺口：标志位是原子的，标志之外的数据却未必可见。
+
+:::note[自旋锁用于演示，不是使用建议]
+这个例子把等待画成自旋，是为了让 CAS 上的内存序可见。长时间等待应当让出 CPU：第二篇的[条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)在锁的保护下阻塞等待，`std::hint::spin_loop` 只是忙等提示[^7]。真实的锁实现也通常把短促自旋与系统级阻塞结合起来，而不是无限自旋。
+:::
+
+回到 `AcqRel`：获取锁只需要接收，释放锁只需要发布，两侧各自的单向内存序恰好够用。只有当同一次读改写既要接收先前的发布、又要发布自己的写入时，才轮到 `AcqRel`——它是按需拼装的结果，不是比 `Relaxed` 更安全的默认值。
 
 ## SeqCst 与顺序一致性
 
@@ -288,7 +334,9 @@ fn main() {
 
 成对同步替代不了共同全序。甚至把两次写改为 `Release`、两次读改为 `Acquire`，`(0, 0)` 仍然允许：两次读取若都读到初始值，就没有接收到对方的发布，自然也没有建立那两条同步边。
 
-到这里，五种内存序的保证都已经出现，可以汇总成一张回查表：
+### 五种内存序的回查表
+
+至此，五种内存序的保证都已经出现，可以放在一起对照：
 
 | 内存序    | 可用于的原子操作 | 保证                                                        | 需要证明的问题                             |
 | --------- | ---------------- | ----------------------------------------------------------- | ------------------------------------------ |
