@@ -21,7 +21,7 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 	<div class="relative px-(--receipt-content-inset) pt-6 pb-5 sm:pt-10">
 		<!-- Brand plate -->
 		<div class="relative mb-8 flex items-start justify-between">
-			<div class="flex items-center gap-4">
+			<brand-signature class="flex items-center gap-4">
 				<div class="brand-avatar relative">
 					{siteConfig.showLogo && <BrandOrbit />}
 					<a
@@ -34,14 +34,15 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 					</a>
 				</div>
 				<div>
-					<div class="font-mono text-sm font-bold tracking-[0.25em] text-printer-ink uppercase">
-						{siteConfig.title}
+					<div class="brand-title font-mono text-sm font-bold tracking-[0.25em] text-printer-ink uppercase">
+						<span data-brand-text>{siteConfig.title}</span>
+						<canvas aria-hidden="true" data-brand-ink></canvas>
 					</div>
 					<div class="mt-0.5 font-mono text-[9px] tracking-[0.1em] text-printer-ink-light uppercase">
 						{siteConfig.description}
 					</div>
 				</div>
-			</div>
+			</brand-signature>
 			<!-- ON indicator light -->
 			<div class="flex flex-col items-center gap-1.5" aria-hidden="true">
 				<div class="relative flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/10 dark:bg-black/40">
@@ -84,7 +85,42 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 	</div>
 </header>
 
+<script>
+	import { animateBrand } from "./brand-motion";
+
+	class BrandSignature extends HTMLElement {
+		private cleanup?: () => void;
+
+		connectedCallback() {
+			this.cleanup?.();
+			this.cleanup = animateBrand(this);
+		}
+
+		disconnectedCallback() {
+			this.cleanup?.();
+		}
+	}
+
+	if (!customElements.get("brand-signature")) {
+		customElements.define("brand-signature", BrandSignature);
+	}
+</script>
+
 <style>
+	.brand-title {
+		position: relative;
+		white-space: nowrap;
+	}
+
+	[data-brand-ink] {
+		position: absolute;
+		inset: -4px;
+		width: calc(100% + 8px);
+		height: calc(100% + 8px);
+		pointer-events: none;
+		opacity: 0;
+	}
+
 	.brand-avatar {
 		flex: 0 0 3rem;
 		width: 3rem;
