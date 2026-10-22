@@ -64,5 +64,6 @@ The deployment target is configured in [wrangler.jsonc](wrangler.jsonc). Build o
 
 - [Astro Cactus](https://github.com/chrismwilliams/astro-theme-cactus) provides the original blog foundation.
 - [nooc.me](https://nooc.me) provides the visual reference for the thermal printer design.
+- [ascii.rest](https://ascii.rest/) provides the static language logos, Tux, and 404 artwork; its MIT notice is preserved in [public/ascii/LICENSE](public/ascii/LICENSE).
 
 MIT license; see [LICENSE](LICENSE).

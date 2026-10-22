@@ -1,10 +1,18 @@
 /* Receipt rhythm is shared by both palettes. Keep spacing semantic so page
    headings, section labels, and archive groups can be tuned independently. */
 :root {
+	/* Keep the housing controls, paper content, and footer on one inset scale. */
+	--receipt-content-inset: 1.5rem;
 	--receipt-heading-gap: 0.75rem;
 	--receipt-page-heading-gap: 1.25rem;
 	--receipt-group-gap: 1rem;
 	--receipt-section-gap: 1.5rem;
 	--receipt-row-padding: 0.625rem;
 	--receipt-series-indent: 0.75rem;
+}
+
+@media (min-width: 640px) {
+	:root {
+		--receipt-content-inset: 2.5rem;
+	}
 }

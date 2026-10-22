@@ -1,0 +1,11 @@
+---
+import { asciiIcon } from "@/utils/ascii-art";
+
+interface Props {
+	name: string;
+}
+
+const source = asciiIcon(Astro.props.name);
+---
+
+{source && <span class="ascii-icon" style={`--ascii-source: url('${source}')`} aria-hidden="true" />}

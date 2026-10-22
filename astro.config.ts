@@ -9,6 +9,7 @@ import icon from "astro-icon";
 import robotsTxt from "astro-robots-txt";
 import webmanifest from "astro-webmanifest";
 import { satteriAdmonitionsPlugin } from "./src/plugins/admonitions";
+import { codeStamps } from "./src/plugins/code-stamps";
 import { satteriGithubCardPlugin } from "./src/plugins/github-cards";
 import {
 	satteriAutolinkHeadingsPlugin,
@@ -35,7 +36,7 @@ export default defineConfig({
 		domains: ["webmention.io"],
 	},
 	integrations: [
-		expressiveCode(expressiveCodeOptions),
+		expressiveCode({ ...expressiveCodeOptions, plugins: [codeStamps()] }),
 		icon(),
 		sitemap(),
 		mdx(),

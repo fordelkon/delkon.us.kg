@@ -8,6 +8,9 @@
    Tailwind theme defaults, to keep the previous cascade order. */
 @import "./tokens/printer-palette.css";
 @import "./tokens/receipt-spacing.css" layer(theme);
+/* Expressive Code emits unlayered resets; the decorative watermark must
+   share that cascade level to retain its layout and mask. */
+@import "./components/ascii-art.css";
 
 /* Native cross-document transition fallback for full page loads (e.g. when
    the ClientRouter script is unavailable). Keep this outside the cascade

@@ -1,0 +1,73 @@
+.ascii-icon {
+	display: inline-block;
+	flex-shrink: 0;
+	width: 3rem;
+	height: 2.75rem;
+	background: currentColor;
+	mask: var(--ascii-source) center / contain no-repeat;
+}
+
+.skill-inventory-row {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	min-width: 0;
+	padding: 0.75rem 0;
+	color: var(--color-printer-ink);
+}
+
+.skill-inventory-name {
+	flex: 1;
+	min-width: 0;
+}
+
+.ascii-not-found {
+	width: min(100%, 20rem);
+	height: 12rem;
+	margin-bottom: var(--receipt-section-gap);
+	background: var(--color-printer-ink);
+	mask: url("/ascii/not-found.svg") center / contain no-repeat;
+}
+
+/* Overlay the original block without reserving space or intercepting input. */
+.expressive-code .frame[data-code-stamp] > .code-watermark {
+	position: absolute;
+	inset-inline-end: 1rem;
+	inset-block-end: 1rem;
+	width: 1.75rem;
+	height: 1.5rem;
+	color: var(--color-printer-ink);
+	pointer-events: none;
+	user-select: none;
+
+	.ascii-icon {
+		display: block;
+		width: 100%;
+		height: 100%;
+		background: currentColor;
+		mask: var(--ascii-source) center / contain no-repeat;
+		opacity: 0.12;
+	}
+}
+
+/* Leave enough room for TypeScript before the fixed-width proficiency marks. */
+@media (max-width: 359px) {
+	.skill-inventory-row {
+		gap: 0.375rem;
+
+		.ascii-icon {
+			width: 2rem;
+			height: 2rem;
+		}
+	}
+
+	.skill-inventory-bars > span {
+		width: 0.625rem;
+	}
+}
+
+@media (min-width: 640px) {
+	.skill-inventory-row .ascii-icon {
+		width: 2.5rem;
+	}
+}

@@ -8,6 +8,11 @@
 	padding-block: var(--receipt-row-padding);
 }
 
+/* Index and utility-page titles share a scale; article mastheads remain larger. */
+.receipt-title {
+	@apply font-serif text-2xl font-bold tracking-tight sm:text-3xl;
+}
+
 /* Small mono chip label: font, size, tracking, and case in one class.
    (The tracking-[0.3em] variant lives in .print-label-wide below.) */
 .print-label {

@@ -1,4 +1,6 @@
 ---
+import AsciiIcon from "@/components/AsciiIcon.astro";
+
 export interface Skill {
 	name: string;
 	/** 1 = 了解, 2 = 熟悉, 3 = 熟练, 4 = 掌握 */
@@ -13,14 +15,16 @@ const { skills } = Astro.props;
 const LEVEL_LABELS = ["了解", "熟悉", "熟练", "掌握"];
 ---
 
-<ul class="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+<!-- Two columns need room for the longest name as well as the proficiency marks. -->
+<ul class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
 	{
 		skills.map((skill) => (
-			<li class="flex items-center gap-3 px-2 py-1.5">
-				<span class="w-24 shrink-0 font-mono text-[13px] text-printer-ink sm:w-28">
+			<li class="skill-inventory-row">
+				<AsciiIcon name={skill.name} />
+				<span class="skill-inventory-name font-mono text-[13px] text-printer-ink">
 					{skill.name}
 				</span>
-				<span class="flex shrink-0 gap-1" aria-hidden="true">
+				<span class="skill-inventory-bars flex shrink-0 gap-1" aria-hidden="true">
 					{[1, 2, 3, 4].map((bar) => (
 						<span
 							class:list={[
