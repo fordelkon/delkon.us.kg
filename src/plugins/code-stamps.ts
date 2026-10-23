@@ -2,8 +2,8 @@ import type { AstroExpressiveCodeOptions } from "astro-expressive-code";
 import { h } from "astro-expressive-code/hast";
 import { asciiIcon } from "../utils/ascii-art.ts";
 
-// After changing rendering hooks, run pnpm exec astro sync --force before
-// building: Astro's content cache can otherwise retain the previous markup.
+// The build command forces content sync because Astro's cached Markdown does
+// not track changes to these rendering hooks for otherwise unchanged entries.
 export function codeStamps() {
 	return {
 		name: "CodeStamps",
