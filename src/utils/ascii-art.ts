@@ -23,6 +23,7 @@ const icons = new Map([
 	["html", "html"],
 	["css", "css"],
 	["dart", "dart"],
+	["git", "git"],
 	["linux", "tux"],
 ]);
 
