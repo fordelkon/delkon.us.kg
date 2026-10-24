@@ -36,6 +36,8 @@ tags: ["concurrency", "async", "rust", "go"]
 
 下面的结构体是 PCB 的简化示意（并非可编译实现，也不对应某个内核的精确字段布局）。真实内核中的上下文保存点常在每线程的内核栈上——例如 Linux 用 `task_struct` 兼作 TCB，并不区分进程、线程两套控制块。每份控制块回答的都是同一组问题：这个执行单元是谁、能不能被调度、停在了哪里——再加上这一层特有的资源。后面两份控制块会反复出现这副骨架：
 
+:::note[深入阅读：PCB 的简化布局]
+
 ```c
 /* Simplified PCB: process-level resources and execution context */
 enum process_state { NEW, RUNNING, READY, WAITING, TERMINATED };
@@ -60,6 +62,8 @@ struct process_control_block {
 };
 ```
 
+:::
+
 ### 线程
 
 线程是进程内部的执行流，也是操作系统进行 CPU 调度的重要单位。一个进程可以包含多个线程，它们共享所属进程的虚拟地址空间、打开的文件等进程级资源，自身只保留少量私有状态：
@@ -70,6 +74,8 @@ struct process_control_block {
 - 调度状态
 
 每个线程也需要一份自己的控制块，调度器才能在进程之内单独调度和切换它们。下面的 TCB 同样只是抽象示意，它的不少字段与 PCB 对位[^9]：
+
+:::note[深入阅读：TCB 的简化布局]
 
 ```c
 /* Simplified TCB: per-thread scheduling and execution context */
@@ -85,6 +91,8 @@ struct thread_control_block {
     /* Address space and open files belong to the process. */
 };
 ```
+
+:::
 
 线程切换通常比进程切换轻量，因为不需要切换整个地址空间。多个线程可以在同一进程内执行相同的代码逻辑，只是执行位置、调用栈和运行状态彼此独立。
 
@@ -125,6 +133,8 @@ fn main() {
 
 操作系统为每个线程维护一份 TCB；把调度搬到用户态之后，这份簿记并没有消失，只是换了主人。有栈协程的运行时同样要为每个协程保存栈边界和挂起现场——Go runtime 里与 TCB 对位的结构体叫 `g`，简化后是这样[^2]（所引用的 Go 1.23.0 源码中，`atomicstatus` 是 `atomic.Uint32` 类型，示意图仍以普通整数表示）：
 
+:::note[深入阅读：Go goroutine 的简化布局]
+
 ```c
 /* Simplified Go goroutine descriptor, analogous to a TCB
    Source: Go 1.23.0, src/runtime/runtime2.go, type g struct */
@@ -143,9 +153,17 @@ struct g {
 };
 ```
 
+:::
+
 `m` 字段记录当前关联的 OS 线程；运行中的 `g` 在某个 `m` 上执行，运行时调度器负责把大量 `g` 分摊到少量线程上。这是 Go 运行时的具体设计，不是所有协程都必须采用的布局。
 
 Go 的协程是**有栈的**（stackful），需要保存私有栈与挂起现场；Rust 的 async 则是**无栈的**（stackless），它把 `async fn` 编译成保存挂起状态的 Future 状态机。这里要分清两层：Future 保存计算进行到哪里的状态，执行器仍可为任务维护调度、唤醒和生命周期信息；Tokio 就有这样的任务记录[^10]。[《并发编程（六）：异步并发与任务的生命周期》](/posts/concurrency/async-concurrency-task-lifecycle/)会继续讨论这两层如何配合。
+
+### 阻塞、挂起与唤醒
+
+线程执行阻塞式等待时，当前线程不能继续推进调用方代码；操作系统可以调度其他就绪线程。异步 Future 等待尚未就绪的操作时，可以保存进度并返回 Pending，让执行器在同一线程上推进其他任务。若在异步任务里直接调用阻塞式 I/O，占住的仍是线程。
+
+唤醒只表示等待者有机会再次推进，不表示条件必然满足，也不表示立即获得 CPU。线程的上下文切换需要操作系统保存与恢复执行现场；Future 分支的轮询切换则可以发生在同一线程内，不必每次都触发操作系统级线程切换。第六篇会解释[执行器如何处理轮询与唤醒](/posts/concurrency/async-concurrency-task-lifecycle/#执行器轮询与唤醒的循环)。
 
 ## 抢占式与协作式
 
@@ -178,12 +196,7 @@ Go 的协程是**有栈的**（stackful），需要保存私有栈与挂起现�
 
 这种方式把任务切换留在用户态，切换点也更明确，适合组织大量 I/O 等待；实际开销仍取决于运行时和任务本身。现代异步编程模型——JS 的事件循环、Rust 的 async/await、Python 的 asyncio——都是协作式并发的重要实践。
 
-关键在于"主动让出"这个动作本身。下面两个异步分支在同一个线程上推进。创建 Cargo 项目后，在 `Cargo.toml` 中加入 Tokio 依赖，将后面的 Rust 程序保存为 `src/main.rs`，用 `cargo run` 运行：
-
-```toml
-[dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
-```
+关键在于"主动让出"这个动作本身。下面两个异步分支在同一个线程上推进。
 
 ```rust
 use tokio::task::yield_now;
@@ -191,7 +204,7 @@ use tokio::task::yield_now;
 async fn first_task() {
     for i in 1..5 {
         println!("first task: {i}");
-        // Yield the task back to the runtime; join! decides which branch is polled next.
+        // Let this branch return Pending so join! can poll the other branch.
         yield_now().await;
     }
 }
@@ -210,7 +223,9 @@ async fn main() {
 }
 ```
 
-`join!` 把两个分支放在同一个任务中轮流轮询，并不创建两个并行线程[^6]。这里要区分两层：`yield_now` 让出的是整个任务——任务被放回运行时的待处理队列；分支之间的交替，则来自 `join!` 在任务被重新轮询时轮转各分支的轮询顺序。删掉两处 `yield_now().await` 后，每个分支都能在一次轮询中运行到底，因此会看到一整段 `first task`，再看到一整段 `second task`。加上让出后，在 Tokio 1.53.3 的一次运行中得到如下交错；这里只截取前四行：
+`join!` 把两个 Future 分支放在同一个任务中轮询，并不创建新任务或并行线程[^6]。Future 可以先理解为保存异步计算进度的对象；执行器轮询任务，任务内部再轮询这些分支。`yield_now().await` 让当前分支暂时返回 `Pending`，`join!` 因而有机会推进另一分支。只有外层任务也返回 `Pending`，执行权才交还执行器；组合器可能使一次让出无法一直向上传播。第六篇会展开[Future 与任务的关系](/posts/concurrency/async-concurrency-task-lifecycle/#future由-poll-推进的计算)。
+
+删掉两处 `yield_now().await` 后，每个分支都能在一次轮询中运行到底，因此会看到一整段 `first task`，再看到一整段 `second task`。加上让出后，在 Tokio 1.53.3 的一次运行中得到如下交错；这里只截取前四行：
 
 ```text
 first task: 1

@@ -22,7 +22,7 @@ tags: ["concurrency", "synchronization", "rust"]
 
 对于这里讨论的普通线程读写，C++ 的数据竞争条件是：访问同一内存位置，至少一方写入、至少一方非原子，且彼此没有 happens-before 顺序。C++ 与 Rust 都将数据竞争视为未定义行为，不能把后果限定为读到旧值或少加几次[^1]。Go 同样要求排除数据竞争，但对竞争程序的行为另有约束，不能直接套用 C++ 的结论[^2]。
 
-Rust 的安全接口通过所有权、借用与 [`Send` / `Sync` 等约束](/posts/concurrency/atomics-memory-model/#send--sync跨线程传递与共享)排除数据竞争，前提是依赖的 `unsafe` 实现遵守安全契约。这些约束不会自动排除其他竞态条件和死锁。
+Rust 的安全接口通过所有权、借用与 [`Send` / `Sync` 等约束](/posts/concurrency/locks-condvars-shared-memory-sync/#send--sync跨线程传递与共享)排除数据竞争，前提是依赖的 `unsafe` 实现遵守安全契约。这些约束不会自动排除其他竞态条件和死锁。
 
 ## 原子性违规与顺序违规
 
@@ -179,7 +179,45 @@ fn main() {
 - **loom** 用替代的同步类型探索小型 Rust 并发模型的执行，配合断言检查结果与状态不变量。它受模型规模、探索配置和支持的内存序行为限制，尤其不能声称覆盖所有 Relaxed 行为[^9]。
 - **线程栈与等待关系**适合分析卡住的程序：把“谁持有什么、正在等谁”画成**等待图**（wait-for graph），就能检查是否形成环。只有“没有输出”还不足以区分死锁、慢操作与外部依赖不可用。
 
-竞态条件同样可以通过模型断言暴露，前提是把业务要求写进检查：余额不能为负、任务不能重复领取、退出后不能继续提交。工具无法替开发者决定哪些交错结果才算正确。
+竞态条件同样可以通过模型断言暴露，前提是把业务要求写进检查。下面是一份使用 loom 替代类型的完整测试：两个线程各加一次，要求最终计数为 2；错误版本把读取与写回拆成两次原子操作[^9]。
+
+```rust
+use loom::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use loom::sync::Arc;
+use loom::thread;
+
+#[test]
+fn two_increments_preserve_both_updates() {
+    loom::model(|| {
+        let count = Arc::new(AtomicUsize::new(0));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let count = Arc::clone(&count);
+                thread::spawn(move || {
+                    let value = count.load(SeqCst);
+                    count.store(value + 1, SeqCst);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(count.load(SeqCst), 2);
+    });
+}
+```
+
+loom 可以探索到这样的交错：A 读到 0，B 也读到 0，A 写入 1，B 再写入 1；两个线程都结束后，断言看到的是 1。所有访问都使用 `SeqCst`，没有数据竞争，但两次访问之间仍能插入另一线程的操作。修复是把加一变成一次不可拆分的读—改—写：
+
+```diff lang="rust"
+                     // Keep the entire increment in one atomic operation.
+-                    let value = count.load(SeqCst);
+-                    count.store(value + 1, SeqCst);
++                    count.fetch_add(1, SeqCst);
+```
+
+修复后，同一测试检查两个更新都被保留；`SeqCst` 无需改变，错误来自操作拆分。余额不能为负、任务不能重复领取、退出后不能继续提交，也都需要写成相应检查。工具无法替开发者决定哪些交错结果才算正确。
 
 ## 总结
 
@@ -193,7 +231,7 @@ fn main() {
 ## 延伸阅读
 
 - [OSTEP: Concurrency Bugs](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-bugs.pdf)——结合原始案例继续理解并发缺陷的分类与预防
-- 不想在本机配置环境的话，Rust 代码可以放到 [Rust Playground](https://play.rust-lang.org) 运行；死锁示例会等待不返回，需要手动终止
+- 标准库 Rust 示例可以放到 [Rust Playground](https://play.rust-lang.org) 运行；死锁示例会等待不返回，需要手动终止。loom 示例是依赖该库的测试，需在支持 loom 的测试环境中执行
 
 [^1]: [C++ 标准草案：Data races](https://eel.is/c++draft/intro.races)与[Rust Reference：未定义行为](https://doc.rust-lang.org/reference/behavior-considered-undefined.html)——数据竞争的判定与未定义行为边界
 

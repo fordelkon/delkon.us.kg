@@ -17,6 +17,14 @@ tags: ["concurrency", "async", "rust", "go"]
 
 Future 也不必对应一个独立任务。`join!` 可以在同一个任务里轮询多个 Future；执行器维护的是任务的调度状态，Future 则保存计算本身的状态。
 
+### Pin / Unpin：为什么 poll 接收固定引用
+
+`Future::poll` 的接收者是 `self: Pin<&mut Self>`，而不是普通的 `&mut self`。某些 `async fn` 生成的状态机可能在挂起期间保存指向自身内部数据的引用；进入这种依赖地址的状态后，移动整个 Future 会使引用失效。`Pin` 为这类值提供固定约束：通过安全接口不能把需要固定的值从原位置移走，直到它在原处完成析构[^22]。
+
+`Unpin` 则表示类型不依赖这项约束。对 `T: Unpin`，`Pin<&mut T>` 可以安全地取得普通可变引用；不是每个 Future 都有自引用，也不是创建后就不能移动。接口统一使用 Pin，是为了让需要固定的 Future 也能安全实现同一个 trait。手动轮询时可用 `std::pin::pin!` 或 `Box::pin` 固定值，通常的 `.await` 由编译器处理相关要求。
+
+下面的 Timer 只持有 `Arc<Mutex<State>>`，自身是 `Unpin`；移动这个 Timer 不会移动 Arc 所指向的共享状态。它采用 Pin 接收者是为了满足 Future 接口，并不是这个例子自身存在自引用。
+
 ### Waker：请求再次轮询
 
 `poll` 的 `Context` 提供当前任务的 **Waker**。当等待条件发生变化时，调用 `wake()` 请求执行器再次轮询关联任务。唤醒不是“操作已经完成”的保证，再次轮询仍可能得到 `Pending`；多次唤醒也可能被合并[^2]。第三篇已[区分唤醒与内存同步](/posts/concurrency/atomics-memory-model/#唤醒与同步以-park--unpark-为例)；本节的 Waker 是另一种接口，具体保证应以 Waker 的契约为准，不能套用 park/unpark 的 token 规则。
@@ -214,6 +222,14 @@ func main() {
 
 `tokio::join!` 在当前任务内组合多个 Future，正常返回前等待全部完成，但不会因某个分支返回 `Err` 就自动停止其他分支。`tokio::spawn` 则创建独立任务，丢弃返回的 `JoinHandle` 只是放弃等待，任务仍可能在运行时存活期间继续执行；父任务结束也不会自动取消它[^10][^15]。
 
+### spawn 的 Send 与生命周期约束
+
+`tokio::spawn` 要求传入的 Future 及其输出满足 `Send + 'static`。第二篇的 [Send / Sync](/posts/concurrency/locks-condvars-shared-memory-sync/#send--sync跨线程传递与共享)讨论值能否跨线程传递；这里的 Send 要求意味着任务可能在线程间迁移，尤其需要检查跨 `.await` 保存的状态。即使使用 current-thread 运行时，`tokio::spawn` 的接口也仍然要求 Send[^23]。
+
+`'static` 不表示任务必须永远运行，而是它不能包含生命周期不足的借用。例如把拥有所有权的 String 移进任务可以满足要求；`async move` 若捕获的是一个短期借用，移入的仍然只是那个借用，不会自动延长被引用对象的生命周期。
+
+需要保留 `Rc` 等非 Send 状态时，可以在 `LocalSet` 中使用 `spawn_local`，让任务留在同一线程。它移除了 Send 要求，仍要求 Future 及输出满足 `'static`；仅把运行时改为 current-thread，并不等于已经建立本地任务上下文[^24]。同一任务内直接组合 Future 则不需要 spawn 的这组约束，但仍需遵守借用规则。
+
 ### abort 后等待结束
 
 需要从外部停止 Tokio 异步任务时，可以请求 `abort()`，再等待 JoinHandle 确认结束。下面让任务保持未完成状态，避免它在取消前已经正常结束：
@@ -238,6 +254,65 @@ async fn main() {
 
 Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃。直接组合并拥有这些 Future 时，丢弃可以停止它们继续推进；若分支持有的是 JoinHandle，丢弃句柄不会中止后台任务，若借用外部 Future，也不会销毁被借用的计算[^10]。`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
 
+### 综合示例：失败或超时后收束任务
+
+下面用 JoinSet 管理两项工作，用信号量许可代表需要释放的资源。工作函数包含模拟 I/O，也允许返回业务错误；`run` 接收同一个总体期限，成功时收集全部结果，失败或超时时停止剩余任务并等待析构完成[^18]：
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+use tokio::time::{sleep, timeout};
+
+async fn run(budget: Duration, should_fail: bool) -> Result<Vec<usize>, String> {
+    let slots = Arc::new(Semaphore::new(2));
+    let mut tasks = JoinSet::new();
+    for id in 0..2 {
+        let slots = Arc::clone(&slots);
+        tasks.spawn(async move {
+            let _permit = slots.acquire_owned().await.unwrap();
+            sleep(Duration::from_millis(10)).await;
+            if should_fail && id == 0 {
+                return Err("request failed");
+            }
+            Ok(id)
+        });
+    }
+
+    let outcome = timeout(budget, async {
+        let mut values = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            let value = result.map_err(|error| error.to_string())?
+                .map_err(str::to_owned)?;
+            values.push(value);
+        }
+        Ok::<_, String>(values)
+    }).await;
+
+    // Request cancellation and wait for every remaining task to finish dropping.
+    tasks.shutdown().await;
+    assert_eq!(slots.available_permits(), 2);
+    outcome.map_err(|_| String::from("deadline exceeded"))?
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    match run(Duration::from_millis(100), false).await {
+        Ok(mut values) => {
+            values.sort_unstable();
+            assert_eq!(values, [0, 1]);
+            println!("finished: {values:?}");
+        }
+        Err(error) => eprintln!("stopped: {error}"),
+    }
+}
+```
+
+把 `should_fail` 改为 true 可观察业务失败路径，缩短 budget 可观察超时路径；时间预算不是确定复现某种调度的工具，运行环境也可能让正常工作超时。任务完成顺序不固定，示例只在输出前排序。每条返回路径都会经过 `shutdown().await`，之后许可数量恢复；`shutdown` 会忽略收束期间子任务的 panic，若需要逐一记录这些错误，应显式 abort 后循环接收结果。
+
+这里等待的是任务持有值的同步析构，不包含异步资源善后，也不会撤销已经发生的外部副作用。若 `run` 本身被父任务丢弃，JoinSet 的析构只请求中止，不能执行后面的异步等待；需要更外层的所有者负责关停与收束。这个例子因此明确了成功、业务失败和超时三条路径，并没有声称任意父级取消都能自动清理完毕。
+
 ## 公平性与阻塞工作
 
 ### 让出与调度公平性
@@ -258,12 +333,12 @@ Tokio 的调度公平性保证本身也有条件，包括任务数量有界、�
 
 ### 异步与线程的分工
 
-| 工作类型               | 常见安排               | 需要注意的边界                                                                        |
-| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| 工作类型               | 常见安排               | 需要注意的边界                                                                                    |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------------- |
 | 大量网络等待           | 异步任务配合非阻塞 I/O | 仍需[限制任务与缓冲数量](/posts/concurrency/message-passing-workers-backpressure/#背压与队列容量) |
-| 有限时长的同步阻塞操作 | `spawn_blocking`       | 启动后不能靠 abort 强行停止                                                           |
-| 长期阻塞的常驻循环     | 独立线程与显式退出协议 | 退出时仍需等待与回收                                                                  |
-| 大量 CPU 计算          | 有界计算线程池         | 限制并行数量，避免占满异步 worker                                                     |
+| 有限时长的同步阻塞操作 | `spawn_blocking`       | 启动后不能靠 abort 强行停止                                                                       |
+| 长期阻塞的常驻循环     | 独立线程与显式退出协议 | 退出时仍需等待与回收                                                                              |
+| 大量 CPU 计算          | 有界计算线程池         | 限制并行数量，避免占满异步 worker                                                                 |
 
 Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工作无约束地交给 `spawn_blocking`。已经开始执行的阻塞闭包也不会因句柄被 abort 而中断[^17]。
 
@@ -325,3 +400,9 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 [^20]: [Tokio `Mutex`：Which kind of mutex should you use?](https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use)——同步 guard 跨 await 的死锁风险，以及异步 Mutex 允许跨 await 持有 guard 的用途
 
 [^21]: [Rust Reference：Async functions](https://doc.rust-lang.org/reference/items/functions.html#async-functions)——调用 async fn 时将参数捕获进 Future，轮询时才执行函数体
+
+[^22]: [Rust `std::pin`](https://doc.rust-lang.org/std/pin/)与[`Pin`](https://doc.rust-lang.org/std/pin/struct.Pin.html)——地址敏感状态、析构前的固定保证、Unpin 与 Future 接口
+
+[^23]: [Tokio `spawn`](https://docs.rs/tokio/latest/tokio/task/fn.spawn.html)——Future 及输出的 Send 与 static 约束，以及跨 await 保存状态的要求
+
+[^24]: [Tokio `LocalSet`](https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html)与[`spawn_local`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_local.html)——同线程非 Send 任务、本地上下文和 static 约束

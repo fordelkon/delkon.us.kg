@@ -80,74 +80,64 @@ fn main() {
 
 **任务池**（worker pool）让一组执行单元反复领取任务，而不是每来一个任务就创建一个线程；池里被复用的是执行单元，不是任务。线程池用线程作为 worker，异步任务池也可以用固定数量的异步 worker。[执行单元与任务](/posts/concurrency/parallelism-execution-units/#任务与执行单元)的生命周期由此分开；Oracle 的线程池教程用内部任务队列解释了这种复用方式[^4]。
 
-前面的 Rust 示例只有一个消费者。要让多个 worker 共同领取任务，还需检查接收端的共享方式：标准库的 `Receiver` 不能直接复制给多个 worker，可以用 `Arc<Mutex<Receiver<T>>>` 串行化领取、在锁外处理。这是一种共享接收端的适配方式，并没有把标准库通道变成原生 MPMC 接口。若确实需要原生 MPMC，Rust 生态的 crossbeam-channel 提供接收端可复制的实现，本篇示例仍以标准库为准。
+前面的 Rust 示例只有一个消费者。下面仍用标准库，让两个 worker 分摊六个任务；任务与结果通道的容量都设为 2。`Receiver` 不能直接复制给多个 worker，因此用 `Arc<Mutex<Receiver<T>>>` 串行化领取，在锁外计算。这是共享接收端的适配方式，没有把标准库通道变成原生 MPMC 接口[^2]。
+
+```rust
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+
+fn main() {
+    let (task_tx, task_rx) = mpsc::sync_channel::<usize>(2);
+    let (result_tx, result_rx) = mpsc::sync_channel(2);
+    let task_rx = Arc::new(Mutex::new(task_rx));
+
+    thread::scope(|scope| {
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let task_rx = Arc::clone(&task_rx);
+                let result_tx = result_tx.clone();
+                scope.spawn(move || loop {
+                    let task = {
+                        let receiver = task_rx.lock().unwrap();
+                        receiver.recv()
+                    }; // Release the lock before computing or sending.
+                    let Ok(id) = task else { break };
+                    result_tx.send((id, id * id)).unwrap();
+                })
+            })
+            .collect();
+        drop(result_tx);
+
+        let producer = scope.spawn(move || {
+            for id in 0..6 {
+                task_tx.send(id).unwrap();
+            }
+            drop(task_tx);
+        });
+
+        // Drain results while the producer is still submitting tasks.
+        let mut results: Vec<_> = result_rx.into_iter().collect();
+        producer.join().unwrap();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        results.sort_unstable();
+        assert_eq!(results, vec![(0, 0), (1, 1), (2, 4), (3, 9), (4, 16), (5, 25)]);
+    });
+}
+```
+
+显式块让接收锁只覆盖 `recv()`；等待任务时会持锁，但取到任务后就释放，另一个 worker 可以领取下一项并在锁外计算。结果顺序不固定，排序后与完整预期列表比较，检查六项结果各出现一次；它不保证两个 worker 恰好均分任务，也不证明某次运行发生了并行执行。
+
+提交与收集应同时推进：任务足够多时，如果主线程先提交全部任务，再接收结果，结果队列可能先满，worker 堵在发送上，不再领取任务；任务队列随后也满，主线程就无法完成提交。这里单独启动提交线程，主线程持续取结果，解除这条等待环。提交结束时丢弃任务发送端，worker 排空任务后退出并丢弃各自的结果发送端；主线程提前丢弃原始 `result_tx`，所以结果迭代最终也能结束。最后显式 `join` 提交线程和全部 worker，确认生命周期完成。示例用 `unwrap()` 让意外断连或线程 panic 暴露为失败。
 
 ### fan-out / fan-in：分工与汇总
 
 **流水线**（pipeline）把工作拆成由通道连接的阶段。一个阶段可以有多个 worker：它们从同一输入领取工作，称为 **fan-out**；把多个输出合并为一个输出，称为 **fan-in**。这里的 fan-out 是分摊任务，每条消息由一个接收者取走，并非广播[^6]。
 
-下面改用允许多个接收者共享通道的 Go，直接展示分工与汇总：两个 `square` 从同一通道领取数据，正是任务池“固定 worker 反复领取任务”的最小雏形。完整程序参考 Go 官方流水线示例：`gen` 产生数据，两个 `square` 分摊计算，`merge` 汇总结果。
+前面的 Rust 任务池已经体现了分摊与汇总：两个 worker 领取同一输入，再把结果发送到同一结果通道。Go 官方[流水线示例](https://go.dev/blog/pipelines)采用另一种拓扑：`gen` 产生数据，两个 `sq` 从同一输入分摊计算，各自输出到独立通道，再由 `merge` 汇总。任务池强调执行单元复用，fan-out / fan-in 强调数据怎样分流与合流，两种视角可以描述同一个系统[^6]。
 
-```go
-package main
-
-import (
-	"fmt"
-	"sync"
-)
-
-func gen(nums ...int) <-chan int {
-	out := make(chan int)
-	go func() {
-		defer close(out)
-		for _, n := range nums {
-			out <- n
-		}
-	}()
-	return out
-}
-
-func square(in <-chan int) <-chan int {
-	out := make(chan int)
-	go func() {
-		defer close(out)
-		for n := range in {
-			out <- n * n
-		}
-	}()
-	return out
-}
-
-func merge(inputs ...<-chan int) <-chan int {
-	out := make(chan int)
-	var wg sync.WaitGroup
-	wg.Add(len(inputs))
-	for _, in := range inputs {
-		go func(in <-chan int) {
-			defer wg.Done()
-			for n := range in {
-				out <- n
-			}
-		}(in)
-	}
-	go func() {
-		wg.Wait() // Close only after all forwarding sends have finished.
-		close(out)
-	}()
-	return out
-}
-
-func main() {
-	in := gen(2, 3, 4, 5)
-	for n := range merge(square(in), square(in)) {
-		fmt.Println(n)
-	}
-}
-```
-
-输出应包含 4、9、16、25，各一次，顺序不固定。多个 worker 可以并发推进，但这份输出不能证明某次运行一定发生了并行执行。
-
-本例使用无缓冲通道：每次发送都要等待接收者。Go 中向已关闭通道发送会 panic，因此 `merge` 必须在全部转发结束后关闭输出。关闭通道在 Go 里是一套固定规则：只有发送方应关闭通道，发送方多于一个时需要单独约定关闭时机；重复关闭同一个通道会 panic；关闭之后接收仍可继续，取完缓冲中的值后得到零值，`v, ok := <-ch` 形式返回 `ok == false`，`for range` 随之结束；`nil` 通道的发送与接收都会永远阻塞，在 `select` 中相应分支永远不会就绪。Rust 标准库通道则通过最后一个发送端被丢弃表示不再有消息；两种机制都需要明确谁负责结束发送[^2][^6][^13]。
+这里引入 Go，是因为它允许多个接收者直接共享通道，且后面可以用 `select` 清楚展示取消信号与数据发送之间的选择。Go 的结束协议需要另行说明：向已关闭通道发送、重复关闭通道都会 panic，因此应由发送方负责关闭；多个发送者共享输出时，需由协调者确认全部发送结束后再关闭，官方 `merge` 就用 `WaitGroup` 等待所有转发结束。关闭后仍可取完缓冲中的值，随后接收得到零值，`v, ok := <-ch` 返回 `ok == false`，`for range` 随之结束；`nil` 通道的发送与接收都会永远阻塞，在 `select` 中相应分支永远不会就绪。Rust 标准库通道通过最后一个发送端被丢弃表示不再有消息；两种机制都需要明确结束发送的责任[^2][^6][^13]。
 
 ## 背压与队列容量
 
@@ -215,7 +205,7 @@ async fn main() {
 
 ## 提前退出与取消
 
-限制队列和资源占用后，还要处理下游不再需要结果的情况。前面的流水线依赖下游持续消费，直到所有输出关闭。如果下游只取一个结果就离开，上游可能永远卡在发送上：goroutine 既无法推进也无法被回收，这类问题称为 **goroutine 泄漏**（goroutine leak）。扩大缓冲只对已知的剩余消息量有效，不能替代退出协议[^6]。
+限制队列和资源占用后，还要处理下游不再需要结果的情况。前面的 Rust 任务池持续收集到结果通道断连，并等待全部线程结束。这里转向 Go 官方流水线讨论的另一种情形：下游只取一个结果就停止接收，又没有通知上游退出，上游便可能永远卡在发送上。goroutine 无法推进也不会自动被回收，这类问题称为 **goroutine 泄漏**（goroutine leak）。扩大缓冲只对已知的剩余消息量有效，不能替代退出协议[^6]。
 
 Go 可以关闭一个独立的 `done` 通道广播取消，让发送者同时等待“可以发送”或“下游已退出”。这个“同时等待”由 **`select`** 语句实现：没有 `default` 分支时，它阻塞到某个分支可以执行；多个分支同时就绪时随机选择一个，避免固定偏序；存在 `default` 分支时不再阻塞，没有就绪分支就执行 `default`[^13]。标准库还提供 `time.After` 等以通道形式出现的定时信号，常与 `select` 搭配实现超时，[超时的系统讨论](/posts/concurrency/async-concurrency-task-lifecycle/#timeout-与-select)留到下一篇。下面用单阶段示例保留这个机制，并等待生产者确认退出：
 

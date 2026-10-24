@@ -27,6 +27,8 @@ tags: ["concurrency", "synchronization", "rust", "cpp"]
 | 条件变量 | 释放锁并等待通知，返回前重新获取锁 | 等待队列非空或生产结束 |
 | Barrier  | 等待约定数量的参与者到达           | 在阶段之间会合         |
 
+信号量可以先理解为一组可领取的许可：获取操作（传统名称 P）在有许可时取走一个，没有许可时等待；归还操作（V）增加可用许可，并使等待者有机会继续。初始为 1 可用于互斥，初始为 0 可用于等待另一方发出事件；具体数据发布保证仍需查看接口契约[^1]。
+
 原子操作与一次性初始化留到[《并发编程（三）：原子操作与内存模型》](/posts/concurrency/atomics-memory-model/)；管理资源许可的**信号量**（Semaphore）留到[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)。信号量既可用于限制并发数量，也可用于互斥或事件排序，并不只属于“协调”一侧[^1]。
 
 ## 保护共享状态
@@ -34,6 +36,17 @@ tags: ["concurrency", "synchronization", "rust", "cpp"]
 ### Mutex：独占访问
 
 **互斥锁**（Mutex）让遵守同一加锁协议的线程独占访问共享状态。Rust 里常配合 `Arc` 使用：`Arc` 提供共享所有权，`Mutex` 控制内部数据的访问；单独使用 `Arc` 不会让任意内部数据自动具备线程安全性[^2]。
+
+#### Send / Sync：跨线程传递与共享
+
+Rust 用两项类型约束区分“能转移给另一线程”与“能被多个线程共享”：
+
+- `Send`：值的所有权可以安全地转移到另一线程。
+- `Sync`：可以安全地跨线程共享引用；精确定义是 `T: Sync` 当且仅当 `&T: Send`[^14]。
+
+`Rc<T>` 的引用计数不支持并发更新，不能因为内部装了 Mutex 就跨线程传递；`Arc<T>` 使用原子引用计数，但只解决共享所有权，内部数据仍需满足相应约束。`Mutex<T>` 在 `T: Send` 时实现 `Sync`，不要求 `T` 自身也实现 `Sync`，因为锁把内部访问串行化[^15]。
+
+`Send`、`Sync` 是没有方法的自动 trait，编译器通常根据组成字段推导它们；手工实现需要 `unsafe impl` 并承担安全性证明。它们不保证没有死锁，也不替调用方证明业务协议正确。类型允许跨线程使用，具体访问仍需遵守锁或原子操作的同步协议。
 
 先把上一篇的计数器改成正确的同步版本。四个线程各加 1000 次，最后必须得到 4000：
 
@@ -383,7 +396,7 @@ fn main() {
 
 不可变性要覆盖对象可观察到的状态，而不只是字段名或引用本身。Java 的简单构造策略包括限制修改入口、使用 `private final` 字段、防止子类改变行为，以及对可变成员做防御性复制；仅仅给一个指向可变列表的字段加上 `final`，并不会让列表内容不可变[^12]。
 
-Rust 的所有权与借用规则提供了另一种约束：普通共享引用限制修改，可变借用要求独占。`Cell<T>`、`RefCell<T>`、`Mutex<T>` 与原子类型都能提供内部可变性，允许通过共享引用修改内部状态。但内部可变性不等于跨线程共享安全：`Cell<T>`、`RefCell<T>` 不实现 `Sync`，而锁与原子类型为跨线程访问提供相应的同步协议。`Send`、`Sync` 约束值或引用能否安全地跨线程传递；这组约束的职责，第三篇的[Send / Sync](/posts/concurrency/atomics-memory-model/#send--sync跨线程传递与共享)展开[^13]。
+Rust 的所有权与借用规则提供了另一种约束：普通共享引用限制修改，可变借用要求独占。`Cell<T>`、`RefCell<T>`、`Mutex<T>` 与原子类型都能提供内部可变性，允许通过共享引用修改内部状态。但内部可变性不等于跨线程共享安全：`Cell<T>`、`RefCell<T>` 不实现 `Sync`，而锁与原子类型为跨线程访问提供相应的同步协议。`Send`、`Sync` 约束值或引用能否安全地跨线程传递；这组约束的职责，见前面的 [Send / Sync](#send--sync跨线程传递与共享)[^13]。
 
 计数器、缓存、连接池仍需要变化。对这些状态，可以集中所有权，让其他任务通过消息请求更新，而不是共同修改；也可以让线程处理互不重叠的数据，最后汇总结果。[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#消息传递与状态所有权)会沿着这个方向继续。
 
@@ -428,3 +441,7 @@ Rust 的所有权与借用规则提供了另一种约束：普通共享引用限
 [^12]: [Java Tutorial: Immutable Objects](https://docs.oracle.com/javase/tutorial/essential/concurrency/immutable.html)与[构造不可变对象的策略](https://docs.oracle.com/javase/tutorial/essential/concurrency/imstrat.html)——不可变性的并发收益与一种简单构造策略
 
 [^13]: [Rust `std::cell`](https://doc.rust-lang.org/std/cell/)与[`Sync`](https://doc.rust-lang.org/std/marker/trait.Sync.html)——内部可变性，以及跨线程共享引用的类型约束
+
+[^14]: [Rust `Send`](https://doc.rust-lang.org/std/marker/trait.Send.html)与[`Sync`](https://doc.rust-lang.org/std/marker/trait.Sync.html)——跨线程所有权与引用的安全条件、自动实现与手工实现的责任
+
+[^15]: [Rust `Arc`：Thread Safety](https://doc.rust-lang.org/std/sync/struct.Arc.html#thread-safety)与[`Mutex` trait 实现](https://doc.rust-lang.org/std/sync/struct.Mutex.html#trait-implementations)——共享所有权与数据同步的区别，以及 `Mutex<T>` 的 Send/Sync 条件
