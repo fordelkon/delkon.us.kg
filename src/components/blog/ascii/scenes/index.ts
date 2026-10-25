@@ -2,6 +2,7 @@ import { atomicCounter } from "./atomic-counter.ts";
 import { awaitState } from "./await-state.ts";
 import { deadlock } from "./deadlock.ts";
 import { mutexCounter } from "./mutex-counter.ts";
+import { recursionStack } from "./recursion-stack.ts";
 import { scheduling } from "./scheduling.ts";
 import { workerPool } from "./worker-pool.ts";
 
@@ -12,11 +13,12 @@ const scenes = {
 	deadlock: deadlock,
 	"worker-pool": workerPool,
 	"await-state": awaitState,
+	"recursion-stack": recursionStack,
 };
 
 export type SceneId = keyof typeof scenes;
 
-/** Build compact, source-authored diagrams; no Rust code executes in the player. */
+/** Build compact, source-authored diagrams; example code never executes in the player. */
 export function getScene(id: SceneId) {
 	const scene = scenes[id];
 	const height = Math.max(...scene.frames.map((frame) => frame.rows.length));
