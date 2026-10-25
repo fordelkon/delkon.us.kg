@@ -82,10 +82,11 @@
 }
 .ascii-explainer-canvas[data-playback="running"] .ascii-explainer-frame {
 	opacity: 0;
-	animation: ascii-explainer-frame 2s steps(1, end) forwards;
+	animation: ascii-explainer-frame var(--ascii-frame-duration) steps(1, end);
 }
 .ascii-explainer-canvas[data-playback="running"] .ascii-explainer-frame:last-child {
 	animation-name: ascii-explainer-final;
+	animation-fill-mode: forwards;
 }
 .ascii-explainer-frame .ascii-explainer-active {
 	color: var(--color-printer-accent);

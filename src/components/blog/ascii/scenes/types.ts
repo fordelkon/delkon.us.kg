@@ -1,6 +1,9 @@
 export interface Frame {
 	rows: string[];
 	active: number[];
+	durationMs?: number;
+	// One optional span per row; start is inclusive and end is exclusive.
+	emphasis?: { row: number; start: number; end: number }[];
 }
 
 export interface Scene {

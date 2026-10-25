@@ -3,7 +3,6 @@ import { awaitState } from "./await-state.ts";
 import { deadlock } from "./deadlock.ts";
 import { mutexCounter } from "./mutex-counter.ts";
 import { scheduling } from "./scheduling.ts";
-import type { Scene } from "./types.ts";
 import { workerPool } from "./worker-pool.ts";
 
 const scenes = {
@@ -18,7 +17,7 @@ const scenes = {
 export type SceneId = keyof typeof scenes;
 
 /** Build compact, source-authored diagrams; no Rust code executes in the player. */
-export function getScene(id: SceneId): Scene {
+export function getScene(id: SceneId) {
 	const scene = scenes[id];
 	const height = Math.max(...scene.frames.map((frame) => frame.rows.length));
 
@@ -27,17 +26,37 @@ export function getScene(id: SceneId): Scene {
 	return {
 		description: scene.description,
 		frames: scene.frames.map((frame) => {
+			const durationMs = frame.durationMs ?? 2000;
+
+			if (!Number.isFinite(durationMs) || durationMs <= 0)
+				throw new Error(`ASCII scene ${id} has an invalid frame duration`);
+
 			if (frame.rows.some((row) => row.length > 35 || /[^\x20-\x7e]/.test(row)))
 				throw new Error(`ASCII scene ${id} exceeds its 35-column grid`);
 
 			if (frame.active.some((row) => row < 0 || row >= frame.rows.length))
 				throw new Error(`ASCII scene ${id} has an invalid highlight`);
 
+			const emphasis = frame.emphasis ?? [];
+
+			if (
+				new Set(emphasis.map((mark) => mark.row)).size !== emphasis.length ||
+				emphasis.some(
+					(mark) =>
+						mark.row < 0 ||
+						mark.row >= frame.rows.length ||
+						mark.start < 0 ||
+						mark.end > 35 ||
+						mark.start >= mark.end,
+				)
+			)
+				throw new Error(`ASCII scene ${id} has an invalid highlight span`);
+
 			const rows = Array.from({ length: height }, (_, index) =>
 				(frame.rows[index] ?? "").padEnd(35),
 			);
 
-			return { rows, active: frame.active };
+			return { rows, active: frame.active, emphasis, durationMs };
 		}),
 	};
 }

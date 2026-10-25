@@ -8,17 +8,31 @@ interface Props {
 const { scene: sceneId } = Astro.props;
 const { description, frames: sceneFrames } = getScene(sceneId);
 
-const frames = sceneFrames.map((frame) =>
-	frame.rows
-		.map((row, index) => {
-			const escaped = row.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+function escapeHtml(text: string) {
+	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
 
-			return frame.active.includes(index)
-				? `<span class="ascii-explainer-active">${escaped}</span>\n`
-				: `${escaped}\n`;
+let elapsedMs = 0;
+
+const frames = sceneFrames.map((frame) => {
+	const html = frame.rows
+		.map((row, index) => {
+			if (frame.active.includes(index))
+				return `<span class="ascii-explainer-active">${escapeHtml(row)}</span>\n`;
+
+			const mark = frame.emphasis?.find((span) => span.row === index);
+
+			if (!mark) return `${escapeHtml(row)}\n`;
+
+			return `${escapeHtml(row.slice(0, mark.start))}<span class="ascii-explainer-active">${escapeHtml(row.slice(mark.start, mark.end))}</span>${escapeHtml(row.slice(mark.end))}\n`;
 		})
-		.join(""),
-);
+		.join("");
+
+	const rendered = { html, delayMs: elapsedMs, durationMs: frame.durationMs };
+	elapsedMs += frame.durationMs;
+
+	return rendered;
+});
 ---
 
 <figure class="ascii-explainer not-prose" data-scene={sceneId} data-pagefind-ignore>
@@ -52,11 +66,11 @@ const frames = sceneFrames.map((frame) =>
 			</svg>
 		</button>
 		<div class="ascii-explainer-visual" role="img" aria-label={description}>
-			{frames.map((frame, index) => <pre
+			{frames.map((frame) => <pre
 				class="ascii-explainer-frame"
-				style={`animation-delay: ${index * 2}s`}
+				style={`animation-delay: ${frame.delayMs}ms; --ascii-frame-duration: ${frame.durationMs}ms`}
 				aria-hidden="true"
-				set:html={frame}
+				set:html={frame.html}
 			></pre>)}
 		</div>
 	</ascii-explainer>

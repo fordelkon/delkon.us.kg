@@ -83,6 +83,17 @@ class AsciiExplainerElement extends HTMLElement {
 		const playing = this.dataset.playback === "running" && !paused && !this.#finished;
 		this.toggleAttribute("data-paused", paused);
 		this.toggleAttribute("data-playing", playing);
+
+		// Resume may use Animation.play(), so also synchronize imperative play state.
+		if (this.dataset.playback === "running" && !this.#finished) {
+			for (const frame of this.querySelectorAll(".ascii-explainer-frame")) {
+				for (const animation of frame.getAnimations()) {
+					if (paused && animation.playState === "running") animation.pause();
+					else if (!paused && animation.playState === "paused") animation.play();
+				}
+			}
+		}
+
 		const button = this.querySelector<HTMLButtonElement>("button");
 
 		if (button) {
@@ -95,18 +106,15 @@ class AsciiExplainerElement extends HTMLElement {
 	#replay() {
 		this.#observer?.disconnect();
 		this.#visible = true;
-		this.dataset.playback = "running";
 		this.#paused = false;
 		this.#finished = false;
-		this.#syncControl();
 
-		// Reset the same CSS timeline, including each frame's staggered delay.
-		for (const frame of this.querySelectorAll(".ascii-explainer-frame")) {
-			for (const animation of frame.getAnimations()) {
-				animation.currentTime = 0;
-				animation.play();
-			}
-		}
+		// Completed non-final frames have no fill and leave getAnimations().
+		// Flush removal before recreating every CSS timeline in one paint.
+		this.dataset.playback = "waiting";
+		void this.offsetWidth;
+		this.dataset.playback = "running";
+		this.#syncControl();
 	}
 
 	#start() {
