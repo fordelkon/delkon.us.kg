@@ -1,0 +1,71 @@
+---
+import { getScene, type SceneId } from "./scenes/index";
+
+interface Props {
+	scene: SceneId;
+}
+
+const { scene: sceneId } = Astro.props;
+const { description, frames: sceneFrames } = getScene(sceneId);
+
+const frames = sceneFrames.map((frame) =>
+	frame.rows
+		.map((row, index) => {
+			const escaped = row.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+			return frame.active.includes(index)
+				? `<span class="ascii-explainer-active">${escaped}</span>\n`
+				: `${escaped}\n`;
+		})
+		.join(""),
+);
+---
+
+<figure class="ascii-explainer not-prose" data-scene={sceneId} data-pagefind-ignore>
+	<ascii-explainer class="ascii-explainer-canvas">
+		<button
+			class="ascii-explainer-toggle"
+			type="button"
+			aria-label="播放 ASCII 演示"
+			title="播放"
+			hidden
+		>
+			<svg
+				class="ascii-explainer-play"
+				width="14"
+				height="14"
+				viewBox="0 0 16 16"
+				fill="currentColor"
+				aria-hidden="true"
+			>
+				<path d="M4 2.5v11l9-5.5z" />
+			</svg>
+			<svg
+				class="ascii-explainer-pause"
+				width="14"
+				height="14"
+				viewBox="0 0 16 16"
+				fill="currentColor"
+				aria-hidden="true"
+			>
+				<path d="M4 3h3v10H4zM10 3h3v10h-3z" />
+			</svg>
+		</button>
+		<div class="ascii-explainer-visual" role="img" aria-label={description}>
+			{frames.map((frame, index) => <pre
+				class="ascii-explainer-frame"
+				style={`animation-delay: ${index * 2}s`}
+				aria-hidden="true"
+				set:html={frame}
+			></pre>)}
+		</div>
+	</ascii-explainer>
+</figure>
+
+<script>
+	import "./playback";
+</script>
+
+<style is:global>
+	@import "./styles.css";
+</style>

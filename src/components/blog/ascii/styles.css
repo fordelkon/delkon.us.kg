@@ -1,0 +1,124 @@
+.ascii-explainer {
+	margin: 0 0 var(--receipt-section-gap, 2rem);
+	padding: 0;
+	color: var(--color-printer-ink);
+}
+.ascii-explainer-canvas {
+	display: block;
+	position: relative;
+	width: 100%;
+	max-width: 100%;
+	margin-inline: auto;
+	padding-top: 1.5rem;
+	font-family: var(--font-mono);
+	font-size: clamp(0.625rem, 2.65vw, 0.875rem);
+}
+.ascii-explainer-visual {
+	display: grid;
+	justify-items: center;
+}
+.ascii-explainer-toggle {
+	position: absolute;
+	inset-block-start: -0.25rem;
+	inset-inline-end: 0;
+	display: grid;
+	place-items: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	padding: 0;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: var(--color-printer-ink-light);
+	cursor: pointer;
+	touch-action: manipulation;
+}
+.ascii-explainer-pause {
+	display: none;
+}
+.ascii-explainer-canvas[data-playing] .ascii-explainer-play {
+	display: none;
+}
+.ascii-explainer-canvas[data-playing] .ascii-explainer-pause {
+	display: block;
+}
+.ascii-explainer-toggle[hidden] {
+	display: none;
+}
+.ascii-explainer-toggle:focus-visible {
+	outline: 2px solid var(--color-printer-accent);
+	outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+	.ascii-explainer-toggle:hover {
+		color: var(--color-printer-ink);
+	}
+}
+.ascii-explainer-frame {
+	grid-area: 1 / 1;
+	width: 35ch;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	font-family: var(--font-mono);
+	font-size: clamp(0.625rem, 2.65vw, 0.875rem);
+	font-variant-ligatures: none;
+	line-height: 1.65;
+	white-space: pre;
+	overflow-wrap: normal;
+	word-break: normal;
+	text-align: left;
+	opacity: 0;
+}
+.ascii-explainer-frame:last-child {
+	opacity: 1;
+}
+.ascii-explainer-canvas[data-playback="waiting"] .ascii-explainer-frame {
+	opacity: 0;
+}
+.ascii-explainer-canvas[data-playback="waiting"] .ascii-explainer-frame:first-child {
+	opacity: 1;
+}
+.ascii-explainer-canvas[data-playback="running"] .ascii-explainer-frame {
+	opacity: 0;
+	animation: ascii-explainer-frame 2s steps(1, end) forwards;
+}
+.ascii-explainer-canvas[data-playback="running"] .ascii-explainer-frame:last-child {
+	animation-name: ascii-explainer-final;
+}
+.ascii-explainer-frame .ascii-explainer-active {
+	color: var(--color-printer-accent);
+	font-weight: 700;
+}
+.ascii-explainer-canvas[data-paused] .ascii-explainer-frame {
+	animation-play-state: paused;
+}
+/* Play once and retain the scene's conclusion, including blocked terminal states. */
+@keyframes ascii-explainer-frame {
+	0% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes ascii-explainer-final {
+	0%,
+	100% {
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce), print {
+	.ascii-explainer-toggle {
+		display: none;
+	}
+	.ascii-explainer-canvas[data-playback] .ascii-explainer-frame,
+	.ascii-explainer-canvas[data-playback] .ascii-explainer-frame:first-child {
+		animation: none;
+		opacity: 0;
+	}
+	.ascii-explainer-canvas[data-playback] .ascii-explainer-frame:last-child {
+		opacity: 1;
+	}
+}
