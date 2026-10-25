@@ -17,6 +17,15 @@
 	display: grid;
 	justify-items: center;
 }
+.ascii-explainer-caption {
+	max-width: 32em;
+	margin: 1rem auto 0;
+	color: var(--color-printer-ink-light);
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	text-align: center;
+	text-wrap: pretty;
+}
 .ascii-explainer-toggle {
 	position: absolute;
 	inset-block-start: -0.25rem;
@@ -56,7 +65,7 @@
 }
 .ascii-explainer-frame {
 	grid-area: 1 / 1;
-	width: 35ch;
+	width: calc(var(--ascii-columns) * 1ch);
 	margin: 0;
 	padding: 0;
 	border: 0;

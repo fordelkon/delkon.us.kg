@@ -6,7 +6,7 @@ interface Props {
 }
 
 const { scene: sceneId } = Astro.props;
-const { description, frames: sceneFrames } = getScene(sceneId);
+const { caption, description, width, frames: sceneFrames } = getScene(sceneId);
 
 function escapeHtml(text: string) {
 	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -20,11 +20,15 @@ const frames = sceneFrames.map((frame) => {
 			if (frame.active.includes(index))
 				return `<span class="ascii-explainer-active">${escapeHtml(row)}</span>\n`;
 
-			const mark = frame.emphasis?.find((span) => span.row === index);
+			let cursor = 0;
+			let html = "";
 
-			if (!mark) return `${escapeHtml(row)}\n`;
+			for (const mark of frame.emphasis.filter((span) => span.row === index)) {
+				html += `${escapeHtml(row.slice(cursor, mark.start))}<span class="ascii-explainer-active">${escapeHtml(row.slice(mark.start, mark.end))}</span>`;
+				cursor = mark.end;
+			}
 
-			return `${escapeHtml(row.slice(0, mark.start))}<span class="ascii-explainer-active">${escapeHtml(row.slice(mark.start, mark.end))}</span>${escapeHtml(row.slice(mark.end))}\n`;
+			return `${html}${escapeHtml(row.slice(cursor))}\n`;
 		})
 		.join("");
 
@@ -36,7 +40,7 @@ const frames = sceneFrames.map((frame) => {
 ---
 
 <figure class="ascii-explainer not-prose" data-scene={sceneId} data-pagefind-ignore>
-	<ascii-explainer class="ascii-explainer-canvas">
+	<ascii-explainer class="ascii-explainer-canvas" style={`--ascii-columns: ${width}`}>
 		<button
 			class="ascii-explainer-toggle"
 			type="button"
@@ -74,6 +78,7 @@ const frames = sceneFrames.map((frame) => {
 			></pre>)}
 		</div>
 	</ascii-explainer>
+	<figcaption class="ascii-explainer-caption">{caption}</figcaption>
 </figure>
 
 <script>

@@ -10,7 +10,7 @@ export function getPostExplainer(postId: string): SceneId | undefined {
 		case "concurrency/locks-condvars-shared-memory-sync":
 			return "mutex-counter";
 		case "concurrency/atomics-memory-model":
-			return "atomic-counter";
+			return "atomic-publication";
 		case "concurrency/deadlock-livelock-correctness":
 			return "deadlock";
 		case "concurrency/message-passing-workers-backpressure":

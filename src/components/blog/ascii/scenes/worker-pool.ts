@@ -4,6 +4,7 @@ type Worker = 0 | 1;
 
 type Event =
 	| { kind: "send"; job: number }
+	| { kind: "wait"; job: number }
 	| { kind: "receive"; worker: Worker }
 	| { kind: "finish"; worker: Worker }
 	| { kind: "collect" };
@@ -17,6 +18,7 @@ const events: Event[] = [
 	{ kind: "receive", worker: 1 },
 	{ kind: "send", job: 2 },
 	{ kind: "send", job: 3 },
+	{ kind: "wait", job: 4 },
 	{ kind: "finish", worker: 1 },
 	{ kind: "receive", worker: 1 },
 	{ kind: "send", job: 4 },
@@ -43,6 +45,7 @@ function buildFrames(): Frame[] {
 	const results: number[] = [];
 	const collected: number[] = [];
 	const sent = new Set<number>();
+	let pending: number | undefined;
 	const slots = (values: number[]) => `[${values[0] ?? " "}|${values[1] ?? " "}]`;
 
 	const queue = (label: string, values: number[], prefix = "       ") =>
@@ -56,14 +59,35 @@ function buildFrames(): Frame[] {
 		const emphasis: NonNullable<Frame["emphasis"]> = [];
 		let incoming = "     +-----------+-----------+";
 		let outgoing = "     +-----------+-----------+";
+		let status = "queue Q=2 / workers W=2";
 
-		if (event?.kind === "send") active.push(0);
+		if (event?.kind === "send") {
+			const start = 16 + (jobs.length - 1) * 2;
+			emphasis.push({ row: 0, start: 0, end: 6 }, { row: 0, start, end: start + 1 });
+			status = `send(${event.job}) -> queued`;
+		}
 
-		if (event?.kind === "collect") active.push(6, 7, 8);
+		if (event?.kind === "wait") {
+			emphasis.push({ row: 0, start: 15, end: 20 });
+			status = `send(${event.job}) stays with producer`;
+		}
+
+		if (event?.kind === "collect") {
+			emphasis.push(
+				{ row: 6, start: 15, end: 20 },
+				{ row: 7, start: 17, end: 18 },
+				{ row: 8, start: 21, end: 24 },
+			);
+			status =
+				collected.length === 6
+					? "6/6 collected / workers reused"
+					: "collect -> drain a result slot";
+		}
 
 		if (event?.kind === "receive" || event?.kind === "finish") {
 			const left = event.worker === 0;
-			emphasis.push({ row: 4, start: left ? 0 : 24, end: left ? 11 : 35 });
+			const workerStart = left ? 2 : 26;
+			emphasis.push({ row: 4, start: workerStart, end: workerStart + worker(event.worker).length });
 			emphasis.push({
 				row: event.kind === "receive" ? 3 : 5,
 				start: left ? 5 : 17,
@@ -71,13 +95,31 @@ function buildFrames(): Frame[] {
 			});
 
 			if (event.kind === "receive") {
-				active.push(2);
+				emphasis.push(
+					{ row: 0, start: 15, end: 20 },
+					{ row: 1, start: 17, end: 18 },
+					{ row: 2, start: 13, end: 22 },
+				);
 				incoming = left ? "     v-----------+-----------+" : "     +-----------+-----------v";
+				status = `W${event.worker}: receive -> compute`;
 			} else {
-				active.push(6);
+				const start = 16 + (results.length - 1) * 2;
+				emphasis.push({ row: 6, start, end: start + 1 });
 				outgoing = left ? "     +---------->v-----------+" : "     +-----------v<----------+";
+				status = `W${event.worker}: finish -> result queued`;
 			}
 		}
+
+		const footer =
+			pending !== undefined
+				? `send(${pending}): ${jobs.length === 2 ? "FULL -> WAIT" : "SLOT FREE -> resume"}`
+				: event?.kind === "send" && event.job === 4
+					? "send(4) resumed in the free slot"
+					: "capacity=2 / worker count=2";
+
+		if (pending !== undefined || (event?.kind === "send" && event.job === 4)) active.push(10);
+
+		if (event) active.push(9);
 
 		// Hold the important states; transfer steps remain quick and discrete.
 		const bothBusy = workers.every((job) => job !== undefined);
@@ -85,6 +127,8 @@ function buildFrames(): Frame[] {
 
 		if (!event) durationMs = 1200;
 		else if (collected.length === 6) durationMs = 1500;
+		else if (event.kind === "wait" || (event.kind === "receive" && pending !== undefined))
+			durationMs = 2200;
 		else if (jobs.length === 2 && results.length === 2 && bothBusy) durationMs = 1800;
 		else if (jobs.length === 2 && results.length === 0 && bothBusy) durationMs = 1400;
 		else if (event.kind === "receive" && event.worker === 0 && collected.length > 0)
@@ -102,6 +146,8 @@ function buildFrames(): Frame[] {
 				queue("results", results),
 				event?.kind === "collect" ? "                 v" : "                 |",
 				center(`collected: ${collected.length}/6`, 35),
+				center(status, 35),
+				center(footer, 35),
 			],
 			active,
 			emphasis,
@@ -113,9 +159,20 @@ function buildFrames(): Frame[] {
 	for (const event of events) {
 		switch (event.kind) {
 			case "send":
-				if (jobs.length === 2 || sent.has(event.job)) throw new Error("Invalid worker-pool send");
+				if (
+					jobs.length === 2 ||
+					sent.has(event.job) ||
+					(pending !== undefined && pending !== event.job)
+				)
+					throw new Error("Invalid worker-pool send");
 				jobs.push(event.job);
 				sent.add(event.job);
+				pending = undefined;
+				break;
+			case "wait":
+				if (jobs.length !== 2 || pending !== undefined || sent.has(event.job))
+					throw new Error("Invalid worker-pool backpressure");
+				pending = event.job;
 				break;
 			case "receive": {
 				if (workers[event.worker] !== undefined || !jobs.length)
@@ -149,16 +206,44 @@ function buildFrames(): Frame[] {
 
 		if (owned.length !== sent.size || new Set(owned).size !== owned.length)
 			throw new Error("Worker-pool job ownership mismatch");
-		frames.push(snapshot(event));
+
+		// Simulate every handoff, but show only the causal milestones in the introduction.
+		if (
+			(event.kind === "send" && [1, 3, 4, 5].includes(event.job)) ||
+			event.kind === "wait" ||
+			(event.kind === "receive" && pending !== undefined) ||
+			collected.length === 6
+		)
+			frames.push({ ...snapshot(event), durationMs: 2200 });
 	}
 
-	if (collected.length !== 6) throw new Error("Incomplete worker-pool scene");
+	if (collected.length !== 6 || pending !== undefined)
+		throw new Error("Incomplete worker-pool scene");
+
+	frames.push({
+		rows: [
+			"BACKPRESSURE / RECAP",
+			"",
+			"send(4) --> [2|3] --> W0 / W1",
+			"   WAIT      FULL      BUSY",
+			"     ^        |",
+			"     +--------+",
+			"",
+			"W1 takes 2 -> a slot opens",
+			"send(4) resumes -> [3|4]",
+			"",
+			"Bound the queue; reuse workers",
+			"6/6 results collected",
+		].map((row) => center(row, 35)),
+		active: [3, 7, 8],
+	});
 
 	return frames;
 }
 
 export const workerPool: Scene = {
+	caption: "队列满时，发送者等待；worker 领取后腾出空位，压力由此传回上游。",
 	description:
-		"两个固定 worker 处理编号 0 到 5 的六个任务。每帧只发生一次发送、领取、完成或收集，接收通过同一把 recv 锁串行进行，计算在锁外。W0 仍持有任务 0 时，W1 已依次领取任务 1、2、3；任务和结果缓冲都能同时积压两项。结果槽展示任务编号，最终逐项收齐六份结果。这只是一种可能调度，动画停留时间不表示计算耗时，也不展开关闭通道和线程退出。",
+		"两个固定 worker 处理任务 0 到 5，任务与结果队列容量均为 2。两位 worker 忙碌且任务队列积压 2、3 时，send(4) 等待，4 此时仍在发送者手里；W1 完成并领取 2 后腾出空位，4 才能入队。recv 锁只覆盖领取，计算在锁外；结果持续收集，槽内展示任务编号，最终收齐六份。这是一种可能调度，停留时间不表示耗时，不展开关闭和退出。",
 	frames: buildFrames(),
 };

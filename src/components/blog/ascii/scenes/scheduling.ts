@@ -1,43 +1,39 @@
-import type { Scene } from "./types.ts";
+import { center, type Scene } from "./types.ts";
 
-const progress = [
-	{ preemptive: "[A][A]", cause: "", cooperative: "[A][A]", yield: "", active: [1, 5] },
-	{
-		preemptive: "[A][A]|[B]",
-		cause: "      ^ timer",
-		cooperative: "[A][A][A]",
-		yield: "",
-		active: [1, 2],
-	},
-	{
-		preemptive: "[A][A]|[B][B]",
-		cause: "      ^ timer",
-		cooperative: "[A][A][A]o[B]",
-		yield: "         ^ yield / Pending",
-		active: [5, 6],
-	},
-	{
-		preemptive: "[A][A]|[B][B]|[A]",
-		cause: "      ^ timer",
-		cooperative: "[A][A][A]o[B][B]o[A]",
-		yield: "         ^ yield / Pending",
-		active: [1, 5],
-	},
-];
+const trace = ["A", "B", "B", "A"];
 
 export const scheduling: Scene = {
+	caption: "并发让多个任务交错推进；有多个执行资源时，它们还可以并行。",
 	description:
-		"对比两种切换机制：操作系统可在 A 未主动让出时抢占线程；同一任务内 join! 的 Future 分支在让出点给另一分支推进机会。图示一种可能交错，不保证严格轮换；await 已就绪时可以直接继续。",
-	frames: progress.map((phase) => ({
-		rows: [
-			"PREEMPTIVE / OS threads",
-			phase.preemptive,
-			phase.cause,
-			"",
-			"COOPERATIVE / join! branches",
-			phase.cooperative,
-			phase.yield,
-		],
-		active: phase.active,
-	})),
+		"一种可能的执行轨迹，横向是时间，每格表示正在执行的任务。单核先后执行 A、B、B、A，同一时刻只执行一个；双核各运行一个任务，同一列的 A 与 B 同时执行。高亮逐列推进，再保留完整轨迹。切换可以来自抢占，也可以来自协作式让出，不保证严格轮换；格子不代表耗时测量。",
+	frames: [1, 2, 3, 4, 4].map((count, index) => {
+		const complete = index === 4;
+		const start = 11 + (count - 1) * 3;
+
+		return {
+			durationMs: complete ? 2400 : 1800,
+			rows: [
+				center("CONCURRENT / 1 CPU", 30),
+				"            1  2  3  4 time ->",
+				`    CPU 0  ${trace
+					.slice(0, count)
+					.map((task) => `[${task}]`)
+					.join("")}`,
+				center("one task at a time", 30),
+				"",
+				center("PARALLEL / 2 CPUs", 30),
+				`    CPU 0  ${"[A]".repeat(count)}`,
+				`    CPU 1  ${"[B]".repeat(count)}`,
+				center("same column = same time", 30),
+				"",
+				center("switch: preempt OR yield", 30),
+			],
+			active: complete ? [3, 8] : [],
+			emphasis: [2, 6, 7].map((row) => ({
+				row,
+				start: complete ? 11 : start,
+				end: complete ? 23 : start + 3,
+			})),
+		};
+	}),
 };

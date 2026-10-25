@@ -1,86 +1,94 @@
 import { center, type Scene } from "./types.ts";
 
 const phases = [
-	{ depth: 1, entered: 1, children: "????", value: 3, event: "call sumTo(3): save n=3", active: 2 },
-	{ depth: 2, entered: 2, children: "????", value: 2, event: "call sumTo(2): save n=2", active: 4 },
-	{ depth: 3, entered: 3, children: "????", value: 1, event: "call sumTo(1): save n=1", active: 6 },
-	{ depth: 4, entered: 4, children: "????", value: 0, event: "call sumTo(0): save n=0", active: 8 },
 	{
-		depth: 4,
-		entered: 4,
-		children: "????",
-		value: 0,
-		event: "base case: return 0 -> w0",
-		active: 11,
+		depth: 1,
+		returned: 0,
+		event: "call: save n=3, wait for child",
+		emphasis: [{ row: 2, start: 2, end: 21 }],
+	},
+	{
+		depth: 2,
+		returned: 0,
+		event: "call: save n=2, wait for child",
+		emphasis: [
+			{ row: 3, start: 4, end: 5 },
+			{ row: 4, start: 4, end: 23 },
+		],
 	},
 	{
 		depth: 3,
-		entered: 4,
-		children: "????",
-		value: 0,
-		event: "pop: release frame, keep bytes",
-		active: 8,
+		returned: 0,
+		event: "call: save n=1, wait for child",
+		emphasis: [
+			{ row: 5, start: 6, end: 7 },
+			{ row: 6, start: 6, end: 25 },
+		],
 	},
-	{ depth: 3, entered: 4, children: "??0?", value: 0, event: "resume: w0 -> child", active: 6 },
-	{ depth: 3, entered: 4, children: "??0?", value: 1, event: "child + n: 0 + 1 -> w0", active: 11 },
 	{
-		depth: 2,
-		entered: 4,
-		children: "??0?",
-		value: 1,
-		event: "pop: release frame, keep bytes",
-		active: 6,
+		depth: 4,
+		returned: 0,
+		event: "base case: return 0",
+		emphasis: [
+			{ row: 7, start: 8, end: 9 },
+			{ row: 8, start: 8, end: 27 },
+		],
 	},
-	{ depth: 2, entered: 4, children: "?10?", value: 1, event: "resume: w0 -> child", active: 4 },
-	{ depth: 2, entered: 4, children: "?10?", value: 3, event: "child + n: 1 + 2 -> w0", active: 11 },
 	{
-		depth: 1,
-		entered: 4,
-		children: "?10?",
-		value: 3,
-		event: "pop: release frame, keep bytes",
-		active: 4,
+		depth: 4,
+		returned: 1,
+		event: "resume n=1: child 0 + 1 = 1",
+		emphasis: [
+			{ row: 7, start: 26, end: 27 },
+			{ row: 6, start: 6, end: 31 },
+		],
 	},
-	{ depth: 1, entered: 4, children: "310?", value: 3, event: "resume: w0 -> child", active: 2 },
-	{ depth: 1, entered: 4, children: "310?", value: 6, event: "child + n: 3 + 3 -> w0", active: 11 },
 	{
-		depth: 0,
-		entered: 4,
-		children: "310?",
-		value: 6,
-		event: "done: sumTo(3) = 6; stack restored",
-		active: 10,
+		depth: 4,
+		returned: 2,
+		event: "resume n=2: child 1 + 2 = 3",
+		emphasis: [
+			{ row: 5, start: 26, end: 27 },
+			{ row: 4, start: 4, end: 31 },
+		],
+	},
+	{
+		depth: 4,
+		returned: 3,
+		event: "resume n=3: child 3 + 3 = 6",
+		emphasis: [
+			{ row: 3, start: 26, end: 27 },
+			{ row: 2, start: 2, end: 31 },
+			{ row: 10, start: 2, end: 31 },
+		],
 	},
 ];
 
 export const recursionStack: Scene = {
+	caption: "递进时各层保留自己的 n；命中基本情况后，子调用的返回值逐层参与加法。",
 	description:
-		"sumTo(3) 的精简栈帧示意，不表示精确字节布局。高地址在上，栈向下增长，SP 标记已分配区域的低地址边界。每层保存自己的 n 和返回地址 RA；递归层的 resume 都表示同一处调用之后的指令。问号表示 child 尚未初始化。到达 n=0 后，结果通过 w0 返回；父层恢复后才写入 child，再加上本层 n。出栈只回收空间，标记 free 的旧值仍残留，但不再属于存活变量。最终返回 6，所有帧均已释放。",
-	frames: phases.map((phase) => {
-		const border = "+------------------------+";
-		const rows = [center("sumTo(3) / STACK grows down", 35), `    ${border}`];
-
-		for (let index = 0; index < 4; index++) {
-			const saved = `n=${3 - index} child=${phase.children[index]}`;
-
-			const contents =
-				index >= phase.entered
-					? ". . . . . . . . . . ."
-					: index >= phase.depth
-						? `${saved} [free]`
-						: `${saved} RA=${index === 0 ? "caller" : "resume"}`;
-
-			rows.push(`    |${contents.padEnd(24)}|`);
-			rows.push(`${phase.depth === index + 1 ? "SP >" : "    "}${border}`);
-		}
-
-		if (phase.depth === 0) rows[1] = `SP >${border}`;
-		rows.push(center(phase.event, 35), center(`w0=${phase.value}   ?=unset   free=released`, 35));
-
-		return {
-			rows,
-			active: [phase.active],
-			durationMs: 1600,
-		};
-	}),
+		"sumTo(3) 的逻辑调用与返回轨迹，保留已发生的步骤，不是同一时刻的内存快照。依次调用 3、2、1、0，每层保留各自的 n 和返回后待做的加法；0 返回后，1 计算 0+1=1，2 计算 1+2=3，3 计算 3+3=6。返回按后进先出顺序进行，基本情况只结束最内层调用。",
+	frames: phases.map((phase) => ({
+		durationMs: 1600,
+		rows: [
+			center("sumTo(3) / CALL AND RETURN TRACE", 33),
+			"call: save n         return: add n",
+			`  [n=3]${phase.returned >= 3 ? " <---------------- 3+3=6" : " ... child + 3"}`,
+			phase.depth >= 2 ? "    v                     ^" : "",
+			phase.depth >= 2
+				? `    [n=2]${phase.returned >= 2 ? " <-------------- 1+2=3" : " ... child + 2"}`
+				: "",
+			phase.depth >= 3 ? "      v                   ^" : "",
+			phase.depth >= 3
+				? `      [n=1]${phase.returned >= 1 ? " <------------ 0+1=1" : " ... child + 1"}`
+				: "",
+			phase.depth >= 4 ? "        v                 ^" : "",
+			phase.depth >= 4 ? "        [n=0] -- base --> 0" : "",
+			"",
+			phase.returned === 3 ? center("result: ((0 + 1) + 2) + 3 = 6", 33) : "",
+			center(phase.event, 33),
+		],
+		active: [11],
+		emphasis: phase.emphasis,
+	})),
 };
