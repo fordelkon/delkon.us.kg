@@ -28,6 +28,7 @@
 		"astro-webmanifest": "^1.0.0",
 		"cssnano": "^9.0.4",
 		"hastscript": "^9.0.0",
+		"katex": "^0.19.1",
 		"mdast-util-directive": "^3.0.0",
 		"mdast-util-to-hast": "^13.2.1",
 		"mdast-util-to-markdown": "^2.1.2",

@@ -11,6 +11,7 @@ import webmanifest from "astro-webmanifest";
 import { satteriAdmonitionsPlugin } from "./src/plugins/admonitions";
 import { codeStamps } from "./src/plugins/code-stamps";
 import { satteriGithubCardPlugin } from "./src/plugins/github-cards";
+import { satteriMathPlugin } from "./src/plugins/math";
 import {
 	satteriAutolinkHeadingsPlugin,
 	satteriExternalLinksPlugin,
@@ -79,6 +80,7 @@ export default defineConfig({
 		processor: satteri({
 			features: {
 				directive: true,
+				math: true,
 				// Footnotes are on by default; only the labels are localized here.
 				// Keep clobberPrefix at its "user-content-" default — it guards
 				// footnote ids against DOM clobbering (docs/footnote-backlink-research.md §1.3).
@@ -92,6 +94,7 @@ export default defineConfig({
 			mdastPlugins: [
 				satteriUnwrapImagesPlugin(),
 				satteriReadingTimePlugin(),
+				satteriMathPlugin(),
 				satteriGithubCardPlugin(),
 				satteriAdmonitionsPlugin(),
 			],

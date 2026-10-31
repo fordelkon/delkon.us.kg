@@ -3,6 +3,7 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "katex/dist/katex.min.css";
 /* Printer colour tokens: @property registrations, @theme mappings, dark-mode
    swaps, and the theme-switch transition. Imported here, unlayered after the
    Tailwind theme defaults, to keep the previous cascade order. */
@@ -135,6 +136,7 @@
 	@import "./components/github-card.css";
 	@import "./components/receipt.css";
 	@import "./components/footnotes.css";
+	@import "./components/math.css";
 
 	/* Warm-faded filter for images inside printed prose */
 	.prose img {
