@@ -4,9 +4,9 @@ publishDate: "2026-10-25T14:00:00+08:00"
 description: "LeetCode 18 的四数之和，先用 Python 明确逐层去重，再用 C++ 精确上下界剪枝和 64 位求和减少无效扫描。"
 ---
 
-[LeetCode 18. 四数之和](https://leetcode.cn/problems/4sum/)要求从一个数组选出四个**不同位置**，返回所有和为 `target` 的**不重复数值四元组**。以 `[-2, -1, 0, 0, 1, 2]`、目标 0 为例，答案包括 `[-2, -1, 1, 2]`、`[-2, 0, 0, 2]`、`[-1, 0, 0, 1]`：两个 `0` 来自不同位置，可以同时使用；只是不允许把同一组数值返回两次。
+[LeetCode 18. 四数之和](https://leetcode.cn/problems/4sum/)要求从一个数组选出四个不同位置，返回所有和为 `target` 的**不重复数值四元组**。以 `[-2, -1, 0, 0, 1, 2]`、目标 0 为例，答案包括 `[-2, -1, 1, 2]`、`[-2, 0, 0, 2]`、`[-1, 0, 0, 1]`：两个 `0` 来自不同位置，可以同时使用；只是不允许把同一组数值返回两次。
 
-[《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/)只需返回一组**原数组下标**，适合扫描时用哈希表查补数。[《三数之和：排序去重与频次压缩》](/notes/algorithm/three-sum/)需要列出全部去重的**数值组合**，因而先排序、固定一个数，再用双指针找剩下两个。四数之和沿用后者的返回约定：排序后固定 `i`、再固定 `j`，只在 `j` 右侧的区间搜索最后两个数。
+[《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/)只需返回一组原数组下标，适合扫描时用哈希表查补数。[《三数之和：排序去重与频次压缩》](/notes/algorithm/three-sum/)需要列出全部去重的数值组合，因而先排序、固定一个数，再用双指针找剩下两个。四数之和沿用后者的返回约定：排序后固定 `i`、再固定 `j`，只在 `j` 右侧的区间搜索最后两个数。
 
 ## Python：每层只跳过本层的重复首项
 
@@ -50,7 +50,7 @@ class Solution:
 
 ## C++：用确切上下界提前结束扫描
 
-原地排序后，可以用**不同位置**算出当前 `i` 所能达到的最小、最大四数和。最小值已超过目标时，继续增大 `i` 只会更大，可以 `break`；最大值仍小于目标时，只能 `continue`，让下一次选择更大的首项。固定 `(i, j)` 后也做同样判断。这些界限准确反映可选位置，比把单个端点乘以剩余个数得到的宽松界限更紧。
+原地排序后，可以用不同位置算出当前 `i` 所能达到的最小、最大四数和。最小值已超过目标时，继续增大 `i` 只会更大，可以 `break`；最大值仍小于目标时，只能 `continue`，让下一次选择更大的首项。固定 `(i, j)` 后也做同样判断。这些界限准确反映可选位置，比把单个端点乘以剩余个数得到的宽松界限更紧。
 
 ```cpp
 #include <algorithm>
@@ -79,12 +79,13 @@ public:
             for (int j = i + 1; j < n - 2; ++j) {
                 if (j > i + 1 && nums[j] == nums[j - 1]) continue;
 
-                const long long localMin = 1LL * nums[i] + nums[j]
-                                      + nums[j + 1] + nums[j + 2];
-                if (localMin > goal) break;
-                const long long localMax = 1LL * nums[i] + nums[j]
-                                      + nums[n - 2] + nums[n - 1];
-                if (localMax < goal) continue;
+                // Apply the same tight bounds after fixing the second anchor j.
+                const long long min_sum = 1LL * nums[i] + nums[j]
+                                        + nums[j + 1] + nums[j + 2];
+                if (min_sum > goal) break;
+                const long long max_sum = 1LL * nums[i] + nums[j]
+                                        + nums[n - 2] + nums[n - 1];
+                if (max_sum < goal) continue;
 
                 int left = j + 1;
                 int right = n - 1;
@@ -110,10 +111,12 @@ public:
 };
 ```
 
-四项相加可能超出 32 位 `int` 的范围；`1LL * nums[i]` 在**第一次加法之前**就提升运算类型，不能等到四项都加完再转换。原地排序省去 Python 版的数组副本，但会改变输入；`std::sort` 的比较次数保证为最坏 O(n log n)，但辅助栈空间取决于实现[^cpp-sort]；输出仍要占 O(R) 空间。即使用了上下界剪枝，最坏仍是 O(n³) 时间；遇到很快就能排除的区间，才可能减少实际双指针扫描。是否比无剪枝版更快，要在相同数据和编译条件下测量，不能从代码长度直接推断。
+四项相加可能超出 32 位 `int` 的范围；`1LL * nums[i]` 在第一次加法之前就提升运算类型，不能等到四项都加完再转换[^cpp-promotion]。原地排序省去 Python 版的数组副本，但会改变输入；`std::sort` 的比较次数保证为最坏 O(n log n)，但辅助栈空间取决于实现[^cpp-sort]；输出仍要占 O(R) 空间。即使用了上下界剪枝，最坏仍是 O(n³) 时间；遇到很快就能排除的区间，才可能减少实际双指针扫描。是否比无剪枝版更快，要在相同数据和编译条件下测量，不能从代码长度直接推断。
 
 四数之和的关键不是记住四层循环，而是让**位置约束与去重层级**配套：固定项只在自己的层内去重，双指针只在命中后跳过已输出的数值对。剪枝再利用排序后的最左、最右可选位置，不改变这套正确性条件。
 
 [^python-sorted]: [Python 文档：`sorted`](https://docs.python.org/3/library/functions.html#sorted)——说明它返回新列表，不修改传入的数组。
+
+[^cpp-promotion]: [cppreference：算术运算符与常用算术转换](https://en.cppreference.com/w/cpp/language/operator_arithmetic.html)——说明有符号整数溢出属于未定义行为；先与 `1LL` 相乘可将后续加法提升为 `long long`。
 
 [^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对原范围排序，最坏 O(n log n) 次比较；未规定辅助栈空间。

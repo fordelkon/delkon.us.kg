@@ -4,9 +4,9 @@ publishDate: "2026-10-20T12:00:00+08:00"
 description: "LeetCode Hot 100 的 LRU 缓存，用 OrderedDict 实现时关于假值陷阱与时序更新的踩坑记录。"
 ---
 
-[LeetCode 146. LRU 缓存](https://leetcode.cn/problems/lru-cache/)（Hot 100）。缓存满了以后，应该淘汰哪一项？**最近最少使用**（LRU, Least Recently Used）的规则是淘汰最久未使用的键：`get` 命中、`put` 更新和 `put` 新增都算一次使用，未命中的查询不改变顺序。题目要求两个操作的平均时间复杂度均为 O(1)，并保证容量为正整数。
+[LeetCode 146. LRU 缓存](https://leetcode.cn/problems/lru-cache/)（Hot 100）要求实现固定容量的缓存：缓存满了以后，淘汰**最近最少使用**（LRU, Least Recently Used）的键，`get` 命中、`put` 更新和 `put` 新增都算一次使用，未命中的查询不改变顺序。题目要求两个操作的平均时间复杂度均为 O(1)，并保证容量为正整数。
 
-经典做法是「哈希表 + 双向链表」：哈希表按键找到节点，双向链表维护使用顺序，拿到节点后就能在 O(1) 时间内摘下并接到末尾。这里先用 Python 的 `collections.OrderedDict` 表达同样的顺序约定：从头到尾，由最久未使用排到最近使用。
+经典做法是「哈希表 + 双向链表」：哈希表像[《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/)那样按键做平均 O(1) 定位，双向链表维护使用顺序；拿到节点后就能在 O(1) 时间内原地改写前后指针，把节点摘下并接到表头，而不必像[《回文链表：把判定拆成三个指针原语》](/notes/algorithm/palindrome-linked-list/)中的单链表那样只能顺着 `next` 单向推进。这里先用 Python 的 `collections.OrderedDict` 表达同样的顺序约定：从头到尾，由最久未使用排到最近使用。
 
 - `move_to_end(key)`：把已有键移到末尾，记录刚发生的访问。
 - `popitem(last=False)`：移除并返回最前面的键值对，用于淘汰[^ordered-dict]。
@@ -90,6 +90,7 @@ class LRUCache {
     };
 
     int capacity_;
+    // Circular sentinel: dummy_.next is most recent, dummy_.prev is least recent.
     Node dummy_{0, 0};
     std::unordered_map<int, Node *> key_to_node_;
 
@@ -159,8 +160,12 @@ public:
 
 沿用上面的容量 2 示例：`put(2, 200)` 命中时只更新值并把节点移到最新端，不会误删键 1；`put(1, 100)` 使键 2 成为最久未使用；随后 `put(3, 30)` 新增节点，淘汰尾部的键 2。`touch` 同时服务于 `get` 命中和 `put` 更新，两条路径不会遗漏顺序刷新。
 
-链表摘除与插入都是 O(1)，哈希表查找、插入和删除平均 O(1)，所以两种操作平均 O(1)，额外空间 O(capacity)；哈希冲突严重时不保证最坏 O(1)。新增节点与哈希表可能分配内存，淘汰节点会释放内存。插入哈希表前用 `unique_ptr` 临时持有新节点，插入失败时也不会泄漏；析构函数释放仍在缓存中的节点，禁止复制以免两个缓存共同持有同一批裸指针。相比限制键范围的数组直索引，这份实现保留了通用性，并没有声称在所有负载下都更快。
+链表摘除与插入都是 O(1)，哈希表查找、插入和删除平均 O(1)，所以两种操作平均 O(1)，额外空间 O(capacity)；哈希冲突严重时不保证最坏 O(1)。新增节点与哈希表可能分配内存，淘汰节点会释放内存。插入哈希表前用 `std::make_unique` 临时持有新节点，`emplace` 失败时也不会泄漏[^make-unique][^unordered-emplace]；析构函数释放仍在缓存中的节点，禁止复制以免两个缓存共同持有同一批裸指针。相比限制键范围的数组直索引，这份实现保留了通用性，并没有声称在所有负载下都更快。
 
 [^ordered-dict]: [Python 文档：OrderedDict](https://docs.python.org/3/library/collections.html#ordereddict-objects)——说明端点移动、按顺序弹出，以及保留或调整已有键位置的行为。
 
 [^truth-value]: [Python 文档：真值检测与字典操作](https://docs.python.org/3/library/stdtypes.html#truth-value-testing)——说明 `0`、`None` 的真值；同页字典章节说明 `get` 的默认返回值与成员检查。
+
+[^make-unique]: [cppreference：`std::make_unique`](https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique.html)——说明用独占智能指针包装动态分配，在调用 `release()` 移交所有权前若发生异常会自动释放节点。
+
+[^unordered-emplace]: [cppreference：`unordered_map::emplace`](https://en.cppreference.com/w/cpp/container/unordered_map/emplace.html)——说明原位插入键值对，若插入期间抛出异常则容器保持原状。

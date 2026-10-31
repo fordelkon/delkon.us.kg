@@ -89,6 +89,7 @@ class Solution {
 public:
     std::vector<int> twoSum(std::vector<int>& nums, int target) {
         std::size_t capacity = 1;
+        // Keep load factor <= 0.5 with a power-of-two capacity so linear probing always terminates.
         while (capacity < nums.size() * 2) capacity *= 2;
         std::vector<Slot> table(capacity);
         const std::size_t mask = capacity - 1;
@@ -106,6 +107,7 @@ public:
             }
 
             std::size_t pos = bucket(nums[i]) & mask;
+            // Stop at an empty slot or an existing duplicate so the earliest index is preserved.
             while (table[pos].index != -1 && table[pos].value != nums[i])
                 pos = (pos + 1) & mask;
             if (table[pos].index == -1) table[pos] = {nums[i], i};
@@ -119,9 +121,11 @@ public:
 
 这一版把散落的节点换成连续槽位，代价是每次都要分配并初始化约 `2n` 至 `4n` 个槽位。小数组或很早命中的输入可能因此更慢；重复值多时也未必能抵消清表成本。平均时间 O(n)、空间 O(n)，碰撞极端密集时最坏时间可能达到 O(n²)。要判断值不值得换，需在目标环境里对**完整函数**测试不同长度、重复率和命中位置，而不能只比较一次哈希查找。
 
-[《三数之和：排序去重与频次压缩》](/notes/algorithm/three-sum/)与[《四数之和：两层固定与双指针的剪枝边界》](/notes/algorithm/four-sum/)的目标不同：它们要返回所有不重复的数值元组，因此会先排序，再在有序后缀内用双指针。两数之和的哈希表解法负责返回原始下标，不应直接拿来替换那个双指针子问题。
+同样是边扫描边在哈希表里查找差值，[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)要统计所有满足条件的前缀起点，因此表中记录的是出现频次而非单个下标。而[《三数之和：排序去重与频次压缩》](/notes/algorithm/three-sum/)与[《四数之和：两层固定与双指针的剪枝边界》](/notes/algorithm/four-sum/)的目标是返回所有不重复的数值元组，会先排序，再在有序后缀内用双指针；两数之和的哈希表解法负责返回原始下标，不应直接拿来替换那个双指针子问题。
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明成员检查按键判断，下标赋值写入对应值。
+
+[^unordered-reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按预期元素数调整桶数及负载因子，不保证无碰撞。
 
 [^unordered-emplace]: [cppreference：`unordered_map::emplace`](https://en.cppreference.com/w/cpp/container/unordered_map/emplace.html)——说明键已存在时不插入，原映射值保持不变。
 
@@ -130,5 +134,3 @@ public:
 [^vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明普通 `vector` 的元素连续存储；这里槽位类型为 `Slot`，不是特化的 `vector<bool>`。
 
 [^hash-mix]: [hash-prospector：`lowbias32`](https://github.com/skeeto/hash-prospector)——列出用于 32 位整数混合的移位步骤与乘数；它不是通用哈希表性能保证。
-
-[^unordered-reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按预期元素数调整桶数及负载因子，不保证无碰撞。

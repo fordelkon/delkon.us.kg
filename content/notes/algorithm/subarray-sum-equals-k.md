@@ -80,10 +80,10 @@ public:
 
 `++prefix_count[prefix]` 在这个位置执行一次查找或插入：前缀已存在就递增，缺失时先插入值初始化为 0 的频次再递增[^unordered-subscript]。它必须位于查询之后，才能排除空区间。题目数组长度不超过 20000，非空子数组至多 `n(n + 1)/2 = 200010000` 个，因此最终转换回 `int` 在题目约束内安全；如果把接口用于更大的输入，应把返回类型也改成 64 位。
 
-预留容量可能增加峰值内存，哈希桶和节点也比一段紧凑的前缀数组更占空间；它减少重新散列，却不会消除碰撞或保证在所有负载上更快。每个元素只做常数次哈希操作，所以平均 O(n) 时间、O(n) 空间。与 [《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/) 相比，两题都在扫描时查找一个差值，但这里表中保存的是**前缀出现次数**：一个终点可能对应多个合法起点，找到一次匹配不能提前返回。
+预留容量可能增加峰值内存，哈希桶和节点也比一段紧凑的前缀数组更占空间；它减少重新散列，却不会消除碰撞或保证在所有负载上更快。每个元素只做常数次哈希操作，所以平均 O(n) 时间、O(n) 空间。与[《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/)相比，两题都在扫描时查找一个差值，但这里表中保存的是**前缀出现次数**：一个终点可能对应多个合法起点，找到一次匹配不能提前返回。
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明 `get(key, default)` 在键缺失时返回指定的默认值。
 
-[^unordered-subscript]: [cppreference：`unordered_map::operator[]`](https://en.cppreference.com/w/cpp/container/unordered_map/operator_at.html)——说明缺失的键会被插入，`int` 映射值先初始化为 0。
-
 [^reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明预留元素容量时如何调整桶数，以及重新散列的开销。
+
+[^unordered-subscript]: [cppreference：`unordered_map::operator[]`](https://en.cppreference.com/w/cpp/container/unordered_map/operator_at.html)——说明缺失的键会被插入，`int` 映射值先初始化为 0。

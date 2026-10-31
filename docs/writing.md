@@ -48,7 +48,7 @@ A tag is a reusable category that aggregates posts for retrieval, not a label de
 ## Code Examples
 
 - Keep examples that demonstrate interleaving, timing, or lifecycle (races, deadlock, async wakeups) as complete, runnable programs; pure API-semantics examples work as function-level snippets.
-- Pick the language — C++, Rust, or Go on this site — that carries the concept most clearly, instead of forcing one language across the series; when an example switches languages, the text states why.
+- Pick the language — C++, Rust, Go, or Python on this site — that carries the concept most clearly, instead of forcing one language across the series; when an example switches languages, the text states why.
 - Show a fix or refactor as a `diff` fence with `+`/`-` line prefixes instead of re-pasting the whole file: `lang="…"` keeps syntax highlighting and `title="…"` names the file (exact syntax in [TEMPLATE-post.md](../content/TEMPLATE-post.md)). Keep context lines to what the change needs. Annotate the why as a short comment immediately above the changed line, not scattered mid-code.
 
 ## Sources

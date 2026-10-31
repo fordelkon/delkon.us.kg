@@ -67,6 +67,8 @@ public:
         std::vector<std::vector<int>> result;
         const int size = static_cast<int>(distinct.size());
         for (int i = 0; i < size; ++i) {
+            if (distinct[i].first > 0) break;
+            // Start left at i so triplets reusing distinct[i] (such as [a, a, c] or [0, 0, 0]) are considered.
             int left = i;
             int right = size - 1;
             while (left <= right) {
@@ -97,12 +99,14 @@ public:
 };
 ```
 
-三个索引相等时，原数组中需要三个该值；只有 `i == left` 或 `left == right` 时，出现两次即可；全不相等时各一个就够。按 `i <= left <= right` 递进，即使某次因频次不够而不输出，下一组数值组合也不会因此重复。第一次加法前的 `1LL *` 把整个和提升到 64 位，在 `int` 极值输入下避免中间和溢出。排序会修改 `nums`，这一点与上面的 Python 版不同。
+三个索引相等时，原数组中需要三个该值；只有 `i == left` 或 `left == right` 时，出现两次即可；全不相等时各一个就够。按 `i <= left <= right` 递进，一旦 `distinct[i].first > 0` 就可直接结束外层循环；即使某次因频次不够而不输出，下一组数值组合也不会因此重复。第一次加法前的 `1LL *` 把整个和提升到 64 位，在 `int` 极值输入下避免中间和有符号溢出[^cpp-promotion]。排序会修改 `nums`，这一点与上面的 Python 版不同。
 
 `std::sort` 保证最坏 O(n log n) 次比较[^cpp-sort]；压缩 O(n)，双指针最多 O(u²)。除结果外，频次数组占 O(u)；排序栈的空间取决于标准库实现，常见的内省排序实现通常需要 O(log n) 栈空间，不能把它当作 `std::sort` 的标准保证。重复值多时，`u` 远小于 `n`，后续扫描会减少；全是不同值时，压缩和额外内存可能让它慢于直接在原数组上双指针。`vector<vector<int>>` 还要为每组三元组存储结果；结果数为 `R` 时，这部分至少要写出 O(R) 个定长三元组。是否更快取决于重复率、输出规模和实际测量，不由渐进复杂度单独决定。
 
-到[《四数之和：两层固定与双指针的剪枝边界》](/notes/algorithm/four-sum/)时，再多固定一个位置，剩余两数仍可用排序双指针；题目仍是列出不重复的**数值组合**，不会变成“和为目标值的连续子数组”计数。
+到[《四数之和：两层固定与双指针的剪枝边界》](/notes/algorithm/four-sum/)时，再多固定一个位置，剩余两数仍可用排序双指针；题目仍是列出不重复的数值组合，不会变成“和为目标值的连续子数组”计数。
 
 [^python-sorted]: [Python 文档：`sorted`](https://docs.python.org/3/library/functions.html#sorted)——说明它从可迭代对象返回一个新的有序列表。
+
+[^cpp-promotion]: [cppreference：算术运算符与常用算术转换](https://en.cppreference.com/w/cpp/language/operator_arithmetic.html)——说明有符号整数溢出属于未定义行为；先与 `1LL` 相乘可将后续加法的操作数提升为 `long long`。
 
 [^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对给定范围排序并要求最坏 O(n log n) 次比较；未规定排序栈空间。
