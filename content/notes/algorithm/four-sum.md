@@ -46,7 +46,7 @@ class Solution:
         return results
 ```
 
-每选定一对 `(i, j)`，双指针最多线性扫描一次，时间为 O(n³)，另有 O(n log n) 排序。`sorted` 返回新列表，保留输入，额外占 O(n) 空间[^python-sorted]；如果有 `R` 组结果，返回值还需 O(R) 个定长四元组。这里没有用 `set` 事后去重：每层跳过同值，命中后跳过同值，直接保证输出唯一。
+每选定一对 `(i, j)`，双指针最多线性扫描一次，时间为 $O(n^3)$，另有 $O(n \log n)$ 排序。`sorted` 返回新列表，保留输入，额外占 $O(n)$ 空间[^python-sorted]；如果有 $R$ 组结果，返回值还需 $O(R)$ 个定长四元组。这里没有用 `set` 事后去重：每层跳过同值，命中后跳过同值，直接保证输出唯一。
 
 ## C++：用确切上下界提前结束扫描
 
@@ -111,7 +111,7 @@ public:
 };
 ```
 
-四项相加可能超出 32 位 `int` 的范围；`1LL * nums[i]` 在第一次加法之前就提升运算类型，不能等到四项都加完再转换[^cpp-promotion]。原地排序省去 Python 版的数组副本，但会改变输入；`std::sort` 的比较次数保证为最坏 O(n log n)，但辅助栈空间取决于实现[^cpp-sort]；输出仍要占 O(R) 空间。即使用了上下界剪枝，最坏仍是 O(n³) 时间；遇到很快就能排除的区间，才可能减少实际双指针扫描。是否比无剪枝版更快，要在相同数据和编译条件下测量，不能从代码长度直接推断。
+四项相加可能超出 32 位 `int` 的范围；`1LL * nums[i]` 在第一次加法之前就提升运算类型，不能等到四项都加完再转换[^cpp-promotion]。原地排序省去 Python 版的数组副本，但会改变输入；`std::sort` 的比较次数保证为最坏 $O(n \log n)$，但辅助栈空间取决于实现[^cpp-sort]；输出仍要占 $O(R)$ 空间。即使用了上下界剪枝，最坏仍是 $O(n^3)$ 时间；遇到很快就能排除的区间，才可能减少实际双指针扫描。是否比无剪枝版更快，要在相同数据和编译条件下测量，不能从代码长度直接推断。
 
 四数之和的关键不是记住四层循环，而是让**位置约束与去重层级**配套：固定项只在自己的层内去重，双指针只在命中后跳过已输出的数值对。剪枝再利用排序后的最左、最右可选位置，不改变这套正确性条件。
 
@@ -119,4 +119,4 @@ public:
 
 [^cpp-promotion]: [cppreference：算术运算符与常用算术转换](https://en.cppreference.com/w/cpp/language/operator_arithmetic.html)——说明有符号整数溢出属于未定义行为；先与 `1LL` 相乘可将后续加法提升为 `long long`。
 
-[^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对原范围排序，最坏 O(n log n) 次比较；未规定辅助栈空间。
+[^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对原范围排序，最坏 $O(n \log n)$ 次比较；未规定辅助栈空间。
