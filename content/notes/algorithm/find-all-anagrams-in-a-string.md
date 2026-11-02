@@ -8,7 +8,7 @@ description: "LeetCode 438 题：将静态异位词判定放进定长滑动窗�
 
 ## 从全局静态签名到局部滑动窗口
 
-在 [《字母异位词分组：排序签名、频次元组与质数哈希》](/notes/algorithm/group-anagrams/) 中，我们通过为每个独立字符串构造静态特征（字符排序或 26 维频次元组）来完成聚合。若直接在 438 题上对 `s` 中每个长度为 $|p|$ 的子串重复这一静态过程：
+在[《字母异位词分组：排序签名、频次元组与质数哈希》](/notes/algorithm/group-anagrams/)中，我们通过为每个独立字符串构造静态特征（字符排序或 26 维频次元组）来完成聚合。若直接在 438 题上对 `s` 中每个长度为 $|p|$ 的子串重复这一静态过程：
 
 - 长度为 $|p|$ 的候选子串共有 $|s| - |p| + 1$ 个；
 - 若对每个子串单独统计 26 维频次（耗时 $O(|p|)$），总时间复杂度为 $O((|s| - |p|) \cdot |p|)$。在 $|s| \le 30000$ 的数据规模下将产生大量重复统计。
@@ -55,17 +55,17 @@ class Solution:
         return result
 ```
 
-表达力上去了，开销结构没变：全等比较至多扫过 26 个条目，单次滑动仍是 $O(|\Sigma|)$，总复杂度 $O(|s| \cdot |\Sigma|)$。阶段 2 的目标正是把这步比较也从循环里拿掉。
+表达力上去了，开销结构没变：全等比较至多扫过 26 个条目，单次滑动仍是 $O(\lvert\Sigma\rvert)$，总复杂度 $O(|s| \cdot \lvert\Sigma\rvert)$。阶段 2 的目标正是把这步比较也从循环里拿掉。
 
 ### 阶段 2：差值数组 + differ 计数器消除循环比较
 
-为了将每次移动的判定开销从 $O(|\Sigma|)$ 降至严格的 $O(1)$，可以维护一个频次差值数组 `count`，其定义为：
+为了将每次移动的判定开销从 $O(\lvert\Sigma\rvert)$ 降至严格的 $O(1)$，可以维护一个频次差值数组 `count`，其定义为：
 
 $$
 \text{count}[c] = \text{window\_count}[c] - \text{p\_count}[c]
 $$
 
-同时维护一个整数变量 `differ`，用于记录**当前有多少种字符的频次与目标不一致**（即满足 $\text{count}[c] \neq 0$ 的字符种类数）。
+同时维护一个整数变量 `differ`，用于记录**频次不一致的字符种类数**（即满足 $\text{count}[c] \neq 0$ 的字符种类数）。
 
 只有当新字符进入或旧字符离开时，对应字符的 `count` 值才会改变，进而可能引起 `differ` 的增减：
 
@@ -80,7 +80,7 @@ $$
 
 只要 `differ == 0`，说明所有 26 个字符的频次差值均为 0，当前窗口即为合法异位词。
 
-## Python：单变量 differ 的 O(1) 增量维护
+## Python：单变量 differ 的常数时间增量维护
 
 ```python
 class Solution:
@@ -123,7 +123,7 @@ class Solution:
         return result
 ```
 
-建立首个窗口的差值消耗 $O(|p| + |\Sigma|)$，其中 `ord` 将单个字符转换为对应的 Unicode 码位，从而把连续排列的 `'a'` 至 `'z'` 映射到下标 `0` 至 `25`[^python-ord]；后续每次滑动仅做常数次整数比较与加减，耗时严格 $O(1)$。总时间复杂度为 $O(|s| + |\Sigma|)$，额外空间为固定大小数组 $O(|\Sigma|)$。
+建立首个窗口的差值消耗 $O(|p| + \lvert\Sigma\rvert)$，其中 `ord` 将单个字符转换为对应的 Unicode 码位，从而把连续排列的 `'a'` 至 `'z'` 映射到下标 `0` 至 `25`[^python-ord]；后续每次滑动仅做常数次整数比较与加减，耗时严格 $O(1)$。总时间复杂度为 $O(|s| + \lvert\Sigma\rvert)$，额外空间为固定大小数组 $O(\lvert\Sigma\rvert)$。
 
 ## C++：数组直接寻址与常数优化
 
@@ -184,7 +184,7 @@ public:
 
 除了最终输出的 `result` 容器，算法不需要其他堆分配：差分数组驻留在栈上的连续内存中，省去了哈希表的桶分配与查找开销[^cpp-array]。
 
-[567. 字符串的排列](https://leetcode.cn/problems/permutation-in-string/)与本题的数学本质相同——排列即字母异位词——区别只在输出形态：它只需判断存在性，循环中一旦检测到 `differ == 0` 即可短路返回，不必收集全部下标。与[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)的方向相反：那道题的数组允许负数，前缀和失去单调性，滑动窗口无从判断扩张与收缩的时机；本题窗口长度严格固定为 $|p|$，频次随进出守恒，滑动窗口是天然解。若把单字符步长换成定长单词，问题升维为 [30. 串联所有单词的子串](https://leetcode.cn/problems/substring-with-concatenation-of-all-words/)，其解法把窗口错位拆成 $k$ 条以单词为步长的流水线，逐条维护窗口内的单词频次。
+[LeetCode 567. 字符串的排列](https://leetcode.cn/problems/permutation-in-string/)与本题的数学本质相同——排列即字母异位词——区别只在输出形态：它只需判断存在性，循环中一旦检测到 `differ == 0` 即可短路返回，不必收集全部下标。与[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)的方向相反：那道题的数组允许负数，前缀和失去单调性，滑动窗口无从判断扩张与收缩的时机；本题窗口长度严格固定为 $|p|$，频次随进出守恒，滑动窗口是天然解。若把单字符步长换成定长单词，问题升维为 [LeetCode 30. 串联所有单词的子串](https://leetcode.cn/problems/substring-with-concatenation-of-all-words/)，其解法把窗口错位拆成 $k$ 条以单词为步长的流水线，逐条维护窗口内的单词频次。
 
 [^counter-eq]: [Python 文档：`collections.Counter`](https://docs.python.org/3/library/collections.html#collections.Counter)——说明相等比较把缺失元素视为 0 计数，Python 3.10 起生效；此前 `Counter(a=1)` 与 `Counter(a=1, b=0)` 不相等。
 

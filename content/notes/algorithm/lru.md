@@ -164,6 +164,13 @@ public:
 
 链表摘除与插入都是 $O(1)$，哈希表查找、插入和删除平均 $O(1)$，所以两种操作平均 $O(1)$，额外空间 $O(\mathrm{capacity})$；哈希冲突严重时不保证最坏 $O(1)$。新增节点与哈希表可能分配内存，淘汰节点会释放内存。插入哈希表前用 `std::make_unique` 临时持有新节点，`emplace` 失败时也不会泄漏[^make-unique][^unordered-emplace]。析构函数负责释放仍在缓存中的节点，并按三/五法则显式弃置拷贝构造与拷贝赋值运算符，以免两个缓存实例共同持有并重复释放同一批裸指针[^cpp-rule-of-three]。相比限制键范围的数组直索引，这份实现保留了通用性，并没有声称在所有负载下都更快。
 
+## 生产演进：高并发读写与锁粒度
+
+上述实现面向单线程环境。在生产环境与真实工业系统中，缓存往往面临高并发读写竞争：
+
+- **读操作引发写冲突**：LRU 的核心语义要求 `get` 命中时必须刷新时序（调用 `touch` 执行链表节点的 `detach` 与 `attach_front`）。这意味着在 LRU 结构中，“读”不仅不是无副作用的只读操作，反而会改写链表指针。若使用读写锁（RwLock），为了保护链表指针完整性，`get` 也必须获取独占写锁，使得读写分离完全失效。
+- **并发同步与锁粒度选择**：为了保证线程安全与状态一致，链表调整与哈希修改必须借助同步原语进行保护。最简单的方案是用全局互斥锁保护整个缓存，但正如[《并发编程（二）：锁、条件变量与共享内存同步》](/posts/concurrency/locks-condvars-shared-memory-sync/)中对[临界区范围与锁的粒度](/posts/concurrency/locks-condvars-shared-memory-sync/#临界区范围与锁的粒度)的讨论，粗粒度互斥锁在激烈争用下会造成严重的线程挂起与吞吐瓶颈；工业级实现通常采用**分段锁**（Striped LRU，将哈希键空间分片到多个独立持锁的子缓存）来分散锁争用，或采用只读并发哈希配合无锁环形队列暂存访问事件、由后台线程异步批量刷新淘汰链表的时序，从而在兼顾状态一致性的同时释放并发性能。
+
 [^ordered-dict]: [Python 文档：OrderedDict](https://docs.python.org/3/library/collections.html#ordereddict-objects)——说明端点移动、按顺序弹出，以及保留或调整已有键位置的行为。
 
 [^truth-value]: [Python 文档：真值检测与字典操作](https://docs.python.org/3/library/stdtypes.html#truth-value-testing)——说明 `0`、`None` 的真值；同页字典章节说明 `get` 的默认返回值与成员检查。

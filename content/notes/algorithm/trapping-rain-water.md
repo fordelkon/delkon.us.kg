@@ -44,7 +44,7 @@ class Solution:
 
 ## C++：用双指针省去极值数组
 
-计算 $\min(L_i, R_i) - h[i]$ 时，并不需要同时知道 $L_i$ 与 $R_i$ 的精确值，只要能判断**哪一侧是两者中的较小值**即可。C++ 版从两端维护尚未结算的闭区间 $[\mathrm{left}, \mathrm{right}]$，将额外空间降到 $O(1)$：
+计算 $\min(L_i, R_i) - h[i]$ 时，并不需要同时知道 $L_i$ 与 $R_i$ 的精确值，只要能判断**哪一侧是两者中的较小值**即可。C++ 版从两端维护尚未结算的闭区间 $[l, r]$，将额外空间降到 $O(1)$：
 
 ```cpp
 #include <algorithm>
@@ -78,10 +78,10 @@ public:
 };
 ```
 
-每轮通过 `std::max` 更新两侧极值后[^cpp-max]，`left_max` 就是精确的前缀极值 $L_{\mathrm{left}} = \max_{0 \le j \le \mathrm{left}} h[j]$，`right_max` 就是精确的后缀极值 $R_{\mathrm{right}} = \max_{\mathrm{right} \le j < n} h[j]$。因为 $\mathrm{left} < \mathrm{right}$，第 `left` 列的完整后缀区间 $[\mathrm{left}, n - 1]$ 包含 $[\mathrm{right}, n - 1]$，故必有 $R_{\mathrm{left}} \ge R_{\mathrm{right}} = \mathrm{right\_max}$；同理 $L_{\mathrm{right}} \ge L_{\mathrm{left}} = \mathrm{left\_max}$。
+每轮通过 `std::max` 更新两侧极值后[^cpp-max]，`left_max` 就是精确的前缀极值 $L_l = \max_{0 \le j \le l} h[j]$，`right_max` 就是精确的后缀极值 $R_r = \max_{r \le j < n} h[j]$。因为 $l < r$，第 $l$ 列的完整后缀区间 $[l, n - 1]$ 包含 $[r, n - 1]$，故必有 $R_l \ge R_r = \mathrm{right\_max}$；同理 $L_r \ge L_l = \mathrm{left\_max}$。
 
-- **当 `left_max < right_max` 时**：结合包含关系有 $L_{\mathrm{left}} = \mathrm{left\_max} < \mathrm{right\_max} \le R_{\mathrm{left}}$，因此 $\min(L_{\mathrm{left}}, R_{\mathrm{left}}) = \mathrm{left\_max}$ 已经完全确定，无须知道 $(\mathrm{left}, \mathrm{right})$ 之间是否还有更高的柱子。直接结算 `left_max - height[left]` 并右移 `left`。
-- **当 `right_max <= left_max` 时**：对称地有 $R_{\mathrm{right}} = \mathrm{right\_max} \le \mathrm{left\_max} \le L_{\mathrm{right}}$，因此 $\min(L_{\mathrm{right}}, R_{\mathrm{right}}) = \mathrm{right\_max}$，直接结算右侧并左移 `right`。
+- **当 `left_max < right_max` 时**：结合包含关系有 $L_l = \mathrm{left\_max} < \mathrm{right\_max} \le R_l$，因此 $\min(L_l, R_l) = \mathrm{left\_max}$ 已经完全确定，无须知道开区间 $(l, r)$ 之间是否还有更高的柱子。直接结算 `left_max - height[left]` 并右移 `left`。
+- **当 `right_max <= left_max` 时**：对称地有 $R_r = \mathrm{right\_max} \le \mathrm{left\_max} \le L_r$，因此 $\min(L_r, R_r) = \mathrm{right\_max}$，直接结算右侧并左移 `right`。
 
 例如 `[2, 0, 3]` 首轮更新后 `left_max = 2 < right_max = 3`，第 0 列结算 `2 - 2 = 0` 并右移 `left`；次轮 `left = 1`，`left_max` 保持 2，立即确定中间列水深为 `2 - 0 = 2`；而 `[1, 2, 3]` 进入中间列时会将 `left_max` 更新为 2，结算 `2 - 2 = 0`，不会把旧极值误当成新列的水位。由于每步都移动极值较小的一侧，两指针最终会在全局最高柱处相遇；最高柱自身无法积水（贡献为 0），循环在 `left == right` 时自然终止。
 
@@ -115,18 +115,20 @@ class Solution:
         return total_water
 ```
 
-若弹出 `bottom` 后栈已空，说明左侧没有更高的柱子挡水，无法形成有界水层；否则，新增水层高度 $\Delta h$ 为两壁较矮者与底部的高度差，宽度为开区间 $(\mathrm{left}, i)$ 的列数，新增水量 $\Delta w$ 为两者的乘积：
+若弹出 `bottom` 后栈已空，说明左侧没有更高的柱子挡水，无法形成有界水层；否则，新增水层高度 $\Delta h$ 为两壁较矮者与底部的高度差，宽度为开区间 $(l, i)$ 的列数，新增水量 $\Delta w$ 为两者的乘积（其中 $l$ 为弹栈后的新栈顶下标）：
 
 $$
 \begin{aligned}
-\Delta h &= \min(h[\mathrm{left}], h[i]) - h[\mathrm{bottom}] \\
-\Delta w &= (i - \mathrm{left} - 1) \times \Delta h
+\Delta h &= \min(h[l], h[i]) - h[\mathrm{bottom}] \\
+\Delta w &= (i - l - 1) \times \Delta h
 \end{aligned}
 $$
 
 这个乘积只计算 `height[bottom]` 以上的新增水层，更低的凹陷已在先前弹栈时填平；同一列可以出现在多个水层的宽度中，但这些水层的高度区间互不重叠。栈内允许等高柱子，靠右的同高柱子先弹出时会得到 $\Delta h = 0$ 的水层，随后靠左的同高柱子再与真正的左壁算出完整水层，不影响结果。每个下标只入栈一次、最多出栈一次，配合列表尾部追加与弹出的平摊 $O(1)$ 开销，总时间复杂度为 $O(n)$；单调不增的输入会使所有下标留在栈中，最坏额外空间为 $O(n)$[^python-list-stack]。
 
-两种方法的结算单位不同：双指针确定一列的完整水深，单调栈确定一层新增水量。迁移到 [LeetCode 84. 柱状图中最大的矩形](https://leetcode.cn/problems/largest-rectangle-in-histogram/) 时，仍可在栈中保存尚未确定右边界的下标，但弹栈条件改为遇到更矮的柱子。接雨水用两壁较矮者减去槽底高度，计算新增水层；最大矩形用弹出柱自身的高度乘以可延伸宽度，计算候选面积。等高柱子的保留或合并方式要与各自的边界定义配套，不能直接照搬。
+两种方法的结算单位不同：双指针确定一列的完整水深，单调栈确定一层新增水量。从状态管理视角看，单调栈在顺序扫描中显式维护了“尚未遇到更高右壁的凹槽序列”：每次右侧出现更高柱子，就通过弹栈逐层结算水层，再由新栈顶恢复左壁约束。这种用显式数据栈保存未决状态、并在条件满足时逐层出栈回溯结算的机制，同[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)中用显式栈接管调用栈帧现场、驱动迭代状态机的模式有着深刻的内在一致性——二者都通过显式后进先出结构消除隐式系统开销，并精确控制历史状态的存活周期。
+
+迁移到 [LeetCode 84. 柱状图中最大的矩形](https://leetcode.cn/problems/largest-rectangle-in-histogram/) 时，仍可在栈中保存尚未确定右边界的下标，但弹栈条件改为遇到更矮的柱子。接雨水用两壁较矮者减去槽底高度，计算新增水层；最大矩形用弹出柱自身的高度乘以可延伸宽度，计算候选面积。等高柱子的保留或合并方式要与各自的边界定义配套，不能直接照搬。
 
 [^cpp-max]: [cppreference：`std::max`](https://en.cppreference.com/w/cpp/algorithm/max.html)——说明返回两个值中的较大者，二者相等时返回第一个参数。
 

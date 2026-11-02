@@ -8,7 +8,7 @@ description: "LeetCode 25：从整链反转理解组内指针变化，用 Python
 
 ## 整链反转与分组边界
 
-[LeetCode 206. 反转链表](https://leetcode.cn/problems/reverse-linked-list/)的迭代过程维护两段：`prev` 指向已反转的前缀，`curr` 指向尚未处理的后缀。每轮先用 `next_node` 保存 `curr.next`，再将 `curr.next` 改为 `prev`，最后推进两个指针。保存后继的顺序不能颠倒，否则会丢失未处理部分的入口。
+[LeetCode 206. 反转链表](https://leetcode.cn/problems/reverse-linked-list/)的迭代过程维护两段（局部三指针翻转机制在[《回文链表：把判定拆成三个指针原语》](/notes/algorithm/palindrome-linked-list/)中也有详细推导）：`prev` 指向已反转的前缀，`curr` 指向尚未处理的后缀。每轮先用 `next_node` 保存 `curr.next`，再将 `curr.next` 改为 `prev`，最后推进两个指针。保存后继的顺序不能颠倒，否则会丢失未处理部分的入口。
 
 分组反转还需要记录组外的连接点：
 
@@ -106,7 +106,7 @@ public:
 
 两版中每个完整组都经过一次探测和一次反转，不完整的尾部只探测一次，所以时间复杂度为 $O(n)$，辅助空间为 $O(1)$。C++ 版使用栈上自动存储期的局部哨兵并减少了每组的连接写入，两版的渐近复杂度相同[^cpp-storage-duration]；具体运行时间仍需测量。
 
-[LeetCode 24. 两两交换链表中的节点](https://leetcode.cn/problems/swap-nodes-in-pairs/)就是 $k = 2$ 的特例，可以直接使用同一套边界处理。递归版本则需要保存每组的调用状态，一般占用 $O(n/k)$ 调用栈；迭代实现更容易满足常数辅助空间要求。
+[LeetCode 24. 两两交换链表中的节点](https://leetcode.cn/problems/swap-nodes-in-pairs/)就是 $k = 2$ 的特例，可以直接使用同一套边界处理。若采用递归实现，每组翻转后将当前组尾部递归连向下一组结果，属于单分支深入的典型**线性递归**：每一层递归都需要在调用栈上保存当前组的上下文与返回地址，导致调用栈积压 $O(n/k)$ 层栈帧（关于线性递归的入栈开销与栈帧保存，参见[《从调用栈理解递归》中的线性递归分析](/posts/understanding-recursion/#线性递归一个子问题进入与返回)）。相比之下，这里利用哨兵哑节点（哑节点用法亦见[《两数相加：统一多指针循环与进位状态》](/notes/algorithm/add-two-numbers/)）配合迭代局部翻转，消除了全部调用栈开销，保证了严格的 $O(1)$ 辅助空间。
 
 [^python-assign]: [Python 文档：赋值语句](https://docs.python.org/3/reference/simple_stmts.html#assignment-statements)——说明赋值语句会先对右侧表达式列表完整求值，再从左到右依次绑定给目标变量。
 

@@ -21,7 +21,7 @@ description: "LeetCode 352 将数据流变为多个不相交区间：数字逐�
 
 ## Python：有序列表上的 bisect 切片替换
 
-Python 标准库没有内置平衡搜索树，可以用有序 `list` 保存区间，配合 `bisect_left` 二分定位[^bisect]。查找第一个左端点 $\ge x + 1$ 的下标 `i` 后，用切片范围 `[start:end]` 记录本次被新区间 `merged` 吞并的旧区间：
+Python 标准库没有内置平衡搜索树，可以用有序 `list` 保存区间，配合 `bisect_left` 二分定位[^bisect]。查找第一个左端点 $\ge x + 1$ 的下标 $i$ 后，用切片范围 `[start:end]` 记录本次被新区间 `merged` 吞并的旧区间：
 
 ```python
 from bisect import bisect_left
@@ -122,7 +122,7 @@ public:
 
 这里有两处细节使实现既不依赖特定值域、又避免多余的树节点分配：
 
-- **全 `int` 值域无溢出判邻**：若直接计算 `value - 1` 或 `value + 1`，当 `value` 取 `INT_MIN` 或 `INT_MAX` 时会触发有符号整数溢出。而提前返回分支已排除 `prev->second >= value`，保证走到判邻处时必有 $\text{prev->second} < \text{value} \le \text{INT\_MAX}$，故 `prev->second + 1 == value` 绝不溢出；同理 `upper_bound` 保证 $\text{next->first} > \text{value} \ge \text{INT\_MIN}$，故 `next->first - 1 == value` 也绝不下溢。
+- **全 `int` 值域无溢出判邻**：若直接计算 `value - 1` 或 `value + 1`，当 `value` 取 `INT_MIN` 或 `INT_MAX` 时会触发有符号整数溢出。而提前返回分支已排除 `prev->second >= value`，保证走到判邻处时必有 `prev->second < value <= INT_MAX`，故 `prev->second + 1 == value` 绝不溢出；同理 `upper_bound` 保证 `next->first > value >= INT_MIN`，故 `next->first - 1 == value` 也绝不下溢。
 - **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先 `erase(next)` 取得紧邻的后继迭代器，再传给 `emplace_hint` 在平摊常数时间内完成原位替换[^map-erase][^map-emplace-hint]。
 
 单次 `addNum` 仅做一次 `upper_bound` 查找与常数次迭代器更新，时间复杂度为 $O(\log(m + 1))$；`getIntervals()` 顺序遍历平衡树构造返回数组，时间复杂度为 $O(m)$，空间复杂度为 $O(m)$。
@@ -133,7 +133,12 @@ public:
 
 但并查集的连通分量之间没有顺序：每次调用 `getIntervals()` 都必须遍历所有活跃根节点并按左端点排序，查询耗时升至 $O(m \log m)$。有序列表与 `std::map` 则在写入时维护了左端点全序，让每次查询保持在线性扫描 $O(m)$。
 
-本题每次到达的仍是单个整数 $x$，至多触碰左右两个相邻区间；当新到达的对象变成跨度任意的闭区间 $[L, R]$ 时，它可能一次吞并中间连续的一批区间——这正是[《插入区间：三段式线性划分》](/notes/algorithm/insert-interval/)要解决的问题。
+## 系统拓展：数据流熔接与并发任务流
+
+在线区间的增量熔接不仅是单机离散算法题的技巧，在流式计算与并发任务调度中同样扮演着核心角色：
+
+- **乱序任务流的连续水位推进**：在流水线或异步任务池架构中（正如[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#fan-out--fan-in分工与汇总)所分析的 fan-out / fan-in 模型），分发给多个工作线程或消费者的切片任务往往因执行耗时不同而乱序返回。收集器或协调者通过实时维护这样一组动态不相交区间，在每个分片编号或序列号 $x$ 到达时触发对数级端点熔接，就能在无需全局重排序的前提下实时确定“已连续完成的最右边界”（即 Watermark 或连续确认进度），进而驱动下游提交或安全释放已处理缓冲。
+- **区间问题族的模式谱系**：回看区间处理的整体脉络，[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)面向静态无序区间全集，通过预先排序将重叠合并收敛为单趟扫描；[《插入区间：三段式线性划分》](/notes/algorithm/insert-interval/)面向已有序不相交区间，以三段式游标在线性时间内完成任意跨度新区间的吸收；而本题则面向数字逐个到达的无限流式场景，借助平衡搜索树将单点注入时的局部桥接与延伸控制在 $O(\log(m + 1))$，三者分别代表了批处理全局合并、单次流式插入与在线增量熔接的演进阶段。
 
 [^bisect]: [Python 文档：`bisect` — 数组二分查找算法](https://docs.python.org/3/library/bisect.html)——说明在有序序列中以对数次比较定位插入点，`key` 参数自 Python 3.10 起支持。
 

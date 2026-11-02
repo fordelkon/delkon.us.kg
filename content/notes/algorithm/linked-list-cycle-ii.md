@@ -91,7 +91,7 @@ public:
 
 设可达的不同节点共有 $n$ 个。有环时第一阶段耗时 $O(a + b)$，第二阶段耗时 $O(a)$；无环时最多扫描到末尾。两版的总时间均为 $O(n)$，辅助空间为 $O(1)$，且不修改链表。
 
-[相交链表的换头法](/notes/algorithm/linked-list-intersection/)也通过调整路程让指针对齐，但它依赖两条无环路径的长度相等；这里依赖环长整倍数的同余关系。理解各自的对齐条件，比把两者概括成同一种技巧更有助于判断何时可以复用。
+[《相交链表：把状态判定收进循环条件》](/notes/algorithm/linked-list-intersection/)也通过调整路程让指针对齐，但它依赖两条无环路径的长度相等；这里依赖环长整倍数的同余关系。理解各自的对齐条件，比把两者概括成同一种技巧更有助于判断何时可以复用。
 
 [^floyd-cycle]: [Robert W. Floyd：*Nondeterministic Algorithms* (JACM, 1967)](https://doi.org/10.1145/321420.321422)——提出双指针倍速判圈思想（亦见 Donald E. Knuth *The Art of Computer Programming, Vol. 2*，3.1 节习题 6）。
 

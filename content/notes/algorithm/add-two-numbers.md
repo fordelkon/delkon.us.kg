@@ -20,7 +20,7 @@ else:
     curr = curr.next
 ```
 
-使用哨兵节点 `dummy = ListNode(0)` 作为占位头后，每次都向 `curr.next` 追加节点，最后返回 `dummy.next`。哨兵的值不参与求和，它只负责固定结果入口；[删除倒数第 N 个节点](/notes/algorithm/remove-nth-node-from-end/)也用哨兵统一处理头节点边界。
+使用哨兵节点 `dummy = ListNode(0)` 作为占位头后，每次都向 `curr.next` 追加节点，最后返回 `dummy.next`。哨兵的值不参与求和，它只负责固定结果入口；[《删除链表的倒数第 N 个结点：固定间距定位前驱》](/notes/algorithm/remove-nth-node-from-end/)也用哨兵统一处理头节点边界。
 
 ## 统一多指针推进与进位状态
 

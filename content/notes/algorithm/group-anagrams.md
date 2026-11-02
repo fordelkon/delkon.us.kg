@@ -26,7 +26,7 @@ $$
 
 ## Python：频次元组规避排序开销
 
-因为题目明确输入只包含小写英文字母，字符集大小固定为 $|\Sigma| = 26$。`Counter` 一次构造即可完成频次统计，缺失的字母按 0 计[^counter-missing]；把计数投影到固定的 26 个字母上，得到等长的计数序列。`tuple` 不可变且可哈希，可作为 Python 原生字典的合法键[^python-hashable]。
+因为题目明确输入只包含小写英文字母，字符集大小固定为 $\lvert\Sigma\rvert = 26$。`Counter` 一次构造即可完成频次统计，缺失的字母按 0 计[^counter-missing]；把计数投影到固定的 26 个字母上，得到等长的计数序列。`tuple` 不可变且可哈希，可作为 Python 原生字典的合法键[^python-hashable]。
 
 ```python
 from collections import Counter, defaultdict
@@ -48,7 +48,7 @@ class Solution:
 
 以 `strs = ["eat", "tea", "tan", "ate", "nat", "bat"]` 为例，`"eat"`、`"tea"`、`"ate"` 统计出的元组在下标 0（`a`）、4（`e`）、19（`t`）处均为 1，其余为 0。它们哈希到同一个桶，最终聚合为同一个列表。
 
-遍历每个字符串需要 $O(k)$ 统计频次（$k$ 为字符串最大长度），构造 26 元素元组耗时 $O(|\Sigma|)$。若字符串总数为 $n$，总时间复杂度为 $O(n(k + |\Sigma|))$，空间复杂度为 $O(n \cdot k)$。相比基于排序的 $O(n \cdot k \log k)$，在单词较长时更具优势。
+遍历每个字符串需要 $O(k)$ 统计频次（$k$ 为字符串最大长度），构造 26 元素元组耗时 $O(\lvert\Sigma\rvert)$。若字符串总数为 $n$，总时间复杂度为 $O(n(k + \lvert\Sigma\rvert))$，空间复杂度为 $O(n \cdot k)$。相比基于排序的 $O(n \cdot k \log k)$，在单词较长时更具优势。
 
 ## C++：定长频次编码与桶容量预留
 
@@ -87,7 +87,7 @@ public:
 };
 ```
 
-这里使用 `std::move` 将局部键与原字符串转移进容器，省去字符串缓冲区的深拷贝[^cpp-move]。若希望省去排序的 $O(k \log k)$，也可以用 `std::array<int, 26>` 搭配自定义组合散列函数（例如 Boost 的 `hash_combine`），将单个字符串的处理时间固定在 $O(k + |\Sigma|)$[^boost-hash]；两者谁更快仍需结合单词长度分布实测。
+这里使用 `std::move` 将局部键与原字符串转移进容器，省去字符串缓冲区的深拷贝[^cpp-move]。若希望省去排序的 $O(k \log k)$，也可以用 `std::array<int, 26>` 搭配自定义组合散列函数（例如 Boost 的 `hash_combine`），将单个字符串的处理时间固定在 $O(k + \lvert\Sigma\rvert)$[^boost-hash]；两者谁更快仍需结合单词长度分布实测。
 
 ## 算术基本定理的视角：质数哈希
 

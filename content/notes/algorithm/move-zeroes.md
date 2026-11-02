@@ -83,7 +83,7 @@ C++ 版只覆写第一个零之后的 $m - p$ 个非零元素，再填充 $n - m
 
 迁移到 [LeetCode 27. 移除元素](https://leetcode.cn/problems/remove-element/) 时，可复用“按条件稳定覆写”的骨架：保留不等于目标值的元素，返回写指针表示的有效长度，无须处理尾部。迁移到 [LeetCode 26. 删除有序数组中的重复项](https://leetcode.cn/problems/remove-duplicates-from-sorted-array/) 时，利用相等元素相邻的条件，在 `slow == 0` 或当前值不同于 `nums[slow - 1]` 时保留元素；先判断前缀为空，才能安全读取其末尾。两题都要按新的保留条件重新初始化扫描边界，不应沿用本题“先找第一个零”的代码。
 
-[《盛最多水的容器：短板内移与候选排除》](/notes/algorithm/container-with-most-water/)则处理位置对：两个指针从两端相向收缩，每一步排除一组不可能改善答案的候选。它与这里的读写分工不同，需要单独证明移动哪一侧是安全的。
+同向快慢指针适用于单趟前缀维护；而当求解目标转向元素对或多元素组合时，指针走向变为从两端相向收缩——[《盛最多水的容器：短板内移与候选排除》](/notes/algorithm/container-with-most-water/)与[《三数之和：排序去重与频次压缩》](/notes/algorithm/three-sum/)通过每一步排除整组不可能成为最优解或目标和的候选缩小范围。不同于这里的读写分工，相向双指针需要基于单调性或几何上界单独证明移动哪一侧是安全的。
 
 [^cpp-fill]: [cppreference：`std::fill`](https://en.cppreference.com/w/cpp/algorithm/fill.html)——说明算法对指定范围内的每个元素赋予给定值。
 
