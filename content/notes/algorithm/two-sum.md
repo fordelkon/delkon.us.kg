@@ -1,6 +1,6 @@
 ---
 title: "两数之和：先查补数，再记下标"
-publishDate: "2026-10-23T12:00:00+08:00"
+publishDate: "2026-10-15T12:00:00+08:00"
 description: "LeetCode 1 的两数之和，用 Python 哈希表返回原下标，再比较 C++ 标准哈希表与连续存储的开放寻址表。"
 ---
 
@@ -29,7 +29,7 @@ class Solution:
 
 ## C++：复用一次查找的迭代器
 
-标准容器版仍用值到下标的哈希映射。命中后直接读 `find` 返回的迭代器，不再对同一个键调用 `operator[]`；提前 `reserve` 也能减少插入期间的重新分桶[^unordered-reserve]。
+标准容器版仍用值到下标的哈希映射。命中后直接读 `find` 返回的迭代器，不再对同一个键调用 `operator[]`；提前 `reserve` 也能减少插入期间的重新分桶[^unordered-find][^unordered-reserve]。
 
 ```cpp
 #include <limits>
@@ -38,7 +38,7 @@ class Solution:
 
 class Solution {
 public:
-    std::vector<int> twoSum(std::vector<int>& nums, int target) {
+    std::vector<int> twoSum(const std::vector<int>& nums, int target) {
         std::unordered_map<int, int> seen;
         seen.reserve(nums.size());
 
@@ -50,7 +50,7 @@ public:
                 const auto it = seen.find(static_cast<int>(complement));
                 if (it != seen.end()) return {it->second, i};
             }
-            // emplace keeps the earliest index when values repeat.
+            // Emplace keeps the earliest index when values repeat.
             seen.emplace(nums[i], i);
         }
         return {};
@@ -58,7 +58,7 @@ public:
 };
 ```
 
-`target - nums[i]` 可能超出 32 位有符号整数范围，先提升到 `long long`，只在补数可表示为 `int` 时才查表。`emplace` 在键已存在时不会插入新值，因此重复值保留最早记录的下标[^unordered-emplace]；若出现一对有效答案，仍会取到不同位置。相比 `find` 命中后再用 `seen[complement]` 查一次，这版少一次按键查找。预留桶可能增加内存占用，哈希冲突也会影响运行时间；平均 $O(n)$ 时间、$O(n)$ 空间不等于每组数据都比其他方案快。
+`target - nums[i]` 可能超出 32 位有符号整数范围，先提升到 `long long`，并通过 `std::numeric_limits<int>` 判断补数可表示为 `int` 时才查表[^cpp-limits]。`emplace` 在键已存在时不会插入新值，因此重复值保留最早记录的下标[^unordered-emplace]；若出现一对有效答案，仍会取到不同位置。相比 `find` 命中后再用 `seen[complement]` 查一次，这版少一次按键查找。预留桶可能增加内存占用，哈希冲突也会影响运行时间；平均 $O(n)$ 时间、$O(n)$ 空间不等于每组数据都比其他方案快。
 
 ## C++ 进阶：按输入大小建立连续哈希表
 
@@ -73,7 +73,7 @@ public:
 class Solution {
     struct Slot {
         int value = 0;
-        int index = -1;  // -1 marks an empty slot; real indices start at 0.
+        int index = -1;  // `-1` marks an empty slot; real indices start at 0.
     };
 
     static std::size_t bucket(int value) {
@@ -87,7 +87,7 @@ class Solution {
     }
 
 public:
-    std::vector<int> twoSum(std::vector<int>& nums, int target) {
+    std::vector<int> twoSum(const std::vector<int>& nums, int target) {
         std::size_t capacity = 1;
         // Keep load factor <= 0.5 with a power-of-two capacity so linear probing always terminates.
         while (capacity < nums.size() * 2) capacity *= 2;
@@ -108,8 +108,9 @@ public:
 
             std::size_t pos = bucket(nums[i]) & mask;
             // Stop at an empty slot or an existing duplicate so the earliest index is preserved.
-            while (table[pos].index != -1 && table[pos].value != nums[i])
+            while (table[pos].index != -1 && table[pos].value != nums[i]) {
                 pos = (pos + 1) & mask;
+            }
             if (table[pos].index == -1) table[pos] = {nums[i], i};
         }
         return {};
@@ -125,7 +126,11 @@ public:
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明成员检查按键判断，下标赋值写入对应值。
 
+[^unordered-find]: [cppreference：`unordered_map::find`](https://en.cppreference.com/w/cpp/container/unordered_map/find.html)——说明查找目标键并返回对应迭代器，命中后可直接通过 `it->second` 读取值而无需二次查找。
+
 [^unordered-reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按预期元素数调整桶数及负载因子，不保证无碰撞。
+
+[^cpp-limits]: [cppreference：`std::numeric_limits`](https://en.cppreference.com/w/cpp/types/numeric_limits.html)——提供目标算术类型的极值边界，用于缩窄转换前排除越界值。
 
 [^unordered-emplace]: [cppreference：`unordered_map::emplace`](https://en.cppreference.com/w/cpp/container/unordered_map/emplace.html)——说明键已存在时不插入，原映射值保持不变。
 

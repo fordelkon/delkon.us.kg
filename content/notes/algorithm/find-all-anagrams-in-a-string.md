@@ -1,6 +1,6 @@
 ---
 title: "找到所有字母异位词：定长滑窗与频次差分维护"
-publishDate: "2026-10-28T10:00:00+08:00"
+publishDate: "2026-10-18T20:00:00+08:00"
 description: "LeetCode 438 题：将静态异位词判定放进定长滑动窗口，从每次全量比对 26 个字符频次，优化到维护单变量 differ 的常数级增量更新。"
 ---
 
@@ -35,23 +35,24 @@ from collections import Counter
 
 class Solution:
     def findAnagrams(self, s: str, p: str) -> list[int]:
-        cnt_p = Counter(p)  # Target frequencies.
-        cnt_s = Counter()  # Current window frequencies.
-        ans: list[int] = []
+        cnt_p = Counter(p)
+        cnt_s = Counter()
+        result: list[int] = []
 
         for right, c in enumerate(s):
-            cnt_s[c] += 1  # Right-end character enters the window.
+            cnt_s[c] += 1
 
             left = right - len(p) + 1
-            if left < 0:  # Window not yet full.
+            if left < 0:
                 continue
 
-            if cnt_s == cnt_p:  # Every letter matches the target.
-                ans.append(left)
+            # Counter equality treats zero-count entries left by outgoing characters as missing.
+            if cnt_s == cnt_p:
+                result.append(left)
 
-            cnt_s[s[left]] -= 1  # Left-end character leaves the window.
+            cnt_s[s[left]] -= 1
 
-        return ans
+        return result
 ```
 
 表达力上去了，开销结构没变：全等比较至多扫过 26 个条目，单次滑动仍是 $O(|\Sigma|)$，总复杂度 $O(|s| \cdot |\Sigma|)$。阶段 2 的目标正是把这步比较也从循环里拿掉。
@@ -91,29 +92,25 @@ class Solution:
         result: list[int] = []
         count = [0] * 26
 
-        # Initialize frequency difference on the first window of size p_len.
         for i in range(p_len):
             count[ord(s[i]) - ord("a")] += 1
             count[ord(p[i]) - ord("a")] -= 1
 
-        # Count how many characters have non-zero difference initially.
         differ = sum(1 for c in count if c != 0)
         if differ == 0:
             result.append(0)
 
-        # Slide the window across s one character at a time.
         for i in range(s_len - p_len):
             out_char = ord(s[i]) - ord("a")
             in_char = ord(s[i + p_len]) - ord("a")
 
-            # Outgoing character from the left boundary
+            # differ only changes when a character's (window - target) delta crosses zero.
             if count[out_char] == 1:
                 differ -= 1
             elif count[out_char] == 0:
                 differ += 1
             count[out_char] -= 1
 
-            # Incoming character to the right boundary
             if count[in_char] == -1:
                 differ -= 1
             elif count[in_char] == 0:
@@ -126,11 +123,11 @@ class Solution:
         return result
 ```
 
-建立首个窗口的差值消耗 $O(|p| + |\Sigma|)$，后续每次滑动仅做常数次整数比较与加减，耗时严格 $O(1)$。总时间复杂度为 $O(|s| + |\Sigma|)$，额外空间为固定大小数组 $O(|\Sigma|)$。
+建立首个窗口的差值消耗 $O(|p| + |\Sigma|)$，其中 `ord` 将单个字符转换为对应的 Unicode 码位，从而把连续排列的 `'a'` 至 `'z'` 映射到下标 `0` 至 `25`[^python-ord]；后续每次滑动仅做常数次整数比较与加减，耗时严格 $O(1)$。总时间复杂度为 $O(|s| + |\Sigma|)$，额外空间为固定大小数组 $O(|\Sigma|)$。
 
 ## C++：数组直接寻址与常数优化
 
-在 C++ 中，26 个小写字母的频次可以直接使用栈上连续分配的 `std::array<int, 26>` 或原始数组，拥有极致的缓存命中率：
+在 C++ 中，26 个小写字母的频次差可直接保存在栈上连续存储的 `std::array<int, 26>` 中，并用空花括号 `count{}` 将全部元素零初始化[^cpp-array]：
 
 ```cpp
 #include <array>
@@ -162,7 +159,7 @@ public:
             const int out_idx = s[i] - 'a';
             const int in_idx = s[i + p_len] - 'a';
 
-            // Update delta for outgoing character
+            // Only transitions into or out of zero change the number of mismatched letters.
             if (count[out_idx] == 1) {
                 --differ;
             } else if (count[out_idx] == 0) {
@@ -170,7 +167,6 @@ public:
             }
             --count[out_idx];
 
-            // Update delta for incoming character
             if (count[in_idx] == -1) {
                 --differ;
             } else if (count[in_idx] == 0) {
@@ -186,8 +182,12 @@ public:
 };
 ```
 
-除了最终输出的 `result` 容器，算法不需要其他堆分配：差分数组驻留在栈上的连续内存中，访问模式固定，缓存命中率高。
+除了最终输出的 `result` 容器，算法不需要其他堆分配：差分数组驻留在栈上的连续内存中，省去了哈希表的桶分配与查找开销[^cpp-array]。
 
 [567. 字符串的排列](https://leetcode.cn/problems/permutation-in-string/)与本题的数学本质相同——排列即字母异位词——区别只在输出形态：它只需判断存在性，循环中一旦检测到 `differ == 0` 即可短路返回，不必收集全部下标。与[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)的方向相反：那道题的数组允许负数，前缀和失去单调性，滑动窗口无从判断扩张与收缩的时机；本题窗口长度严格固定为 $|p|$，频次随进出守恒，滑动窗口是天然解。若把单字符步长换成定长单词，问题升维为 [30. 串联所有单词的子串](https://leetcode.cn/problems/substring-with-concatenation-of-all-words/)，其解法把窗口错位拆成 $k$ 条以单词为步长的流水线，逐条维护窗口内的单词频次。
 
 [^counter-eq]: [Python 文档：`collections.Counter`](https://docs.python.org/3/library/collections.html#collections.Counter)——说明相等比较把缺失元素视为 0 计数，Python 3.10 起生效；此前 `Counter(a=1)` 与 `Counter(a=1, b=0)` 不相等。
+
+[^python-ord]: [Python 文档：内置函数 `ord`](https://docs.python.org/3/library/functions.html#ord)——说明返回单字符对应的 Unicode 码位整数，用于将小写字母映射为从 0 开始的数组下标。
+
+[^cpp-array]: [cppreference：`std::array`](https://en.cppreference.com/w/cpp/container/array.html)——说明封装固定大小连续数组的聚合类型，支持通过 `{}` 对全部元素执行值初始化（置零）且不产生堆分配。

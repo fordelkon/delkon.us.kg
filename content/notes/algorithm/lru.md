@@ -1,6 +1,6 @@
 ---
 title: "LRU 缓存：OrderedDict 的两次踩坑与时序语义"
-publishDate: "2026-10-20T12:00:00+08:00"
+publishDate: "2026-11-01T12:00:00+08:00"
 description: "LeetCode Hot 100 的 LRU 缓存，用 OrderedDict 实现时关于假值陷阱与时序更新的踩坑记录。"
 ---
 
@@ -42,10 +42,11 @@ description: "LeetCode Hot 100 的 LRU 缓存，用 OrderedDict 实现时关于�
 ```python
 from collections import OrderedDict
 
+
 class LRUCache:
-    def __init__(self, capacity: int):
+    def __init__(self, capacity: int) -> None:
         self.capacity = capacity
-        self.cache = OrderedDict()
+        self.cache: OrderedDict[int, int] = OrderedDict()
 
     def get(self, key: int) -> int:
         # A cached value of 0 is still a hit.
@@ -76,6 +77,7 @@ Python 版的 `OrderedDict` 隐藏了节点操作；在 C++ 中，可以用 `uno
 把一个**循环哨兵节点**（sentinel node）放在链表首尾之间：`dummy.next` 指向最新使用的节点，`dummy.prev` 指向最久未使用的节点。空链表时两者都指向 `dummy`。命中时先摘下节点，再放回头部；未命中且已满时，淘汰 `dummy.prev`。哨兵让这两项指针操作不必分别处理空链表、头节点和尾节点。
 
 ```cpp
+#include <cstddef>
 #include <memory>
 #include <unordered_map>
 
@@ -83,8 +85,8 @@ class LRUCache {
     struct Node {
         int key;
         int value;
-        Node *prev = nullptr;
-        Node *next = nullptr;
+        Node* prev = nullptr;
+        Node* next = nullptr;
 
         Node(int key, int value) : key(key), value(value) {}
     };
@@ -92,24 +94,24 @@ class LRUCache {
     int capacity_;
     // Circular sentinel: dummy_.next is most recent, dummy_.prev is least recent.
     Node dummy_{0, 0};
-    std::unordered_map<int, Node *> key_to_node_;
+    std::unordered_map<int, Node*> key_to_node_;
 
-    void detach(Node *node) {
+    void detach(Node* node) {
         node->prev->next = node->next;
         node->next->prev = node->prev;
     }
 
-    void attach_front(Node *node) {
+    void attach_front(Node* node) {
         node->prev = &dummy_;
         node->next = dummy_.next;
         dummy_.next->prev = node;
         dummy_.next = node;
     }
 
-    Node *touch(int key) {
+    Node* touch(int key) {
         auto it = key_to_node_.find(key);
         if (it == key_to_node_.end()) return nullptr;
-        Node *node = it->second;
+        Node* node = it->second;
         detach(node);
         attach_front(node);
         return node;
@@ -122,24 +124,24 @@ public:
     }
 
     ~LRUCache() {
-        Node *node = dummy_.next;
+        Node* node = dummy_.next;
         while (node != &dummy_) {
-            Node *next = node->next;
+            Node* next = node->next;
             delete node;
             node = next;
         }
     }
 
-    LRUCache(const LRUCache &) = delete;
-    LRUCache &operator=(const LRUCache &) = delete;
+    LRUCache(const LRUCache&) = delete;
+    LRUCache& operator=(const LRUCache&) = delete;
 
     int get(int key) {
-        Node *node = touch(key);
+        Node* node = touch(key);
         return node == nullptr ? -1 : node->value;
     }
 
     void put(int key, int value) {
-        if (Node *node = touch(key)) {
+        if (Node* node = touch(key)) {
             node->value = value;
             return;
         }
@@ -149,7 +151,7 @@ public:
         key_to_node_.emplace(key, fresh.get());
         attach_front(fresh.release());
         if (key_to_node_.size() > static_cast<std::size_t>(capacity_)) {
-            Node *oldest = dummy_.prev;
+            Node* oldest = dummy_.prev;
             key_to_node_.erase(oldest->key);
             detach(oldest);
             delete oldest;
@@ -160,7 +162,7 @@ public:
 
 沿用上面的容量 2 示例：`put(2, 200)` 命中时只更新值并把节点移到最新端，不会误删键 1；`put(1, 100)` 使键 2 成为最久未使用；随后 `put(3, 30)` 新增节点，淘汰尾部的键 2。`touch` 同时服务于 `get` 命中和 `put` 更新，两条路径不会遗漏顺序刷新。
 
-链表摘除与插入都是 $O(1)$，哈希表查找、插入和删除平均 $O(1)$，所以两种操作平均 $O(1)$，额外空间 $O(\mathrm{capacity})$；哈希冲突严重时不保证最坏 $O(1)$。新增节点与哈希表可能分配内存，淘汰节点会释放内存。插入哈希表前用 `std::make_unique` 临时持有新节点，`emplace` 失败时也不会泄漏[^make-unique][^unordered-emplace]；析构函数释放仍在缓存中的节点，禁止复制以免两个缓存共同持有同一批裸指针。相比限制键范围的数组直索引，这份实现保留了通用性，并没有声称在所有负载下都更快。
+链表摘除与插入都是 $O(1)$，哈希表查找、插入和删除平均 $O(1)$，所以两种操作平均 $O(1)$，额外空间 $O(\mathrm{capacity})$；哈希冲突严重时不保证最坏 $O(1)$。新增节点与哈希表可能分配内存，淘汰节点会释放内存。插入哈希表前用 `std::make_unique` 临时持有新节点，`emplace` 失败时也不会泄漏[^make-unique][^unordered-emplace]。析构函数负责释放仍在缓存中的节点，并按三/五法则显式弃置拷贝构造与拷贝赋值运算符，以免两个缓存实例共同持有并重复释放同一批裸指针[^cpp-rule-of-three]。相比限制键范围的数组直索引，这份实现保留了通用性，并没有声称在所有负载下都更快。
 
 [^ordered-dict]: [Python 文档：OrderedDict](https://docs.python.org/3/library/collections.html#ordereddict-objects)——说明端点移动、按顺序弹出，以及保留或调整已有键位置的行为。
 
@@ -169,3 +171,5 @@ public:
 [^make-unique]: [cppreference：`std::make_unique`](https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique.html)——说明用独占智能指针包装动态分配，在调用 `release()` 移交所有权前若发生异常会自动释放节点。
 
 [^unordered-emplace]: [cppreference：`unordered_map::emplace`](https://en.cppreference.com/w/cpp/container/unordered_map/emplace.html)——说明原位插入键值对，若插入期间抛出异常则容器保持原状。
+
+[^cpp-rule-of-three]: [cppreference：三/五/零法则](https://en.cppreference.com/w/cpp/language/rule_of_three.html)——说明需要自定义析构函数管理裸指针资源的类，应同时处理或用 `= delete` 禁用拷贝操作，防止浅拷贝导致重复释放。

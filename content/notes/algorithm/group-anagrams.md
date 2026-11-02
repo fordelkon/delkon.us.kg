@@ -1,6 +1,6 @@
 ---
 title: "字母异位词分组：排序签名、频次元组与质数哈希"
-publishDate: "2026-10-27T10:00:00+08:00"
+publishDate: "2026-10-18T12:00:00+08:00"
 description: "LeetCode 49 的字母异位词分组：对比排序签名、26位频次元组与质数乘积三种哈希键设计，并分析小写字符集的性能与空间权衡。"
 ---
 
@@ -18,11 +18,11 @@ $$
 
 常见的签名设计有三种，各具权衡：
 
-| 方案         | 键设计方式                     | 单词处理时间                | 单词额外空间            | 适用场景与缺陷                         |
-| :----------- | :----------------------------- | :-------------------------- | :---------------------- | :------------------------------------- |
-| **字符排序** | `sorted(s)` 得到的排序列       | $O(k \log k)$               | $O(k)$                  | 逻辑直观，但面对长单词排序成本高       |
-| **频次元组** | 统计 26 维字符频次构成元组     | $O(k + \lvert\Sigma\rvert)$ | $O(\lvert\Sigma\rvert)$ | 有限字符集下线性复杂度，极其稳健       |
-| **质数乘积** | 每个字母映射唯一质数，求累乘积 | $O(k)$                      | $O(1)$                  | 计算速度极快，但容易因连乘导致整型溢出 |
+| 方案         | 键设计方式                     | 单词处理时间                | 单词额外空间            | 适用场景与缺陷                       |
+| :----------- | :----------------------------- | :-------------------------- | :---------------------- | :----------------------------------- |
+| **字符排序** | `sorted(s)` 得到的排序列       | $O(k \log k)$               | $O(k)$                  | 逻辑直观，但面对长单词排序成本高     |
+| **频次元组** | 统计 26 维字符频次构成元组     | $O(k + \lvert\Sigma\rvert)$ | $O(\lvert\Sigma\rvert)$ | 有限字符集下线性复杂度，无溢出风险   |
+| **质数乘积** | 每个字母映射唯一质数，求累乘积 | $O(k)$                      | $O(1)$                  | 单次循环完成，但连乘容易导致整型溢出 |
 
 ## Python：频次元组规避排序开销
 
@@ -52,14 +52,15 @@ class Solution:
 
 ## C++：定长频次编码与桶容量预留
 
-在 C++ 中，`std::unordered_map` 默认没有为 `std::array` 提供散列函数特化。一种工程上常见且高效的做法是将 26 维频次直接编码为短字符串（如 `"1#0#...#1"` 或二进制编码），或者按字符排序后作为 `std::string` 键[^unordered-map]。
+在 C++ 中，`std::hash` 默认没有为 `std::array` 提供特化，而 `std::string` 具备标准散列支持[^cpp-hash]。因此工程上常将 26 维频次编码为短字符串（如 `"1#0#...#1"` 或定长字节串），或者按字符排序后作为 `std::unordered_map` 的 `std::string` 键[^unordered-map]。
 
-当字符串长度通常较短（$k \le 100$）时，字符排序的原地缓存局部性极好；同时配合 `reserve` 预分配桶容量，可消除动态增长期间的频繁重新散列[^unordered-reserve]：
+当字符串长度较短（如本题约束 $k \le 100$）时，直接在连续内存的 `std::string` 上原地排序开销可控；同时配合 `reserve` 预分配桶容量，可减少动态增长期间的重新散列[^unordered-reserve]：
 
 ```cpp
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class Solution {
@@ -72,7 +73,7 @@ public:
         for (std::string& s : strs) {
             std::string key = s;
             std::sort(key.begin(), key.end());
-            // Emplace appends to the existing bucket or creates a new one.
+            // key is a sorted copy, so moving both key and s avoids duplicating string buffers.
             groups[std::move(key)].push_back(std::move(s));
         }
 
@@ -86,7 +87,7 @@ public:
 };
 ```
 
-这里使用 `std::move` 减少深拷贝开销。若希望完全消除排序的 $O(k \log k)$，也可以用 `std::array<int, 26>` 搭配自定义组合哈希（例如基于 boost 的 `hash_combine`），在常数要求极严苛的工业场景下提供稳定线性耗时。
+这里使用 `std::move` 将局部键与原字符串转移进容器，省去字符串缓冲区的深拷贝[^cpp-move]。若希望省去排序的 $O(k \log k)$，也可以用 `std::array<int, 26>` 搭配自定义组合散列函数（例如 Boost 的 `hash_combine`），将单个字符串的处理时间固定在 $O(k + |\Sigma|)$[^boost-hash]；两者谁更快仍需结合单词长度分布实测。
 
 ## 算术基本定理的视角：质数哈希
 
@@ -98,7 +99,7 @@ $$
 
 字符串的特征值定义为字符映射质数的乘积。因为乘法满足**交换律**与**结合律**，字符以任意顺序排列算出的乘积都相同；由分解的唯一性可知，字符频次不同的串对应不同的乘积。该方法的单次计算耗时为严格的 $O(k)$，无需额外数组。
 
-但其代价是**整型溢出风险**：质数增长迅速，字符串稍长（如超过 15 个字符），连乘积便会溢出 64 位无符号整数。生产代码中，除非配合大数运算或可证明无假阳性碰撞的大质数取模，实用性不如频次元组。
+但其代价是**整型溢出风险**：第 26 个质数为 $101$，由于 $101^{10} > 2^{64} - 1$，仅 10 个 `'z'` 连乘就会超出 64 位无符号整数（`uint64_t`）的表示上限。生产代码中若使用大整数运算，乘法开销不再是常数；若改为对固定模数取余，又会破坏唯一性并引入哈希碰撞，因此实用性不如频次元组。
 
 本题处理的是互不相关的独立字符串，签名为每个字符串全量计算一次，元素之间也没有顺序约束，一个键聚合的列表可以随时追加，因此不涉及[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)里“先查后写”的时序约束，也不像[《两数之和：先查补数，再记下标》](/notes/algorithm/two-sum/)那样命中单个下标即可返回。当判定对象变成长主串中重叠的连续子串时，全量重算签名开始浪费，[《找到所有字母异位词：定长滑窗与频次差分维护》](/notes/algorithm/find-all-anagrams-in-a-string/)把静态签名演进为增量维护。
 
@@ -106,6 +107,12 @@ $$
 
 [^counter-missing]: [Python 文档：`collections.Counter`](https://docs.python.org/3/library/collections.html#collections.Counter)——说明计数器对缺失的元素返回 0 计数，而不是抛出 `KeyError`。
 
+[^cpp-hash]: [cppreference：`std::hash`](https://en.cppreference.com/w/cpp/utility/hash.html)——说明标准库默认提供 `std::string` 的散列特化，而未为 `std::array` 提供默认特化。
+
 [^unordered-map]: [cppreference：`std::unordered_map`](https://en.cppreference.com/w/cpp/container/unordered_map.html)——说明基于哈希表实现的键值对容器与平均常数时间复杂度。
 
 [^unordered-reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明预先调整桶数以减少重新散列。
+
+[^cpp-move]: [cppreference：`std::move`](https://en.cppreference.com/w/cpp/utility/move.html)——说明将左值转换为右值引用以启用移动构造或移动赋值，避免复制底层字符串缓冲区。
+
+[^boost-hash]: [Boost 文档：`hash_combine`](https://www.boost.org/doc/libs/release/libs/container_hash/doc/html/hash.html#ref_hash_combine)——说明通过迭代混合元素散列值来为定长序列或复合结构构造组合散列函数。

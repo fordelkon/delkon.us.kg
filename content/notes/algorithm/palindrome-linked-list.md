@@ -1,6 +1,6 @@
 ---
 title: "回文链表：把判定拆成三个指针原语"
-publishDate: "2026-10-21T12:30:00+08:00"
+publishDate: "2026-10-28T12:00:00+08:00"
 description: "LeetCode Hot 100 的回文链表，用 Python 拆解快慢指针、原地反转与链表复原，再用 C++ 在找中点时同步反转前半段。"
 ---
 
@@ -8,13 +8,13 @@ description: "LeetCode Hot 100 的回文链表，用 Python 拆解快慢指针�
 
 ## Python 解法：切分、反转、比较并复原
 
-最直观的做法是先把节点值放进列表，再与反向列表比较，但会复制整条链表的元素并占用 $O(n)$ 额外空间[^python-seq]。题目的进阶要求是 $O(n)$ 时间、$O(1)$ 额外空间：找到中点，反转后半段，让它能与前半段同步比对。这里还约定在返回结果前恢复输入链表；下面的 `ListNode` 和 `Optional` 沿用题目提供的定义。
+最直观的做法是先把节点值放进列表，再与反向列表比较，但会复制整条链表的元素并占用 $O(n)$ 额外空间[^python-seq]。题目的进阶要求是 $O(n)$ 时间、$O(1)$ 额外空间：找到中点，反转后半段，让它能与前半段同步比对。比较完成后再反转一次后半段，就能在返回结果前恢复原链表。
 
 ### 反转：保存后继，再修改指向
 
 反转子步骤对应 [LeetCode 206. 反转链表](https://leetcode.cn/problems/reverse-linked-list/)。三个引用就够了：`prev` 指向已反转部分，`curr` 指向待处理部分，`next_node` 暂存原来的后继。
 
-每轮把 `curr` 从待处理部分移到已反转部分的头部。先保存后继，再改写 `curr.next`，就不会丢失剩余链表的入口；循环结束后，`prev` 是反转后的头节点。完整的 `reverse_linked_list` 函数与回文判定一起放在下方代码中。反转 $k$ 个节点需要 $O(k)$ 时间和 $O(1)$ 额外空间。
+每轮把 `curr` 从待处理部分移到已反转部分的头部。先保存后继，再改写 `curr.next`，就不会丢失剩余链表的入口；循环结束后，`prev` 是反转后的头节点。完整的 `_reverse` 辅助方法与回文判定一起放在下方的 `Solution` 类中。反转 $k$ 个节点需要 $O(k)$ 时间和 $O(1)$ 额外空间。
 
 ### 切分：让 slow.next 指向后半段
 
@@ -33,17 +33,11 @@ description: "LeetCode Hot 100 的回文链表，用 Python 拆解快慢指针�
 
 ### 比对后，无论结果如何都接回原链表
 
-下面是一份完整的 Python 答案，先定义反转函数，再定义回文判定：
+下面是一份完整的 Python 答案，先给出回文判定，再定义类内的 `_reverse` 辅助方法：
 
 ```python
-def reverse_linked_list(head: Optional[ListNode]) -> Optional[ListNode]:
-    prev, curr = None, head
-    while curr:
-        # Save the remaining chain before reversing this link.
-        next_node = curr.next
-        curr.next = prev
-        prev, curr = curr, next_node
-    return prev
+from typing import Optional
+
 
 class Solution:
     def isPalindrome(self, head: Optional[ListNode]) -> bool:
@@ -56,11 +50,11 @@ class Solution:
             slow = slow.next
             fast = fast.next.next
 
-        second_half = reverse_linked_list(slow.next)
+        second_half = self._reverse(slow.next)
 
         is_palin = True
         p1, p2 = head, second_half
-        while p2:
+        while p2 is not None:
             if p1.val != p2.val:
                 is_palin = False
                 # Leave the comparison loop, but still restore the links.
@@ -68,8 +62,17 @@ class Solution:
             p1 = p1.next
             p2 = p2.next
 
-        slow.next = reverse_linked_list(second_half)
+        slow.next = self._reverse(second_half)
         return is_palin
+
+    def _reverse(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        prev, curr = None, head
+        while curr is not None:
+            # Save the remaining chain before reversing this link.
+            next_node = curr.next
+            curr.next = prev
+            prev, curr = curr, next_node
+        return prev
 ```
 
 以 `1 → 2 → 3 → 2 → 1` 为例，`slow` 停在 3，后半段的 `2 → 1` 被反转成 `1 → 2`。从原链表头和反转后的头同时出发，依次比较 `1 == 1`、`2 == 2`；`p2` 到达末尾时，所有对称位置都已比过，中心的 3 无需参与。
@@ -88,25 +91,24 @@ class Solution:
 Python 版分开找中点、反转和比对，每一步都容易检查。C++ 版可以在快慢指针前进时，同时反转慢指针走过的前半段：快指针每轮走两步，慢指针每轮走一步并把当前节点接到 `reversed` 前面。到达中点后，`reversed` 从中点朝表头排列，后半段从中点朝表尾排列，可以同步比较；比较结束再把前半段接回去。
 
 ```cpp
-// ListNode is provided by the problem.
 class Solution {
 public:
-    bool isPalindrome(ListNode *head) {
-        ListNode *slow = head;
-        ListNode *fast = head;
-        ListNode *reversed = nullptr;
+    bool isPalindrome(ListNode* head) {
+        ListNode* slow = head;
+        ListNode* fast = head;
+        ListNode* reversed = nullptr;
 
         while (fast != nullptr && fast->next != nullptr) {
             fast = fast->next->next;
-            ListNode *next = slow->next;
+            ListNode* next = slow->next;
             slow->next = reversed;
             reversed = slow;
             slow = next;
         }
 
         // For odd lengths, slow is the middle node; skip it for comparison.
-        ListNode *left = reversed;
-        ListNode *right = fast == nullptr ? slow : slow->next;
+        ListNode* left = reversed;
+        ListNode* right = fast == nullptr ? slow : slow->next;
         bool matches = true;
         while (left != nullptr) {
             if (left->val != right->val) {
@@ -119,7 +121,7 @@ public:
 
         // Reconnect the reversed prefix to the middle or the second half.
         while (reversed != nullptr) {
-            ListNode *next = reversed->next;
+            ListNode* next = reversed->next;
             reversed->next = slow;
             slow = reversed;
             reversed = next;

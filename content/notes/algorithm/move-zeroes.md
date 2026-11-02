@@ -1,6 +1,6 @@
 ---
 title: "移动零：读写双指针与稳定前缀"
-publishDate: "2026-10-30T15:30:00+08:00"
+publishDate: "2026-10-22T12:00:00+08:00"
 description: "LeetCode 283 的移动零：用读写双指针保持非零元素的相对顺序，证明原地交换与覆写补零的安全性，并比较两种方法的数组写入次数。"
 ---
 
@@ -56,7 +56,7 @@ public:
 
         for (std::size_t fast = slow + 1; fast < n; ++fast) {
             if (nums[fast] != 0) {
-                // slow < fast holds throughout this loop, preserving unread values.
+                // The condition slow < fast holds throughout this loop, preserving unread values.
                 nums[slow++] = nums[fast];
             }
         }

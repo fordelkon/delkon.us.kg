@@ -1,6 +1,6 @@
 ---
 title: "接雨水：按列结算与单调栈分层"
-publishDate: "2026-11-01T15:40:00+08:00"
+publishDate: "2026-10-24T12:00:00+08:00"
 description: "LeetCode 42 的接雨水：用 Python 前后缀最大值直观计算水深，再用 C++ 双指针将额外空间降至常数，并拓展到单调栈的水层切分。"
 ---
 
@@ -28,7 +28,6 @@ class Solution:
         left_max[0] = height[0]
         right_max[-1] = height[-1]
 
-        # Precompute the highest bar on [0, i] and [i, n - 1] for every column i.
         for i in range(1, n):
             left_max[i] = max(left_max[i - 1], height[i])
         for i in range(n - 2, -1, -1):
@@ -79,7 +78,7 @@ public:
 };
 ```
 
-每轮更新后，`left_max` 就是精确的前缀极值 $L_{\mathrm{left}} = \max_{0 \le j \le \mathrm{left}} h[j]$，`right_max` 就是精确的后缀极值 $R_{\mathrm{right}} = \max_{\mathrm{right} \le j < n} h[j]$。因为 $\mathrm{left} < \mathrm{right}$，第 `left` 列的完整后缀区间 $[\mathrm{left}, n - 1]$ 包含 $[\mathrm{right}, n - 1]$，故必有 $R_{\mathrm{left}} \ge R_{\mathrm{right}} = \mathrm{right\_max}$；同理 $L_{\mathrm{right}} \ge L_{\mathrm{left}} = \mathrm{left\_max}$。
+每轮通过 `std::max` 更新两侧极值后[^cpp-max]，`left_max` 就是精确的前缀极值 $L_{\mathrm{left}} = \max_{0 \le j \le \mathrm{left}} h[j]$，`right_max` 就是精确的后缀极值 $R_{\mathrm{right}} = \max_{\mathrm{right} \le j < n} h[j]$。因为 $\mathrm{left} < \mathrm{right}$，第 `left` 列的完整后缀区间 $[\mathrm{left}, n - 1]$ 包含 $[\mathrm{right}, n - 1]$，故必有 $R_{\mathrm{left}} \ge R_{\mathrm{right}} = \mathrm{right\_max}$；同理 $L_{\mathrm{right}} \ge L_{\mathrm{left}} = \mathrm{left\_max}$。
 
 - **当 `left_max < right_max` 时**：结合包含关系有 $L_{\mathrm{left}} = \mathrm{left\_max} < \mathrm{right\_max} \le R_{\mathrm{left}}$，因此 $\min(L_{\mathrm{left}}, R_{\mathrm{left}}) = \mathrm{left\_max}$ 已经完全确定，无须知道 $(\mathrm{left}, \mathrm{right})$ 之间是否还有更高的柱子。直接结算 `left_max - height[left]` 并右移 `left`。
 - **当 `right_max <= left_max` 时**：对称地有 $R_{\mathrm{right}} = \mathrm{right\_max} \le \mathrm{left\_max} \le L_{\mathrm{right}}$，因此 $\min(L_{\mathrm{right}}, R_{\mathrm{right}}) = \mathrm{right\_max}$，直接结算右侧并左移 `right`。
@@ -105,7 +104,8 @@ class Solution:
             while stack and h > height[stack[-1]]:
                 bottom = stack.pop()
                 if not stack:
-                    break  # No left wall remains to bound the water.
+                    # No left wall remains to bound the water.
+                    break
                 left = stack[-1]
                 width = i - left - 1
                 bounded_height = min(height[left], h) - height[bottom]
@@ -124,6 +124,10 @@ $$
 \end{aligned}
 $$
 
-这个乘积只计算 `height[bottom]` 以上的新增水层，更低的凹陷已在先前弹栈时填平；同一列可以出现在多个水层的宽度中，但这些水层的高度区间互不重叠。栈内允许等高柱子，靠右的同高柱子先弹出时会得到 $\Delta h = 0$ 的水层，随后靠左的同高柱子再与真正的左壁算出完整水层，不影响结果。每个下标只入栈一次、最多出栈一次，总时间复杂度为 $O(n)$；单调不增的输入会使所有下标留在栈中，最坏额外空间为 $O(n)$。
+这个乘积只计算 `height[bottom]` 以上的新增水层，更低的凹陷已在先前弹栈时填平；同一列可以出现在多个水层的宽度中，但这些水层的高度区间互不重叠。栈内允许等高柱子，靠右的同高柱子先弹出时会得到 $\Delta h = 0$ 的水层，随后靠左的同高柱子再与真正的左壁算出完整水层，不影响结果。每个下标只入栈一次、最多出栈一次，配合列表尾部追加与弹出的平摊 $O(1)$ 开销，总时间复杂度为 $O(n)$；单调不增的输入会使所有下标留在栈中，最坏额外空间为 $O(n)$[^python-list-stack]。
 
 两种方法的结算单位不同：双指针确定一列的完整水深，单调栈确定一层新增水量。迁移到 [LeetCode 84. 柱状图中最大的矩形](https://leetcode.cn/problems/largest-rectangle-in-histogram/) 时，仍可在栈中保存尚未确定右边界的下标，但弹栈条件改为遇到更矮的柱子。接雨水用两壁较矮者减去槽底高度，计算新增水层；最大矩形用弹出柱自身的高度乘以可延伸宽度，计算候选面积。等高柱子的保留或合并方式要与各自的边界定义配套，不能直接照搬。
+
+[^cpp-max]: [cppreference：`std::max`](https://en.cppreference.com/w/cpp/algorithm/max.html)——说明返回两个值中的较大者，二者相等时返回第一个参数。
+
+[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明在列表末尾执行 `append()` 与 `pop()` 无需移动其余元素，适合作为后进先出栈实现平摊常数时间的入栈与出栈。

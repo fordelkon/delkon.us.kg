@@ -1,6 +1,6 @@
 ---
 title: "插入区间：三段式线性划分"
-publishDate: "2026-10-30T22:00:00+08:00"
+publishDate: "2026-10-21T12:00:00+08:00"
 description: "LeetCode 57 插入区间：利用输入按左端点升序且互不重叠的前提，Python 与 C++ 一次线性扫描完成左侧保留、重叠融合、右侧保留的三段式划分。"
 ---
 
@@ -36,22 +36,18 @@ class Solution:
         i = 0
         n = len(intervals)
 
-        # 1. Keep all intervals that end strictly before new_interval starts (r_i < L).
         while i < n and intervals[i][1] < left:
             merged.append(intervals[i])
             i += 1
 
-        # 2. Remaining intervals satisfy r_i >= L; any with l_i <= R overlaps new_interval.
+        # Remaining intervals satisfy r_i >= left, so l_i <= right is necessary and sufficient for overlap.
         while i < n and intervals[i][0] <= right:
             left = min(left, intervals[i][0])
             right = max(right, intervals[i][1])
             i += 1
         merged.append([left, right])
 
-        # 3. Remaining intervals start strictly after the merged interval ends (l_i > R).
-        while i < n:
-            merged.append(intervals[i])
-            i += 1
+        merged.extend(intervals[i:])
 
         return merged
 ```
@@ -62,9 +58,11 @@ class Solution:
 2. 第二段依次检查左端点是否 $\le \text{right}$：`[3, 5]`（$3 \le 8$）将 `[left, right]` 扩为 `[3, 8]`，`[6, 7]`（$6 \le 8$）保持 `[3, 8]`，`[8, 10]`（$8 \le 8$）再将右界扩为 `[3, 10]`；到 `[12, 16]` 时 $12 > 10$，循环结束并追加新建的 `[3, 10]`；
 3. 第三段把剩余的 `[12, 16]` 原样追加。
 
-第二段中 `left` 只可能被第一个进入该循环的区间缩小（后续重叠区间的左端点递增，不会比第一个更小），而 `right` 会随每个重叠区间单调递增，直到最后一个重叠区间确定最终右界。将 `new_interval` 解包为局部标量 `left, right` 并以新列表 `[left, right]` 追加，既省去了循环内的列表下标读写，也保证执行期间不会原地改写调用方传入的 `new_interval` 或 `intervals` 中的内层列表。
+第二段中 `left` 只可能被第一个进入该循环的区间缩小（后续重叠区间的左端点递增，不会比第一个更小），而 `right` 会随每个重叠区间单调递增，直到最后一个重叠区间确定最终右界。将 `new_interval` 解包为局部标量 `left, right` 并以新列表 `[left, right]` 追加，配合 `extend` 批量浅拷贝尾部切片引用，既省去了循环内的列表下标读写，也保证执行期间不会原地改写调用方传入的 `new_interval` 或 `intervals` 中的内层列表[^python-mutable-seq]。
 
-三个 `while` 循环共享同一个单向递增的游标 `i`，每个区间至多被访问一次，时间复杂度为 $O(n)$，除返回结果外额外空间复杂度为 $O(1)$。与[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)中平衡树单次更新的 $O(\log(m + 1))$ 不同，本题一方面可能单次吞并 $O(n)$ 个既有区间，另一方面接口要求返回包含全部区间的新数组，构造返回值本身就有 $\Omega(n)$ 的下界。
+两个 `while` 循环共享单向递增的游标 `i`，再由 `extend` 追加剩余区间，整体时间复杂度为 $O(n)$。`intervals[i:]` 会先创建一个临时列表；当新区间位于所有已有区间左侧时，切片包含全部 $n$ 个区间的引用，因此即使不计返回结果，最坏辅助空间仍为 $O(n)$。若改为逐项追加尾部区间，就可以将辅助空间降为 $O(1)$。
+
+与[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)中平衡树单次更新的 $O(\log(m + 1))$ 不同，本题一次插入可能吞并 $O(n)$ 个既有区间；在没有重叠等需要保留线性数量区间的情况下，构造返回数组本身也需要 $\Omega(n)$ 时间。
 
 ## C++：预留容量与尾部区间批量追加
 
@@ -87,13 +85,12 @@ public:
         int right = new_interval[1];
 
         std::size_t i = 0;
-        // 1. Keep intervals ending strictly before new_interval starts (r_i < L).
         while (i < n && intervals[i][1] < left) {
             merged.push_back(intervals[i]);
             ++i;
         }
 
-        // 2. Absorb all overlapping intervals (r_i >= L and l_i <= R) into [left, right].
+        // Past the first loop, intervals[i][1] >= left; any interval with start <= right overlaps.
         while (i < n && intervals[i][0] <= right) {
             left = std::min(left, intervals[i][0]);
             right = std::max(right, intervals[i][1]);
@@ -101,7 +98,6 @@ public:
         }
         merged.push_back({left, right});
 
-        // 3. Append the remaining non-overlapping suffix in a single range operation.
         merged.insert(merged.end(), intervals.begin() + i, intervals.end());
 
         return merged;
@@ -109,9 +105,11 @@ public:
 };
 ```
 
-当 `intervals` 为空，或 `new_interval` 落在所有区间最左侧（$R < l_0$）与最右侧（$L > r_{n-1}$）时，三段循环各有对应的空跳分支，无需额外特判。时间复杂度为 $O(n)$，除返回值外额外空间为 $O(1)$。
+当 `intervals` 为空，或 `new_interval` 落在所有区间最左侧（$R < l_0$）与最右侧（$L > r_{n-1}$）时，三段处理各有对应的空区间，无需额外特判。时间复杂度为 $O(n)$，除返回值外额外空间为 $O(1)$。
 
 三段式划分之所以能用单游标一次扫完，依赖输入列表“按左端点有序且互不重叠”的先验性质。一旦输入变成杂乱无章的区间集合，重叠对象不再聚集于单个局部切片，就必须先把无序集合转化为有序序列——这正是[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)的核心步骤。
+
+[^python-mutable-seq]: [Python 文档：可变序列操作](https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types)——说明 `append` 与 `extend(s[i:])` 将原序列元素的引用追加到新列表中，不会原地修改原内层列表的值。
 
 [^vector-reserve]: [cppreference：`std::vector::reserve`](https://en.cppreference.com/w/cpp/container/vector/reserve.html)——说明预留至少指定数量的存储容量，避免后续插入触发重新分配。
 

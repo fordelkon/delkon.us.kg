@@ -1,6 +1,6 @@
 ---
 title: "和为 K 的子数组：先查前缀，再记录频次"
-publishDate: "2026-10-26T11:00:00+08:00"
+publishDate: "2026-10-17T12:00:00+08:00"
 description: "LeetCode 560 的连续子数组计数：从前缀和差值推导哈希频次，解释零前缀、更新时序与负数下滑动窗口失效的原因，并给出 C++ 实现。"
 ---
 
@@ -39,7 +39,7 @@ $$
 ```python
 class Solution:
     def subarraySum(self, nums: list[int], k: int) -> int:
-        prefix_count = {0: 1}
+        prefix_count: dict[int, int] = {0: 1}
         prefix = 0
         result = 0
 
@@ -52,11 +52,11 @@ class Solution:
         return result
 ```
 
-`[0, 0]`、$k = 0$ 时，这段代码依次增加 1、2 个答案，返回 3；它计算的是起止位置不同的非空子数组，而不是去重后的数值组合。哈希查找和插入平均 $O(1)$，总时间平均 $O(n)$，最多存储 $n + 1$ 种前缀，额外空间 $O(n)$。最坏情况下哈希操作的性能仍取决于实现与输入。
+`[0, 0]`、$k = 0$ 时，这段代码依次增加 1、2 个答案，返回 3；它计算的是起止位置不同的非空子数组，而不是去重后的数值组合。哈希查找和插入平均 $O(1)$，总时间平均 $O(n)$，最多存储 $n + 1$ 种前缀，额外空间 $O(n)$；最坏情况下哈希操作的性能仍取决于实现与输入[^python-dict-complexity]。
 
 ## C++：预留容量并复用哈希查找结果
 
-C++ 实现沿用同一条状态不变量。`unordered_map` 为最多 $n + 1$ 种前缀预留空间，减少增长过程中的重新散列；`find` 返回匹配项后直接读取出现次数，不再使用 `operator[]` 重查补数[^reserve]。前缀和及答案总数用 `long long` 暂存，以免把求和和计数绑定在 32 位中间值上。
+C++ 实现沿用同一条状态不变量。`unordered_map` 为最多 $n + 1$ 种前缀预留空间，减少增长过程中的重新散列；`find` 返回匹配项后直接读取出现次数，不再使用 `operator[]` 重查补数[^reserve][^unordered-find]。前缀和及答案总数用 `long long` 暂存，以免把求和和计数绑定在 32 位中间值上。
 
 ```cpp
 #include <unordered_map>
@@ -64,7 +64,7 @@ C++ 实现沿用同一条状态不变量。`unordered_map` 为最多 $n + 1$ 种
 
 class Solution {
 public:
-    int subarraySum(std::vector<int>& nums, int k) {
+    int subarraySum(const std::vector<int>& nums, int k) {
         std::unordered_map<long long, int> prefix_count;
         prefix_count.reserve(nums.size() + 1);
         prefix_count.emplace(0LL, 1);
@@ -90,6 +90,10 @@ public:
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明 `get(key, default)` 在键缺失时返回指定的默认值。
 
+[^python-dict-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 Python `dict` 查找与写入的平均时间复杂度为 $O(1)$，极端哈希冲突下最坏退化为 $O(n)$。
+
 [^reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明预留元素容量时如何调整桶数，以及重新散列的开销。
+
+[^unordered-find]: [cppreference：`unordered_map::find`](https://en.cppreference.com/w/cpp/container/unordered_map/find.html)——说明按键查找并返回指向匹配键值对的迭代器，未命中时返回 `end()` 且不会像 `operator[]` 那样插入新元素。
 
 [^unordered-subscript]: [cppreference：`unordered_map::operator[]`](https://en.cppreference.com/w/cpp/container/unordered_map/operator_at.html)——说明缺失的键会被插入，`int` 映射值先初始化为 0。

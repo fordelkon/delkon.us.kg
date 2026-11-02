@@ -1,6 +1,6 @@
 ---
 title: "合并区间：排序后维护右边界"
-publishDate: "2026-10-29T22:30:00+08:00"
+publishDate: "2026-10-20T12:00:00+08:00"
 description: "LeetCode 56 合并区间：按左端点排序后，只需比较新区间左端点与当前右边界；用 Python 说明合并步骤，用 C++ 展示原地排序与容量预留。"
 ---
 
@@ -87,7 +87,7 @@ public:
 };
 ```
 
-Python 的 `sorted(intervals)` 默认按列表字典序比较，左端点相等时还会继续比较右端点；C++ 的比较器 `a[0] < b[0]` 则只比较左端点，在左端点相等时视为等价，满足 `std::sort` 对**严格弱序**（Strict Weak Ordering）的要求[^cpp-sort]。不规定相同左端点的次序并不影响正确性——首个同左端点区间处理后，当前右边界已满足 $R \ge r_{\text{first}} \ge l_i$，其余同左端点区间无论按什么相对顺序进入循环都会被当前段吸收，而求右端点最大值的 $\max$ 运算满足交换律与结合律。
+Python 的 `sorted(intervals)` 默认按列表字典序比较，左端点相等时还会继续比较右端点；C++ 的比较器 `a[0] < b[0]` 则只比较左端点，在左端点相等时视为等价，满足 `std::sort` 对**严格弱序**（Strict Weak Ordering）的要求[^python-lexicographical][^cpp-sort]。不规定相同左端点的次序并不影响正确性——首个同左端点区间处理后，当前右边界已满足 $R \ge r_{\text{first}} \ge l_i$，其余同左端点区间无论按什么相对顺序进入循环都会被当前段吸收，而求右端点最大值的 $\max$ 运算满足交换律与结合律。
 
 `std::sort` 保证最坏 $O(n \log n)$ 次比较[^cpp-sort]，后续线性扫描耗时 $O(n)$，总时间复杂度为 $O(n \log n)$；原地排序会改写 `intervals`，除返回结果外额外空间取决于排序栈实现（通常为 $O(\log n)$）。
 
@@ -103,5 +103,7 @@ Python 的 `sorted(intervals)` 默认按列表字典序比较，左端点相等�
 [^python-sorted]: [Python 文档：`sorted`](https://docs.python.org/3/library/functions.html#sorted)——说明从可迭代对象构造并返回一个新的有序列表。
 
 [^vector-reserve]: [cppreference：`std::vector::reserve`](https://en.cppreference.com/w/cpp/container/vector/reserve.html)——说明预留至少指定数量的存储容量，避免后续追加元素时重复扩容。
+
+[^python-lexicographical]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明序列（如 `list`）默认按字典序逐项比较，首项相等时继续比较下一项。
 
 [^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明比较器须满足严格弱序，比较次数最坏为 $O(n \log n)$。

@@ -1,6 +1,6 @@
 ---
 title: "三数之和：排序去重与频次压缩"
-publishDate: "2026-10-24T13:00:00+08:00"
+publishDate: "2026-10-16T12:00:00+08:00"
 description: "LeetCode 15 的三数之和：用 Python 排序和双指针找出所有不重复的三元组，再用 C++ 压缩重复值，比较扫描与输出的成本。"
 ---
 
@@ -58,10 +58,11 @@ public:
         std::sort(nums.begin(), nums.end());
         std::vector<std::pair<int, int>> distinct;
         for (int value : nums) {
-            if (distinct.empty() || distinct.back().first != value)
+            if (distinct.empty() || distinct.back().first != value) {
                 distinct.emplace_back(value, 1);
-            else
+            } else {
                 ++distinct.back().second;
+            }
         }
 
         std::vector<std::vector<int>> result;
@@ -80,15 +81,19 @@ public:
                     --right;
                 } else {
                     // Equal indices reuse one distinct value, so its count must cover the repeats.
-                    const bool enough = i == left && left == right
-                                            ? distinct[i].second >= 3
-                                            : i == left ? distinct[i].second >= 2
-                                            : left == right ? distinct[left].second >= 2
-                                                            : true;
-                    if (enough)
+                    bool enough = true;
+                    if (i == right) {
+                        enough = distinct[i].second >= 3;
+                    } else if (i == left) {
+                        enough = distinct[i].second >= 2;
+                    } else if (left == right) {
+                        enough = distinct[left].second >= 2;
+                    }
+                    if (enough) {
                         result.push_back({distinct[i].first,
                                           distinct[left].first,
                                           distinct[right].first});
+                    }
                     ++left;
                     --right;
                 }
@@ -101,7 +106,7 @@ public:
 
 三个索引相等时，原数组中需要三个该值；只有 `i == left` 或 `left == right` 时，出现两次即可；全不相等时各一个就够。按 $i \le \mathrm{left} \le \mathrm{right}$ 递进，一旦 `distinct[i].first > 0` 就可直接结束外层循环；即使某次因频次不够而不输出，下一组数值组合也不会因此重复。第一次加法前的 `1LL *` 把整个和提升到 64 位，在 `int` 极值输入下避免中间和有符号溢出[^cpp-promotion]。排序会修改 `nums`，这一点与上面的 Python 版不同。
 
-`std::sort` 保证最坏 $O(n \log n)$ 次比较[^cpp-sort]；压缩 $O(n)$，双指针最多 $O(u^2)$。除结果外，频次数组占 $O(u)$；排序栈的空间取决于标准库实现，常见的内省排序实现通常需要 $O(\log n)$ 栈空间，不能把它当作 `std::sort` 的标准保证。重复值多时，$u$ 远小于 $n$，后续扫描会减少；全是不同值时，压缩和额外内存可能让它慢于直接在原数组上双指针。`vector<vector<int>>` 还要为每组三元组存储结果；结果数为 $R$ 时，这部分至少要写出 $O(R)$ 个定长三元组。是否更快取决于重复率、输出规模和实际测量，不由渐进复杂度单独决定。
+`std::sort` 保证最坏 $O(n \log n)$ 次比较，后续压缩耗时 $O(n)$，双指针扫描最多耗时 $O(u^2)$[^cpp-sort]。除结果外，频次数组占 $O(u)$；排序栈的空间取决于标准库实现，常见的内省排序实现通常需要 $O(\log n)$ 栈空间，不能把它当作 `std::sort` 的标准保证[^cpp-sort]。重复值多时，$u$ 远小于 $n$，后续扫描会减少；全是不同值时，压缩和额外内存可能让它慢于直接在原数组上双指针。`vector<vector<int>>` 还要为每组三元组存储结果；结果数为 $R$ 时，这部分至少要写出 $O(R)$ 个定长三元组。是否更快取决于重复率、输出规模和实际测量，不由渐进复杂度单独决定。
 
 到[《四数之和：两层固定与双指针的剪枝边界》](/notes/algorithm/four-sum/)时，再多固定一个位置，剩余两数仍可用排序双指针；题目仍是列出不重复的数值组合，不会变成“和为目标值的连续子数组”计数。
 

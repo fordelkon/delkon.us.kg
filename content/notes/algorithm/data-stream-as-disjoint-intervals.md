@@ -1,6 +1,6 @@
 ---
 title: "将数据流变为多个不相交区间：在线区间的增量熔接"
-publishDate: "2026-10-30T21:30:00+08:00"
+publishDate: "2026-10-21T20:00:00+08:00"
 description: "LeetCode 352 将数据流变为多个不相交区间：数字逐个到达时的四种边界合并情形，Python 用 bisect 切片替换，C++ 用 std::map 对数级维护端点，并与并查集对比。"
 ---
 
@@ -29,7 +29,7 @@ from bisect import bisect_left
 
 class SummaryRanges:
     def __init__(self) -> None:
-        self.intervals: list[list[int]] = []  # Sorted, disjoint [start, end] pairs.
+        self.intervals: list[list[int]] = []
 
     def addNum(self, value: int) -> None:
         # First interval whose start is strictly greater than value (i.e., >= value + 1).
@@ -39,8 +39,9 @@ class SummaryRanges:
 
         if i > 0:
             prev = self.intervals[i - 1]
+            # Disjoint ordering makes prev the only interval that can already contain value.
             if prev[1] >= value:
-                return  # Already covered by the unique predecessor with start <= value.
+                return
             if prev[1] == value - 1:
                 merged[0] = prev[0]
                 start = i - 1
@@ -56,13 +57,13 @@ class SummaryRanges:
         return self.intervals
 ```
 
-下标 `< i` 的区间左端点都 $\le x$，又因区间互不相交，`self.intervals[i - 1]` 拥有其中最大的左端点和最大的右端点；因此只需检查 `prev[1] >= value` 就能判断 $x$ 是否已被覆盖。随后的四种合并情形统一收敛到 `self.intervals[start:end] = [merged]`：
+下标 `< i` 的区间左端点都 $\le x$，又因区间互不相交，`self.intervals[i - 1]` 拥有其中最大的左端点和最大的右端点；因此只需检查 `prev[1] >= value` 就能判断 $x$ 是否已被覆盖。随后的四种合并情形统一收敛到 `self.intervals[start:end] = [merged]`[^python-slice-assign]：
 
 - **孤立成段**：`start == i` 且 `end == i`，对空切片 `self.intervals[i:i]` 赋值等价于在下标 `i` 处插入 `[value, value]`；
 - **左侧或右侧延伸**：`[i - 1 : i]` 或 `[i : i + 1]` 长度为 $1$，原地替换单个邻居；
 - **左右桥接**：`[i - 1 : i + 1]` 长度为 $2$，把前后两个邻居合并替换为单个 `[prev[0], self.intervals[i][1]]`。
 
-设当前共有 $m$ 个不相交区间。`bisect_left` 需要 $O(\log(m + 1))$ 次比较，但 Python `list` 是连续数组，插入新段或桥接删段在最坏情况下需要搬移 $O(m)$ 个元素；`getIntervals()` 直接返回内部列表引用（若调用方可能修改返回值，则应返回浅拷贝 `[interval[:] for interval in self.intervals]`，耗时 $O(m)$）。这种取舍适合读多写少或区间总数 $m$ 较小的负载；当写入频繁且 $m$ 很大时，列表中间的线性搬移会成为瓶颈，需要换用平衡搜索树将更新也控制在 $O(\log(m + 1))$。
+设当前共有 $m$ 个不相交区间。`bisect_left` 需要 $O(\log(m + 1))$ 次比较，但 Python `list` 是连续数组，插入新段或桥接删段在最坏情况下需要搬移 $O(m)$ 个元素[^python-list-complexity]。`getIntervals()` 直接返回内部列表引用（若调用方可能修改返回值，则应返回浅拷贝 `[interval[:] for interval in self.intervals]`，耗时 $O(m)$）。这种取舍适合读多写少或区间总数 $m$ 较小的负载；当写入频繁且 $m$ 很大时，列表中间的线性搬移会成为瓶颈，需要换用平衡搜索树将更新也控制在 $O(\log(m + 1))$。
 
 ## C++：std::map 的对数级端点维护
 
@@ -73,19 +74,17 @@ class SummaryRanges:
 #include <vector>
 
 class SummaryRanges {
-    std::map<int, int> intervals;  // Maps each interval's start to its end.
+    std::map<int, int> intervals;
 
 public:
     SummaryRanges() = default;
 
     void addNum(int value) {
-        // First interval whose start is strictly greater than value.
         auto next = intervals.upper_bound(value);
         auto prev = next;
         if (prev != intervals.begin()) {
             --prev;
             if (prev->second >= value) {
-                // Value is already covered by the predecessor interval.
                 return;
             }
         }
@@ -96,14 +95,12 @@ public:
         const bool right_touch = next != intervals.end() && next->first - 1 == value;
 
         if (left_touch && right_touch) {
-            // Bridge both neighbors: extend predecessor in place and drop successor.
             prev->second = next->second;
             intervals.erase(next);
         } else if (left_touch) {
-            // Extend predecessor's right endpoint without modifying tree keys.
             prev->second = value;
         } else if (right_touch) {
-            // Shifting the start key requires replacing the successor node.
+            // std::map keys are const; erase returns the successor iterator for O(1) hinted reinsertion.
             const int right_end = next->second;
             const auto hint = intervals.erase(next);
             intervals.emplace_hint(hint, value, right_end);
@@ -126,13 +123,13 @@ public:
 这里有两处细节使实现既不依赖特定值域、又避免多余的树节点分配：
 
 - **全 `int` 值域无溢出判邻**：若直接计算 `value - 1` 或 `value + 1`，当 `value` 取 `INT_MIN` 或 `INT_MAX` 时会触发有符号整数溢出。而提前返回分支已排除 `prev->second >= value`，保证走到判邻处时必有 $\text{prev->second} < \text{value} \le \text{INT\_MAX}$，故 `prev->second + 1 == value` 绝不溢出；同理 `upper_bound` 保证 $\text{next->first} > \text{value} \ge \text{INT\_MIN}$，故 `next->first - 1 == value` 也绝不下溢。
-- **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先 `erase(next)` 取得紧邻的后继迭代器，再传给 `emplace_hint` 在平摊常数时间内完成原位替换[^map-emplace-hint]。
+- **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先 `erase(next)` 取得紧邻的后继迭代器，再传给 `emplace_hint` 在平摊常数时间内完成原位替换[^map-erase][^map-emplace-hint]。
 
 单次 `addNum` 仅做一次 `upper_bound` 查找与常数次迭代器更新，时间复杂度为 $O(\log(m + 1))$；`getIntervals()` 顺序遍历平衡树构造返回数组，时间复杂度为 $O(m)$，空间复杂度为 $O(m)$。
 
 ## 并查集视角：写快读慢的权衡
 
-回看[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)提到的并查集：每次 `addNum(x)` 时，若 $x - 1$ 或 $x + 1$ 已存在则将它们合并，并在每个连通分量的根节点维护该分量的最小、最大元素，单次 `addNum` 的平摊时间可降至 $O(\alpha(n))$。
+回看[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)提到的并查集：每次 `addNum(x)` 时，若 $x - 1$ 或 $x + 1$ 已存在则将它们合并，并在每个连通分量的根节点维护该分量的最小、最大元素，单次 `addNum` 的平摊时间可降至 $O(\alpha(n))$[^tarjan-dsu]。
 
 但并查集的连通分量之间没有顺序：每次调用 `getIntervals()` 都必须遍历所有活跃根节点并按左端点排序，查询耗时升至 $O(m \log m)$。有序列表与 `std::map` 则在写入时维护了左端点全序，让每次查询保持在线性扫描 $O(m)$。
 
@@ -140,6 +137,14 @@ public:
 
 [^bisect]: [Python 文档：`bisect` — 数组二分查找算法](https://docs.python.org/3/library/bisect.html)——说明在有序序列中以对数次比较定位插入点，`key` 参数自 Python 3.10 起支持。
 
+[^python-slice-assign]: [Python 文档：可变序列操作](https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types)——说明切片赋值 `s[i:j] = t` 会将切片 `[i:j]` 替换为可迭代对象 `t` 的内容，切片与替换序列的长度不必相等。
+
+[^python-list-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 `list` 基于连续动态数组实现，在任意中间位置插入或删除切片平均与最坏均需移动 $O(m)$ 个后续元素。
+
 [^map-upper-bound]: [cppreference：`std::map::upper_bound`](https://en.cppreference.com/w/cpp/container/map/upper_bound.html)——说明返回首个键严格大于给定值的元素迭代器，时间复杂度与容器大小成对数关系。
 
+[^map-erase]: [cppreference：`std::map::erase`](https://en.cppreference.com/w/cpp/container/map/erase.html)——说明 `std::map` 的键不可原地修改，按迭代器擦除单个节点自 C++11 起返回紧随被删元素之后的迭代器。
+
 [^map-emplace-hint]: [cppreference：`std::map::emplace_hint`](https://en.cppreference.com/w/cpp/container/map/emplace_hint.html)——说明当提示迭代器恰好指向新元素紧邻的后继位置时，插入操作的平摊时间复杂度为常数。
+
+[^tarjan-dsu]: [Robert E. Tarjan：*Efficiency of a Good But Not Linear Set Union Algorithm* (JACM, 1975)](https://doi.org/10.1145/321879.321884)——证明带路径压缩与按秩合并的并查集单次操作平摊时间复杂度为 $O(\alpha(n))$。

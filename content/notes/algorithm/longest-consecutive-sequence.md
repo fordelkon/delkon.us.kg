@@ -1,6 +1,6 @@
 ---
 title: "最长连续序列：哈希起点、并查集与边界缝合"
-publishDate: "2026-10-28T20:55:00+08:00"
+publishDate: "2026-10-19T12:00:00+08:00"
 description: "LeetCode 128 的最长连续序列：Python 哈希起点与过半剪枝、并查集与 C++ 边界哈希单次遍历，最后给出按值域宽度自适应的直接寻址优化。"
 ---
 
@@ -47,7 +47,7 @@ class Solution:
 
 ## 并查集：连通分量视角的在线延伸
 
-同样从连通分量出发，也可以在检测到 $x - 1$ 或 $x + 1$ 已存在时调用**并查集**（Disjoint Set Union）的 `union`，并在根节点维护分量大小。带路径压缩与按秩合并的单次操作平摊为 $O(\alpha(n))$（$\alpha$ 为反阿克曼函数）。不过面对任意整数输入时，数值本身并非 $[0, n)$ 内的稠密下标，无法直接用定长数组充当父节点表，仍要先靠哈希表把数值映射到节点，外加维护父指针与分量大小两份状态，在一次性给定的静态数组上常数开销明显高于集合起点法。
+同样从连通分量出发，也可以在检测到 $x - 1$ 或 $x + 1$ 已存在时调用**并查集**（Disjoint Set Union）的 `union`，并在根节点维护分量大小。带路径压缩与按秩合并的单次操作平摊为 $O(\alpha(n))$（$\alpha$ 为反阿克曼函数）[^tarjan-dsu]。不过面对任意整数输入时，数值本身并非 $[0, n)$ 内的稠密下标，无法直接用定长数组充当父节点表，仍要先靠哈希表把数值映射到节点，外加维护父指针与分量大小两份状态，在一次性给定的静态数组上常数开销明显高于集合起点法。
 
 并查集的真正用武之地在于**在线数据流**：当数字逐个到达且穿插查询时，静态起点法每来一个数都要重扫集合，而增量维护的连通结构只需局部合并。[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)正是把这一增量合并思想搬到有序区间结构上。
 
@@ -73,7 +73,7 @@ class Solution:
 
 class Solution {
 public:
-    int longestConsecutive(std::vector<int>& nums) {
+    int longestConsecutive(const std::vector<int>& nums) {
         std::unordered_map<int, int> boundary_len;
         boundary_len.reserve(nums.size());
         int max_len = 0;
@@ -128,7 +128,7 @@ public:
 
 class Solution {
 public:
-    int longestConsecutive(std::vector<int>& nums) {
+    int longestConsecutive(const std::vector<int>& nums) {
         if (nums.empty()) return 0;
 
         const auto [min_it, max_it] = std::minmax_element(nums.begin(), nums.end());
@@ -187,16 +187,22 @@ public:
 | 字节标记数组       | $O(n + W)$             | $O(W)$                             |
 | 哈希集合与起点扫描 | 平均 $O(n + u) = O(n)$ | $O(n)$，包含按输入长度预留的桶容量 |
 
-进入数组分支时，条件保证 $W \le 2n + 1$，因此初始化、写入和扫描合计仍为 $O(n)$，空间也为 $O(n)$。另一个条件把数组长度限制为至多 1,000,001 个 `char`；`vector<char>` 是字节标记数组，并非每个值只占一位的压缩位图。大量重复值会让 $n$ 远大于 $u$，所以这里按输入长度估算分配成本，不能把分支条件理解为对唯一值密度的精确测量。
+进入数组分支时，条件保证 $W \le 2n + 1$，因此初始化、写入和扫描合计仍为 $O(n)$，空间也为 $O(n)$。另一个条件把数组长度限制为至多 1,000,001 个 `char`；`vector<char>` 是字节标记数组，并非每个值只占一位的压缩位图[^cpp-vector-bool]。大量重复值会让 $n$ 远大于 $u$，所以这里按输入长度估算分配成本，不能把分支条件理解为对唯一值密度的精确测量。
 
-这两个阈值只影响性能取舍，不影响正确性：超出阈值仍由哈希分支兜底，算法并不要求输入落在小值域内。减法前先转成 `long long`，使最小值与最大值分别为 `INT_MIN` 和 `INT_MAX` 时也能安全计算跨度；稀疏分支则在查询相邻整数前检查极值[^cpp-limits]，沿用集合去重、`reserve` 容量预留[^unordered-set-reserve]与过半剪枝。连续数组访问省去了稠密分支中的哈希与节点分配，但混合方案需要额外扫描一次最小值和最大值；最终走稀疏分支时，这次扫描就是相对纯哈希解法增加的工作。阈值 `2` 和 `1'000'000` 是可调参数，具体耗时取决于数据分布、标准库和硬件，不能仅凭源码断言它在所有输入上都更快。
+这两个阈值只影响性能取舍，不影响正确性：超出阈值仍由哈希分支兜底，算法并不要求输入落在小值域内。减法前先转成 `long long`，使最小值与最大值分别为 `INT_MIN` 和 `INT_MAX` 时也能安全计算跨度；稀疏分支则在查询相邻整数前检查极值[^cpp-limits]，沿用集合去重、`reserve` 容量预留[^unordered-set-reserve]与过半剪枝。连续数组访问省去了稠密分支中的哈希与节点分配，但混合方案需要先调用 `std::minmax_element` 额外扫描一次最小值和最大值[^cpp-minmax-element]；最终走稀疏分支时，这次扫描就是相对纯哈希解法增加的工作。阈值 `2` 和 `1'000'000` 是可调参数，具体耗时取决于数据分布、标准库和硬件，不能仅凭源码断言它在所有输入上都更快。
 
 回看整道题，每个数字都相当于长度为 $1$ 的单点区间 $[x, x]$，拼接只发生在左右紧邻的整数边界上。当数字改为逐个在线到达并需要随时输出有序区间时，问题延伸为[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)；当输入对象从离散单点扩展为任意闭区间 $[l, r]$ 时，[《插入区间：三段式线性划分》](/notes/algorithm/insert-interval/)处理单个新区间融入有序不相交列表的局部合并，[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)则通过排序解决乱序区间集合的全局合并。
 
 [^hash-lookup]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 Python `set` 成员检查与迭代的平均时间复杂度。
+
+[^tarjan-dsu]: [Robert E. Tarjan：*Efficiency of a Good But Not Linear Set Union Algorithm* (JACM, 1975)](https://doi.org/10.1145/321879.321884)——证明同时采用路径压缩与按秩（或大小）合并的并查集，其单次操作的平摊时间复杂度受反阿克曼函数 $\alpha(n)$ 约束。
 
 [^cpp-limits]: [cppreference：`std::numeric_limits`](https://en.cppreference.com/w/cpp/types/numeric_limits.html)——提供目标整型可表示的最小与最大极值，用于在减一或加一前排除有符号溢出。
 
 [^unordered-reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按元素数量预留桶容量，以避免插入过程中频繁重新散列。
 
 [^unordered-set-reserve]: [cppreference：`unordered_set::reserve`](https://en.cppreference.com/w/cpp/container/unordered_set/reserve.html)——参数是预期容纳的元素数量，实际桶数还取决于最大负载因子。
+
+[^cpp-vector-bool]: [cppreference：`std::vector<bool>`](https://en.cppreference.com/w/cpp/container/vector_bool.html)——说明标准库仅对 `std::vector<bool>` 做了按位压缩特化，而 `std::vector<char>` 按普通连续字节数组存储。
+
+[^cpp-minmax-element]: [cppreference：`std::minmax_element`](https://en.cppreference.com/w/cpp/algorithm/minmax_element.html)——说明在单趟遍历中同时找出范围的最小与最大元素，至多执行 $\max(\lfloor\frac{3}{2}(n - 1)\rfloor, 0)$ 次比较。

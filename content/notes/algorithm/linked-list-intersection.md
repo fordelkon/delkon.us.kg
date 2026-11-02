@@ -1,6 +1,6 @@
 ---
 title: "相交链表：把状态判定收进循环条件"
-publishDate: "2026-10-22T10:00:00+08:00"
+publishDate: "2026-10-25T12:00:00+08:00"
 description: "LeetCode Hot 100 的相交链表，推导双指针换头的相遇条件，并修正循环中漏检 None 的终止时序。"
 ---
 
@@ -30,9 +30,12 @@ B: b nodes -> shared tail (c nodes) -> None
 
 我初版把换头写在判等之前，并且换头后当轮还会再推进一次。以两条互不相交的单节点链表为例，一轮末尾两个指针同时到达 `None`；下一轮却先把它们换成各自的头节点，判等再也看不到刚才的 `None` 状态，最后只能靠额外计数跳出循环。
 
-修正后，每轮先在循环条件里检查两个指针是否相同，再各推进一步；到达 `None` 的指针下一步切换到对方的链表头。`ListNode` 和 `Optional` 沿用题目提供的定义：
+修正后，每轮先在循环条件里检查两个指针是否相同，再各推进一步；到达 `None` 的指针下一步切换到对方的链表头。对应的 Python 实现如下：
 
 ```python
+from typing import Optional
+
+
 class Solution:
     def getIntersectionNode(
         self, headA: Optional[ListNode], headB: Optional[ListNode]
@@ -55,18 +58,17 @@ class Solution:
 
 ## C++ 进阶：同步扫描、尾节点剪枝与长度对齐
 
-换头法适合用几行代码处理所有情况。C++ 版进一步利用两条**无环**链表的结构：如果它们相交，从交点起必然共用同一个尾节点；尾节点不同，就不用再寻找交点。先让两个指针同步前进，保留等长链表早期相遇时立即返回的路径；若一条链先结束，才扫描另一条链的剩余部分，得到长度差并比较尾节点。`ListNode` 沿用题目提供的定义。
-
+换头法适合用几行代码处理所有情况。C++ 版进一步利用两条**无环**链表的结构：如果它们相交，从交点起必然共用同一个尾节点；尾节点不同，就不用再寻找交点。先让两个指针同步前进，保留等长链表早期相遇时立即返回的路径；若一条链先结束，才扫描另一条链的剩余部分，得到长度差并比较尾节点。
 ```cpp
 #include <cstddef>
 
 class Solution {
 public:
-    ListNode *getIntersectionNode(ListNode *headA, ListNode *headB) {
-        ListNode *a = headA;
-        ListNode *b = headB;
-        ListNode *tailA = nullptr;
-        ListNode *tailB = nullptr;
+    ListNode* getIntersectionNode(ListNode* headA, ListNode* headB) {
+        ListNode* a = headA;
+        ListNode* b = headB;
+        ListNode* tailA = nullptr;
+        ListNode* tailB = nullptr;
 
         while (a != nullptr && b != nullptr) {
             if (a == b) return a;
@@ -135,26 +137,26 @@ constexpr std::size_t BLOCK_COUNT = 1u << 18;
 // Scalar new must return default-new-aligned storage for any same-size type.
 struct alignas(__STDCPP_DEFAULT_NEW_ALIGNMENT__) Slot {
     std::byte storage[sizeof(ListNode)];
-    Slot *next;
+    Slot* next;
 };
 
 Slot slots[BLOCK_COUNT];
-Slot *free_head = nullptr;
+Slot* free_head = nullptr;
 std::size_t used = 0;
 std::mutex mutex;
 
-bool owns(const void *pointer) noexcept {
-    std::less<const void *> less;
-    return !less(pointer, static_cast<const void *>(slots)) &&
-           less(pointer, static_cast<const void *>(slots + BLOCK_COUNT));
+bool owns(const void* pointer) noexcept {
+    std::less<const void*> less;
+    return !less(pointer, static_cast<const void*>(slots)) &&
+           less(pointer, static_cast<const void*>(slots + BLOCK_COUNT));
 }
-} // namespace NodeAllocation
+}  // namespace NodeAllocation
 
-void *operator new(std::size_t size) {
+void* operator new(std::size_t size) {
     if (size == sizeof(ListNode)) {
         std::lock_guard<std::mutex> guard(NodeAllocation::mutex);
         if (NodeAllocation::free_head != nullptr) {
-            auto *slot = NodeAllocation::free_head;
+            auto* slot = NodeAllocation::free_head;
             NodeAllocation::free_head = slot->next;
             return slot->storage;
         }
@@ -165,7 +167,7 @@ void *operator new(std::size_t size) {
 
     // Fall back for other sizes or an exhausted pool; honor new_handler.
     for (;;) {
-        if (void *pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
+        if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
         if (auto handler = std::get_new_handler()) {
             handler();
         } else {
@@ -174,10 +176,10 @@ void *operator new(std::size_t size) {
     }
 }
 
-void operator delete(void *pointer) noexcept {
+void operator delete(void* pointer) noexcept {
     if (pointer == nullptr) return;
     if (NodeAllocation::owns(pointer)) {
-        auto *slot = reinterpret_cast<NodeAllocation::Slot *>(pointer);
+        auto* slot = reinterpret_cast<NodeAllocation::Slot*>(pointer);
         std::lock_guard<std::mutex> guard(NodeAllocation::mutex);
         slot->next = NodeAllocation::free_head;
         NodeAllocation::free_head = slot;
@@ -186,14 +188,14 @@ void operator delete(void *pointer) noexcept {
     }
 }
 
-void operator delete(void *pointer, std::size_t) noexcept {
+void operator delete(void* pointer, std::size_t) noexcept {
     ::operator delete(pointer);
 }
 
 // Keep arrays on the ordinary heap, even if their byte count matches a node.
-void *operator new[](std::size_t size) {
+void* operator new[](std::size_t size) {
     for (;;) {
-        if (void *pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
+        if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
         if (auto handler = std::get_new_handler()) {
             handler();
         } else {
@@ -202,22 +204,26 @@ void *operator new[](std::size_t size) {
     }
 }
 
-void operator delete[](void *pointer) noexcept {
+void operator delete[](void* pointer) noexcept {
     std::free(pointer);
 }
 
-void operator delete[](void *pointer, std::size_t) noexcept {
+void operator delete[](void* pointer, std::size_t) noexcept {
     ::operator delete[](pointer);
 }
 ```
 
-`Slot` 按默认 `new` 的对齐要求布置[^global-new]，释放的槽位进入空闲链表，池满后回退到普通分配；`owns` 用 `std::less<const void *>` 判断指针是否落在静态池区间内，避免直接对非同一数组的指针使用内建关系运算符[^std-less]，非池分配则交由 `std::free` 释放[^global-delete]。数组分配与释放单独走普通堆，避免同尺寸数组和节点池混用[^global-new][^global-delete]。普通 `new` 的底层分配失败时先调用已安装的 `new_handler`，若它返回就重试；没有处理器时抛出 `std::bad_alloc`[^global-new]。互斥锁保护槽位分配与归还，因为替换的全局分配和释放函数也必须支持并发调用[^global-new]。`Solution` 仍只通过 `next` 找交点，**不能**把连续分配的地址当作链表连接关系。
+`Slot` 用 `alignas(__STDCPP_DEFAULT_NEW_ALIGNMENT__)` 按默认 `new` 的对齐要求布置，且首成员 `storage` 与标准布局结构体 `Slot` 指针可互转，释放的槽位得以通过 `reinterpret_cast` 归入空闲链表，池满后回退到普通分配[^global-new][^cpp-alignas][^cpp-pointer-interconvertible]。`owns` 用 `std::less<const void *>` 判断指针是否落在静态池区间内，避免直接对非同一数组的指针使用内建关系运算符，非池分配则交由 `std::free` 释放[^std-less][^global-delete]。数组分配与释放单独走普通堆，避免同尺寸数组和节点池混用[^global-new][^global-delete]。普通 `new` 的底层分配失败时先调用已安装的 `new_handler`，若它返回就重试；没有处理器时抛出 `std::bad_alloc`[^global-new]。互斥锁保护槽位分配与归还，因为替换的全局分配和释放函数也必须支持并发调用[^global-new]。`Solution` 仍只通过 `next` 找交点，**不能**把连续分配的地址当作链表连接关系。
 
 这是一种**评测环境定向**的优化：全局 `operator new` 只能看到申请大小，任何恰好与 `ListNode` 同尺寸、通过普通 `new` 分配的对象也会进入池；额外对齐对象的 `new` 会优先选择 C++17 的对齐版本，类专属分配函数也可能接管调用[^new-expression]。固定池会占用常驻内存，锁与所有权检查也有开销；评测器如何创建节点、是否多组输入重用进程，都会影响收益。代码没有修改求交算法的 $O(m + n)$ 时间、$O(1)$ 额外空间；它在提交环境中可能减少节点的底层分配次数，但不能仅凭源码保证更快。
 
 [^identity]: [Python 文档：比较运算](https://docs.python.org/3/library/stdtypes.html#comparisons)——区分对象身份比较 `is` 与可由类自定义的相等比较 `==`。
 
 [^global-new]: [cppreference：`operator new` 的全局替换](https://en.cppreference.com/w/cpp/memory/new/operator_new.html)——说明全局普通分配函数可替换、默认对齐要求、失败时调用 `new_handler`，以及替换函数的线程安全要求。
+
+[^cpp-alignas]: [cppreference：`alignas` 说明符](https://en.cppreference.com/w/cpp/language/alignas.html)——说明显式指定类型或对象的对齐要求，配合 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 满足全局标量 `operator new` 的默认对齐契约。
+
+[^cpp-pointer-interconvertible]: [cppreference：`reinterpret_cast` 与指针可互转性](https://en.cppreference.com/w/cpp/language/reinterpret_cast.html)——说明标准布局结构体对象与其首个非静态数据成员指针可互转（pointer-interconvertible），因此可将 `slot->storage` 的返回地址安全转回 `Slot*`。
 
 [^global-delete]: [cppreference：`operator delete` 的全局替换](https://en.cppreference.com/w/cpp/memory/new/operator_delete.html)——说明全局释放函数可替换，编译器可选择 C++14 起提供的带大小释放重载。
 
