@@ -40,13 +40,12 @@ $$
 在每个节点上，必须遵循与[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)一致的更新时序：**先查询 `current_sum - targetSum` 的频次，再将 `current_sum` 计入表中**。若顺序颠倒，当 `targetSum == 0` 时，`current_sum - 0 == current_sum` 会把刚刚写入的当前节点自身算作前驱，从而把长度为 $0$ 的空路径误计入答案。
 
 ```python
-from collections import defaultdict
 from typing import Optional
 
 
 class Solution:
     def pathSum(self, root: Optional[TreeNode], targetSum: int) -> int:
-        prefix_count: dict[int, int] = defaultdict(int, {0: 1})
+        prefix_count: dict[int, int] = {0: 1}
 
         def dfs(node: Optional[TreeNode], current_sum: int) -> int:
             if node is None:
@@ -56,24 +55,26 @@ class Solution:
 
             # Query ancestor prefixes before recording `current_sum` so that
             # targetSum == 0 does not match an empty zero-node path at `node`.
-            paths = prefix_count[current_sum - targetSum]
+            paths = prefix_count.get(current_sum - targetSum, 0)
 
-            prefix_count[current_sum] += 1
+            prefix_count[current_sum] = prefix_count.get(current_sum, 0) + 1
             paths += dfs(node.left, current_sum)
             paths += dfs(node.right, current_sum)
-            # Remove `node`'s prefix sum before returning to sibling/parent branches.
+            # Remove only this node's contribution; keep matching ancestor prefixes.
             prefix_count[current_sum] -= 1
+            if prefix_count[current_sum] == 0:
+                del prefix_count[current_sum]
 
             return paths
 
         return dfs(root, 0)
 ```
 
-回溯时必须执行 `prefix_count[current_sum] -= 1`，而不能直接删除键 `del prefix_count[current_sum]`。因为树中存在正负节点相互抵消的情况，同一条祖先链上可能出现多个节点拥有相同的前缀和，离开当前节点时只能核销当前节点贡献的那 $1$ 次频次[^py-defaultdict]。
+`dict.get` 只读查询，不会为缺失键插入条目[^py-dict]。回溯时先将频次减 $1$，只有归零后才删除键：同一条祖先链上可能因正负抵消而多次出现相同前缀和，必须保留其他祖先贡献的频次，包括初始空前缀。这样表中始终只有当前路径上的活跃前缀。
 
 ## C++：64 位前缀和防溢出与只读查找
 
-题目中单个节点值可达 $\pm 10^9$，树高可达 $1000$，沿单链累加时前缀和最大可达 $10^{12}$，超出 32 位有符号整数 `int` 的上限（约 $2.14 \times 10^9$）。Python 的 `int` 支持任意精度整数，而在 C++ 中必须使用 64 位有符号整型（如 `<cstdint>` 的 `std::int64_t` 或 `long long`）[^cpp-int] 存储前缀和与哈希表键类型。此外，查询 `current_sum - target_sum` 时使用 `unordered_map::find`[^cpp-find] 而非 `operator[]`[^cpp-op-at]，可以避免因查询不存在的键而在哈希表中插入值为 $0$ 的冗余条目：
+题目中单个节点值可达 $\pm 10^9$，树高可达 $1000$，沿单链累加时前缀和最大可达 $10^{12}$，超出 32 位有符号整数 `int` 的上限（约 $2.14 \times 10^9$）。Python 的 `int` 支持任意精度整数，而在 C++ 中必须使用 64 位有符号整型（如 `<cstdint>` 的 `std::int64_t` 或 `long long`）[^cpp-int] 存储前缀和与哈希表键类型。此外，查询 `current_sum - target_sum` 时使用 `unordered_map::find`[^cpp-find] 而非 `operator[]`[^cpp-op-at]，可以避免因查询不存在的键而插入冗余条目。回溯时也要在频次归零后 `erase`；注意递归中的插入可能触发重散列，不能跨递归保存迭代器，须在返回后重新 `find`：
 
 ```cpp
 #include <cstdint>
@@ -100,8 +101,11 @@ class Solution {
         ++prefix_count[current_sum];
         paths += dfs(node->left, current_sum, target_sum, prefix_count);
         paths += dfs(node->right, current_sum, target_sum, prefix_count);
-        // Restore invariant: only active ancestors of the current node remain counted.
-        --prefix_count[current_sum];
+        // Reacquire after recursion: insertions may have rehashed the map.
+        auto current = prefix_count.find(current_sum);
+        if (--current->second == 0) {
+            prefix_count.erase(current);
+        }
 
         return paths;
     }
@@ -118,9 +122,9 @@ public:
 
 如果采用朴素的双重递归（外层遍历每个节点作为起点，内层向下遍历子树累加求和），在平衡树上耗时 $O(n \log n)$，而在退化单链上会达到 $O(n^2)$。引入前缀和哈希表与回溯恢复后，每个节点仅被 DFS 访问一次，单节点上的字典/哈希表查找、频次递增与回溯递减均为平均 $O(1)$ 时间开销[^py-complexity][^cpp-find]，总体时间复杂度降至平均 $O(n)$（极端哈希冲突下最坏 $O(n^2)$）。
 
-空间复杂度方面，递归调用栈的深度不超过树高 $h$，为 $O(h)$；哈希表中有效活跃（频次大于 0）的前缀和条目数同样不超过当前路径长度 $h + 1$。在不主动擦除零频次键的实现中，哈希表至多保存 $n + 1$ 个不同前缀和，总辅助空间不超过 $O(n)$。
+设树高为 $h$，回溯归零即删除后，哈希表只保留当前路径的前缀和及空前缀，最多 $h + 1$ 个键；调用栈也占 $O(h)$，所以峰值辅助空间为 $O(h)$，平衡树为 $O(\log n)$，最坏链状树为 $O(n)$。两种实现都不修改输入树，输出是一个计数；深树仍受 Python 递归限制或 C++ 线程栈容量约束。
 
-[^py-defaultdict]: [Python 文档：`collections.defaultdict`](https://docs.python.org/3/library/collections.html#collections.defaultdict)——说明为缺失键提供默认工厂函数值（`int()` 返回 `0`）的字典子类行为。
+[^py-dict]: [Python 文档：映射类型 `dict`](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明 `get(key, default)` 在缺失时返回默认值，以及 `del d[key]` 的删除语义。
 
 [^py-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 Python `dict` 查找与写入操作的平均时间复杂度为 $O(1)$。
 

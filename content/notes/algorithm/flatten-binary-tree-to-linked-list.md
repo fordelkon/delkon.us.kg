@@ -34,7 +34,7 @@ class Solution:
         dfs(root)
 ```
 
-设二叉树共有 $n$ 个节点，树高为 $h$。每个节点恰好被访问一次并执行常数次指针赋值，时间复杂度为 $O(n)$；递归调用栈的深度取决于树高，辅助空间复杂度为 $O(h)$。
+设二叉树共有 $n$ 个节点，树高为 $h$。每个节点恰好被访问一次并执行常数次指针赋值，时间复杂度为 $O(n)$；递归调用栈的深度取决于树高，辅助空间为 $O(h)$，平衡树为 $O(\log n)$，最坏单链为 $O(n)$，并可能触及 Python 递归限制。展开结果复用输入节点，不另占 $O(n)$ 输出空间。
 
 ## C++：左子树最右节点就地嫁接
 
@@ -42,7 +42,9 @@ class Solution:
 
 考察当前节点 `curr`。若 `curr->left` 为空，则 `curr` 已经满足单链表形态，直接令 `curr = curr->right` 推进即可。若 `curr->left` 非空，按照先序遍历“根 $\to$ 左子树 $\to$ 右子树”的规则，原右子树 `curr->right` 应当紧接在整棵左子树所有节点访问完毕之后被访问。
 
-为什么只需从 `curr->left` 出发一路沿 `right` 指针走到底找到最右节点 `predecessor`，并将 `curr->right` 嫁接到 `predecessor->right` 即可？需要注意，这里的 `predecessor` 是左子树**中序遍历**的最后一个节点；当 `predecessor` 自身还带有非空左子树 `predecessor->left` 时，它还不是左子树当前时刻先序遍历的最后一个节点（先序末端位于 `predecessor->left` 内部）。但这一嫁接依然严格正确：在先序遍历中，`curr->left` 下所有非 `predecessor` 的右路祖先节点，其左子树均会在沿右链下探到达 `predecessor` 之前被优先展开并插入右链；而当主循环的游标 `curr` 稍后推进到 `predecessor` 本身时，若 `predecessor->left` 非空，同一嫁接规则会再次把刚刚挂在 `predecessor->right` 上的原右子树继续下推到 `predecessor->left` 的最右端。因此，在局部每一步维持如下**子树嫁接不变量**——将 `curr->right` 挂到 `curr->left` 最右节点 `predecessor` 的空 `right` 指针上，再令 `curr->right = curr->left` 并置 `curr->left = nullptr`——经归纳即可保证整棵树按先序顺序完整展平。
+从 `curr->left` 沿 `right` 走到底找到 `predecessor`，把原右子树挂到它的空 `right` 上。`predecessor` 未必是左子树的先序末节点：它还可能有左子树。但先序遍历会先访问这棵左子树，再进入新挂上的右子树；而右链上其余祖先的左子树也都在到达 `predecessor` 前访问完毕。因此，嫁接后的先序序列仍是“原左子树序列 + 原右子树序列”。再令 `curr->right = curr->left`、`curr->left = nullptr`，整个局部改写保持先序序列不变。
+
+循环始终维持：`curr` 之前的已处理前缀中，每个节点的 `left` 都为空，`right` 都指向原先序序列中的下一节点。局部改写使 `curr` 也满足这一条件，再沿 `right` 前进，便将前缀延长一个节点；循环结束时，全部节点都已按原先序序列连接。两种实现都复用原节点并永久修改输入树，不创建新节点。
 
 与[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)相比，中序 Morris 遍历将 `predecessor->right` 临时指向当前根节点 `curr` 并在第二次经过时恢复为 `nullptr`；而本题的目标本就是将原树重排为单链表，因此直接将 `predecessor->right` 永久指向 `curr->right`，随后沿着改写后的 `curr = curr->right` 单向推进，无需回溯拆桥：
 
@@ -73,8 +75,8 @@ public:
 
 [^py-nonlocal]: [Python 文档：`nonlocal` 语句](https://docs.python.org/3/reference/simple_stmts.html#the-nonlocal-statement)——说明内层嵌套函数如何绑定并更新外层函数作用域中的变量 `prev`。
 
-[^sicp-recursion]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——阐述递归调用如何借由系统栈暂存外层节点上下文，使子树的指针重连得以在子调用返回后安全执行。
+[^sicp-recursion]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——说明递归调用如何保存并恢复待完成的上下文；本题指针重连的正确性由正文的访问顺序与 `prev` 不变量说明。
 
-[^morris-1979]: [J. M. Morris: *Traversing binary trees simply and cheaply* (Information Processing Letters, 1979)](https://doi.org/10.1016/0020-0190(79)90068-1)——提出利用左子树最右节点的空闲右指针编码后续访问路径的思想，本题在此基础上将临时回溯线索改为对原右子树的永久嫁接。
+[^morris-1979]: [J. M. Morris: _Traversing binary trees simply and cheaply_ (Information Processing Letters, 1979)](<https://doi.org/10.1016/0020-0190(79)90068-1>)——提出利用左子树最右节点的空闲右指针编码后续访问路径的思想，本题在此基础上将临时回溯线索改为对原右子树的永久嫁接。
 
 [^sicp-iter]: [SICP §1.2.1: Linear Recursion and Iteration](https://sicp.sourceacademy.org/chapters/1.2.1.html)——对比需要维护延迟操作链的递归过程与仅靠固定数量状态变量推进的常数空间迭代过程。

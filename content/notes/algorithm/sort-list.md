@@ -6,6 +6,8 @@ description: "LeetCode 148：用 Python 递归归并理解链表排序，再用 
 
 [LeetCode 148. 排序链表](https://leetcode.cn/problems/sort-list/)（Hot 100）要求将链表按升序排列，进阶要求是 $O(n \log n)$ 时间和 $O(1)$ 辅助空间。归并排序适合这道题：切分链表只需断开指针，合并时可以复用节点，无需为节点值准备额外数组。
 
+设节点数为 $n$。输入的 `next` 链须有限且无环，并允许独占改写链接。两版都会永久重排原节点，调用方应使用返回的新头；它们不复制数据节点，C++ 也不分配或释放这些节点，所有权仍由调用方管理。
+
 ## Python：先切分，再递归合并
 
 自顶向下的分治递归遵循标准的**分解与合并**模式：先把大链表平分为两个独立子链表分别递归排序，再将有序子链表组合为全局有序链表（详见[《从调用栈理解递归》中的分解与合并](/posts/understanding-recursion/#分解与合并用子问题结果求当前答案)）。具体步骤比较直接：
@@ -63,7 +65,7 @@ class Solution:
 
 ## C++：按段长翻倍，省去递归栈
 
-自底向上版本从长度为 1 的有序段开始，每轮合并相邻两段，段长依次为 $1, 2, 4, 8, \dots$。先扫描一次得到链表长度，就能确定何时结束。这种通过自底向上迭代规约来模拟递归树执行、消除函数调用栈的思路，在[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)中有系统阐述。
+自底向上版本从长度为 1 的有序段开始，每轮合并相邻两段，段长依次为 $1, 2, 4, 8, \dots$。每轮开始时，链表由长度为 `width` 的有序段组成（最后一段可以更短）；合并后便得到下一轮的有序段。先扫描一次得到链表长度，就能确定何时结束。这里的段长不变式说明了本实现为何可逐轮排序；一般的迭代改写思路见[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)。
 
 ```text
 原始:   4 -> 2 -> 1 -> 3
@@ -144,6 +146,6 @@ private:
 
 这两种写法的主要取舍是控制流程：递归便于理解拆分与合并，自底向上迭代则通过显式管理段长省去调用栈。[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)也会利用指针重连节省辅助空间，但复制完成后还需要恢复原链表。
 
-[^stable-sort]: [cppreference：`std::stable_sort`](https://en.cppreference.com/w/cpp/algorithm/stable_sort.html)——说明稳定排序要求等价元素在排序后保持原有的相对次序。
+[^stable-sort]: [cppreference：`std::stable_sort`](https://en.cppreference.com/w/cpp/algorithm/stable_sort.html)——这里只引用稳定性的定义：等价元素保持原有相对次序。本文链表归并的稳定性来自切分保持顺序、相等时优先取左侧，不依赖该库函数的实现或复杂度。
 
 [^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明自动存储期的局部对象在函数作用域内分配并在返回时自动销毁，不产生动态堆分配。

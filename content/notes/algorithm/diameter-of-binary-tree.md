@@ -65,7 +65,7 @@ class Solution:
 
 ## C++：引用参数透传与零动态分配
 
-在 C++ 中，将 `int& max_diameter` 作为引用参数沿调用栈透传，既避免了类成员变量在多次调用之间的状态残留，也省去了 `std::function` 闭包捕获的额外开销，在后序回退阶段通过 `std::max`[^cpp-max] 就地更新全局直径：
+在 C++ 中，将 `int& max_diameter` 作为引用参数沿调用栈透传，每次入口调用都重新初始化答案，避免类成员状态残留；后序回退时通过 `std::max`[^cpp-max] 更新直径。这里不需要 `std::function`，也不为树节点分配动态内存：
 
 ```cpp
 #include <algorithm>
@@ -99,11 +99,11 @@ public:
 
 需要注意，最长路径并不一定经过整棵树的根节点 `root`。当整棵树呈现“根部一侧只有短链，另一侧深层子树内部却有宽阔分叉”时，最长路径的最高拐点位于深层子树内部。因此必须在每个节点的后序位置都更新一次 `max_diameter`，而不能只在根节点计算 `depth(root.left) + depth(root.right)`。
 
-设二叉树共有 $n$ 个节点，树高为 $h$。递归函数严格访问每个节点一次，每个节点内部仅执行常数次算术加法与比较操作，时间复杂度为 $O(n)$。辅助空间完全取决于递归调用栈的最大深度 $O(h)$：在平衡二叉树中为 $O(\log n)$，在退化为单链的最坏情况下为 $O(n)$。
+设二叉树共有 $n$ 个节点，树高为 $h$。递归函数严格访问每个节点一次，每个节点内部仅执行常数次算术加法与比较操作，时间复杂度为 $O(n)$。辅助空间完全取决于递归调用栈的最大深度 $O(h)$：在平衡二叉树中为 $O(\log n)$，在退化为单链的最坏情况下为 $O(n)$。两种实现均只读输入树，返回整数不需要额外结果容器；深树上仍需留意 Python 递归限制与 C++ 线程栈容量。
 
 本题建立的“后序递归向上返回单侧链贡献 + 当前节点作为最高拐点更新全局最优解”模型，是树上路径极值问题的通用基础。当边权固定为 $1$ 时，子树的深度非负，因此路径自然延伸到叶子节点最优；一旦把“边数”推广为“带正负权值的节点和”，只需在接收左右子树贡献时增加一步 `max(0, gain)` 的负收益截断剪枝，即可直接过渡到[《二叉树中的最大路径和：负收益归零剪枝与树上后序贡献》](/notes/algorithm/binary-tree-maximum-path-sum/)。
 
-[^clrs-trees]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 对自由树与有根树中唯一简单路径及最高顶点（最近公共祖先）性质的论述。
+[^clrs-trees]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 介绍自由树与有根树的基础概念；本文据唯一简单路径推导最高拐点的结算方式。
 
 [^sicp-tree]: [SICP §2.2.2: Hierarchical Structures](https://sicp.sourceacademy.org/chapters/2.2.2.html)——阐述层次化树形结构上的递归分解与子问题结果组合模型。
 

@@ -44,10 +44,10 @@ description: "LeetCode 98：剖析仅比对直接子节点的局部判定陷阱�
 
 这与[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)及[《二叉搜索树中第 K 小的元素：中序遍历与迭代提前终止》](/notes/algorithm/kth-smallest-element-in-a-bst/)共享同一性质。实现时无需先将整棵树的值收集到数组中再做二次扫描，只需在遍历过程中维护前驱节点值 `prev`：每访问一个当前节点 `curr`，立即校验 `curr.val > prev` 是否成立，随后将 `prev` 更新为 `curr.val`。一旦遇到 `curr.val <= prev` 即可提前返回 `False`。
 
-| 判定范式 | 跨层状态通道 | 核心不变量 | 提前终止时机 |
-| :--- | :--- | :--- | :--- |
-| 开区间收缩 | 递归参数向下传值 `(low, high)` | 当前子树内所有节点值 $v \in (l, r)$ | 首次遇到 $v \le l$ 或 $v \ge r$ |
-| 中序单调性检验 | 遍历状态记录前驱 `prev` | 当前访问值严格大于中序前驱值 | 首次遇到 `curr.val <= prev` |
+| 判定范式       | 跨层状态通道                   | 核心不变量                          | 提前终止时机                    |
+| :------------- | :----------------------------- | :---------------------------------- | :------------------------------ |
+| 开区间收缩     | 递归参数向下传值 `(low, high)` | 当前子树内所有节点值 $v \in (l, r)$ | 首次遇到 $v \le l$ 或 $v \ge r$ |
+| 中序单调性检验 | 遍历状态记录前驱 `prev`        | 当前访问值严格大于中序前驱值        | 首次遇到 `curr.val <= prev`     |
 
 ## Python：显式栈中序遍历与前驱校验
 
@@ -86,7 +86,7 @@ class Solution:
 工程上有两种常见的无歧义边界写法：
 
 1. 将上下界类型拓宽为 64 位整数 `long long`，并用 `LLONG_MIN` 与 `LLONG_MAX` 初始化开区间[^cpp-climits]。因为 32 位 `int` 的全部取值都严格落在 `(LLONG_MIN, LLONG_MAX)` 内部，根节点不会在初始边界上触发假阳性。
-2. 若节点值本身已经是 `long long` 或泛化比较类型，无法继续拓宽位宽，则可将上下界声明为 `std::optional<int>`（或传入 `const TreeNode*` 边界指针），用 `std::nullopt` 显式表达“尚无上界/下界”[^cpp-optional]。
+2. 若节点值本身已经是 `long long` 或泛化比较类型，无法继续拓宽位宽，则可将上下界声明为对应值类型的 `std::optional<T>`（或传入 `const TreeNode*` 边界指针），用 `std::nullopt` 显式表达“尚无上界/下界”[^cpp-optional]。
 
 下面给出位宽拓宽的递归实现：
 
@@ -113,9 +113,9 @@ public:
 };
 ```
 
-递归过程对每个节点访问一次，每次调用仅做常数次比较，时间复杂度为 $O(n)$；递归调用栈的最大深度等于树高 $h$，辅助空间复杂度为 $O(h)$。
+递归过程在失败时会短路，每个节点至多访问一次，最坏时间为 $O(n)$；递归栈深度为 $O(h)$，平衡树为 $O(\log n)$，最坏单链为 $O(n)$，深树可能耗尽 C++ 线程栈。两种方法都只读输入树，返回布尔值；显式栈实现可直接提前退出，若改用 Morris，则须先确保所有临时线索都已恢复。
 
-[^clrs-bst]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章给出二叉搜索树的定义及定理 12.1（Inorder tree walk prints the keys of a binary search tree in sorted order）。
+[^clrs-bst]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章给出二叉搜索树的定义及定理 12.1（Inorder tree walk prints the keys of a binary search tree in sorted order）。
 
 [^python-compare]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明 Python 数值类型 `int` 与 `float('-inf')` 跨类型比较时的全序规则。
 

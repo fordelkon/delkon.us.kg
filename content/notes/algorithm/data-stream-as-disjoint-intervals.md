@@ -10,6 +10,8 @@ description: "LeetCode 352 将数据流变为多个不相交区间：数字逐�
 
 ## 四种边界合并情形
 
+这里维护的是连续整数段，除了不重叠，还要合并相邻整数：`[1, 2]` 与 `[3, 4]` 应表示为 `[1, 4]`。因此相邻两段必须满足 $r_i + 1 < l_{i+1}$。这与[普通闭区间的重叠合并](/notes/algorithm/merge-intervals/#为什么先排序)不同，后者会保留这两个没有公共点的区间。
+
 设当前已维护的 $m$ 个不相交闭区间满足 $l_0 \le r_0 < l_1 \le r_1 < \dots < l_{m-1} \le r_{m-1}$。新到达的整数 $x$（对应参数 `value`）若已落在某个既有区间 $[l_k, r_k]$ 内部（$l_k \le x \le r_k$），区间集合保持不变；否则 $x$ 严格位于两个相邻区间之间，只可能通过 $x - 1$ 与 $x + 1$ 触碰左右邻居的端点，触发四种局部变化：
 
 1. **孤立成段**：前驱右端点 $< x - 1$ 且后继左端点 $> x + 1$，新增独立区间 $[x, x]$；
@@ -21,7 +23,7 @@ description: "LeetCode 352 将数据流变为多个不相交区间：数字逐�
 
 ## Python：有序列表上的 bisect 切片替换
 
-Python 标准库没有内置平衡搜索树，可以用有序 `list` 保存区间，配合 `bisect_left` 二分定位[^bisect]。查找第一个左端点 $\ge x + 1$ 的下标 $i$ 后，用切片范围 `[start:end]` 记录本次被新区间 `merged` 吞并的旧区间：
+Python 标准库没有内置平衡搜索树，可以用有序 `list` 保存区间，配合 `bisect_left` 二分定位。以下代码需要 Python 3.10 或更新版本，因为使用了 `key` 参数[^bisect]。查找第一个左端点 $\ge x + 1$ 的下标 $i$ 后，用切片范围 `[start:end]` 记录本次被新区间 `merged` 吞并的旧区间。`getIntervals()` 复制外层列表和每个区间列表，调用方修改返回值不会影响内部状态：
 
 ```python
 from bisect import bisect_left
@@ -54,7 +56,8 @@ class SummaryRanges:
         self.intervals[start:end] = [merged]
 
     def getIntervals(self) -> list[list[int]]:
-        return self.intervals
+        # Copy both list levels so callers cannot mutate the maintained intervals.
+        return [interval[:] for interval in self.intervals]
 ```
 
 下标 `< i` 的区间左端点都 $\le x$，又因区间互不相交，`self.intervals[i - 1]` 拥有其中最大的左端点和最大的右端点；因此只需检查 `prev[1] >= value` 就能判断 $x$ 是否已被覆盖。随后的四种合并情形统一收敛到 `self.intervals[start:end] = [merged]`[^python-slice-assign]：
@@ -63,7 +66,7 @@ class SummaryRanges:
 - **左侧或右侧延伸**：`[i - 1 : i]` 或 `[i : i + 1]` 长度为 $1$，原地替换单个邻居；
 - **左右桥接**：`[i - 1 : i + 1]` 长度为 $2$，把前后两个邻居合并替换为单个 `[prev[0], self.intervals[i][1]]`。
 
-设当前共有 $m$ 个不相交区间。`bisect_left` 需要 $O(\log(m + 1))$ 次比较，但 Python `list` 是连续数组，插入新段或桥接删段在最坏情况下需要搬移 $O(m)$ 个元素[^python-list-complexity]。`getIntervals()` 直接返回内部列表引用（若调用方可能修改返回值，则应返回浅拷贝 `[interval[:] for interval in self.intervals]`，耗时 $O(m)$）。这种取舍适合读多写少或区间总数 $m$ 较小的负载；当写入频繁且 $m$ 很大时，列表中间的线性搬移会成为瓶颈，需要换用平衡搜索树将更新也控制在 $O(\log(m + 1))$。
+设当前共有 $m$ 个不相交区间。`bisect_left` 需要 $O(\log(m + 1))$ 次比较，但 Python `list` 是连续数组，插入新段或桥接删段在最坏情况下需要搬移 $O(m)$ 个元素，因此 `addNum()` 最坏耗时 $O(m)$[^python-list-complexity]。内部区间状态占 $O(m)$ 空间，更新只需常数个临时区间和下标。`getIntervals()` 构造独立快照，时间与输出空间均为 $O(m)$，除输出外辅助空间为 $O(1)$。列表方案适合区间总数较小的情况；若需避免频繁更新时的线性搬移，可换用平衡搜索树。
 
 ## C++：std::map 的对数级端点维护
 
@@ -125,13 +128,13 @@ public:
 - **全 `int` 值域无溢出判邻**：若直接计算 `value - 1` 或 `value + 1`，当 `value` 取 `INT_MIN` 或 `INT_MAX` 时会触发有符号整数溢出。而提前返回分支已排除 `prev->second >= value`，保证走到判邻处时必有 `prev->second < value <= INT_MAX`，故 `prev->second + 1 == value` 绝不溢出；同理 `upper_bound` 保证 `next->first > value >= INT_MIN`，故 `next->first - 1 == value` 也绝不下溢。
 - **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先 `erase(next)` 取得紧邻的后继迭代器，再传给 `emplace_hint` 在平摊常数时间内完成原位替换[^map-erase][^map-emplace-hint]。
 
-单次 `addNum` 仅做一次 `upper_bound` 查找与常数次迭代器更新，时间复杂度为 $O(\log(m + 1))$；`getIntervals()` 顺序遍历平衡树构造返回数组，时间复杂度为 $O(m)$，空间复杂度为 $O(m)$。
+单次 `addNum` 仅做一次 `upper_bound` 查找与常数次节点更新，时间复杂度为 $O(\log(m + 1))$。内部映射占 $O(m)$ 空间；`getIntervals()` 与 Python 版一样返回独立快照，时间与输出空间均为 $O(m)$，除输出外辅助空间为 $O(1)$。这两个版本的更新成本不同，来自有序列表与平衡搜索树的选择。
 
 ## 并查集视角：写快读慢的权衡
 
-回看[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)提到的并查集：每次 `addNum(x)` 时，若 $x - 1$ 或 $x + 1$ 已存在则将它们合并，并在每个连通分量的根节点维护该分量的最小、最大元素，单次 `addNum` 的平摊时间可降至 $O(\alpha(n))$[^tarjan-dsu]。
+回看[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)提到的并查集：每次 `addNum(x)` 时，若 $x - 1$ 或 $x + 1$ 已存在则合并对应分量，并在根节点维护最小、最大元素。设已接收 $u$ 个不同整数，采用路径压缩与按秩合并时，并查集操作的平摊时间为 $O(\alpha(u))$[^tarjan-dsu]；任意整数到并查集下标的映射还需平均常数时间的哈希查询。
 
-但并查集的连通分量之间没有顺序：每次调用 `getIntervals()` 都必须遍历所有活跃根节点并按左端点排序，查询耗时升至 $O(m \log m)$。有序列表与 `std::map` 则在写入时维护了左端点全序，让每次查询保持在线性扫描 $O(m)$。
+若另外维护活跃根节点集合，查询可以枚举 $m$ 个分量，再按左端点排序，耗时 $O(m\log(m + 1))$；若没有这份集合，还要扫描全部 $u$ 个元素寻找根。并查集及映射占 $O(u)$ 状态空间，而有序区间方案只保存 $O(m)$ 个端点对。选择依据是更新、查询和存储成本，而不只是单次合并的复杂度。
 
 ## 系统拓展：数据流熔接与并发任务流
 
@@ -152,4 +155,4 @@ public:
 
 [^map-emplace-hint]: [cppreference：`std::map::emplace_hint`](https://en.cppreference.com/w/cpp/container/map/emplace_hint.html)——说明当提示迭代器恰好指向新元素紧邻的后继位置时，插入操作的平摊时间复杂度为常数。
 
-[^tarjan-dsu]: [Robert E. Tarjan：*Efficiency of a Good But Not Linear Set Union Algorithm* (JACM, 1975)](https://doi.org/10.1145/321879.321884)——证明带路径压缩与按秩合并的并查集单次操作平摊时间复杂度为 $O(\alpha(n))$。
+[^tarjan-dsu]: [Robert E. Tarjan：_Efficiency of a Good But Not Linear Set Union Algorithm_ (JACM, 1975)](https://doi.org/10.1145/321879.321884)——证明带路径压缩与按秩合并的并查集单次操作平摊时间复杂度为 $O(\alpha(n))$。

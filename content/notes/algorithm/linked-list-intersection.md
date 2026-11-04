@@ -48,7 +48,7 @@ class Solution:
         return p
 ```
 
-`is` 比较对象身份，直接表达“是否为同一个节点”，不依赖节点类如何定义 `==`[^identity]。相遇条件也覆盖 `None is None`，所以正常交点和无交点可以共用一个出口。
+`is` 比较对象身份，直接表达“是否为同一个节点”，不依赖节点类如何定义 `==`[^identity]。相遇条件也覆盖 `None is None`，所以正常交点和无交点可以共用一个出口。两版都只读取输入，不分配、释放或改写节点；返回的是输入中已有节点的引用，C++ 调用方仍负责其生命周期。
 
 ## 判等和换头各做一件事
 
@@ -58,7 +58,8 @@ class Solution:
 
 ## C++ 进阶：同步扫描、尾节点剪枝与长度对齐
 
-换头法适合用几行代码处理所有情况。C++ 版进一步利用两条**无环**链表的结构（若链表可能含环，则需改用[《环形链表 II：快慢指针相遇后为什么能找到入口》](/notes/algorithm/linked-list-cycle-ii/)的同余判圈逻辑）：如果它们相交，从交点起必然共用同一个尾节点；尾节点不同，就不用再寻找交点。先让两个指针同步前进，保留等长链表早期相遇时立即返回的路径；若一条链先结束，才扫描另一条链的剩余部分，得到长度差并比较尾节点。
+换头法适合用几行代码处理所有情况。C++ 版进一步利用两条无环链表的结构：如果它们相交，从交点起必然共用同一个尾节点；尾节点不同，就不用再寻找交点。先让两个指针同步前进，保留等长链表早期相遇时立即返回的路径；若一条链先结束，才扫描另一条链的剩余部分，得到长度差并比较尾节点。若输入可能含环，可先用[快慢指针判环](/notes/algorithm/linked-list-cycle-ii/)，但还需另行分析环内相交，不能直接套用这里的尾节点判据。
+
 ```cpp
 #include <cstddef>
 
@@ -120,113 +121,10 @@ public:
 
 扫描和对齐至多进行线性数量的指针移动，总时间 $O(m + n)$、额外空间 $O(1)$，且不分配或修改节点。等距交点可以在同步扫描时直接返回，尾节点不同则可省去后续对齐和比较；长度不同且相交时还需要对齐并再次遍历。相较于换头法的实际速度取决于输入分布、分支和内存访问，不能仅凭循环次数断言更快。
 
-## 评测器建链阶段：可提交的分配优化
+## 附录：评测器建链与分配实验
 
-上面的 `getIntersectionNode` 只读链表，本身不分配节点；如果评测器为每组输入反复执行 `new ListNode(...)` 和 `delete`，节点分配也可能影响整个提交的运行时间。手动封装的 `NodePool::create` 需要调用方主动使用，评测器不会调用它。C++ 允许程序替换全局普通 `operator new/delete`[^global-new][^global-delete]；若评测器确实使用这组分配函数创建和释放节点，下例与上面的 `Solution` 类放在同一个提交文件中，就能参与建链阶段的分配。
+`getIntersectionNode` 本身不分配节点。若评测器把建链、释放也计入运行时间，节点池可能改变整次提交的测量结果；它优化的是评测器的内存分配过程，不是求交过程。求交仍为 $O(m + n)$ 时间、$O(1)$ 辅助空间，节点池自身占用的内存需另计。
 
-```cpp
-#include <cstddef>
-#include <cstdlib>
-#include <functional>
-#include <mutex>
-#include <new>
-
-namespace NodeAllocation {
-constexpr std::size_t BLOCK_COUNT = 1u << 18;
-
-// Scalar new must return default-new-aligned storage for any same-size type.
-struct alignas(__STDCPP_DEFAULT_NEW_ALIGNMENT__) Slot {
-    std::byte storage[sizeof(ListNode)];
-    Slot* next;
-};
-
-Slot slots[BLOCK_COUNT];
-Slot* free_head = nullptr;
-std::size_t used = 0;
-std::mutex mutex;
-
-bool owns(const void* pointer) noexcept {
-    std::less<const void*> less;
-    return !less(pointer, static_cast<const void*>(slots)) &&
-           less(pointer, static_cast<const void*>(slots + BLOCK_COUNT));
-}
-}  // namespace NodeAllocation
-
-void* operator new(std::size_t size) {
-    if (size == sizeof(ListNode)) {
-        std::lock_guard<std::mutex> guard(NodeAllocation::mutex);
-        if (NodeAllocation::free_head != nullptr) {
-            auto* slot = NodeAllocation::free_head;
-            NodeAllocation::free_head = slot->next;
-            return slot->storage;
-        }
-        if (NodeAllocation::used < NodeAllocation::BLOCK_COUNT) {
-            return NodeAllocation::slots[NodeAllocation::used++].storage;
-        }
-    }
-
-    // Fall back for other sizes or an exhausted pool; honor new_handler.
-    for (;;) {
-        if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
-        if (auto handler = std::get_new_handler()) {
-            handler();
-        } else {
-            throw std::bad_alloc();
-        }
-    }
-}
-
-void operator delete(void* pointer) noexcept {
-    if (pointer == nullptr) return;
-    if (NodeAllocation::owns(pointer)) {
-        auto* slot = reinterpret_cast<NodeAllocation::Slot*>(pointer);
-        std::lock_guard<std::mutex> guard(NodeAllocation::mutex);
-        slot->next = NodeAllocation::free_head;
-        NodeAllocation::free_head = slot;
-    } else {
-        std::free(pointer);
-    }
-}
-
-void operator delete(void* pointer, std::size_t) noexcept {
-    ::operator delete(pointer);
-}
-
-// Keep arrays on the ordinary heap, even if their byte count matches a node.
-void* operator new[](std::size_t size) {
-    for (;;) {
-        if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
-        if (auto handler = std::get_new_handler()) {
-            handler();
-        } else {
-            throw std::bad_alloc();
-        }
-    }
-}
-
-void operator delete[](void* pointer) noexcept {
-    std::free(pointer);
-}
-
-void operator delete[](void* pointer, std::size_t) noexcept {
-    ::operator delete[](pointer);
-}
-```
-
-`Slot` 用 `alignas(__STDCPP_DEFAULT_NEW_ALIGNMENT__)` 按默认 `new` 的对齐要求布置，且首成员 `storage` 与标准布局结构体 `Slot` 指针可互转，释放的槽位得以通过 `reinterpret_cast` 归入空闲链表，池满后回退到普通分配[^global-new][^cpp-alignas][^cpp-pointer-interconvertible]。`owns` 用 `std::less<const void *>` 判断指针是否落在静态池区间内，避免直接对非同一数组的指针使用内建关系运算符，非池分配则交由 `std::free` 释放[^std-less][^global-delete]。数组分配与释放单独走普通堆，避免同尺寸数组和节点池混用[^global-new][^global-delete]。普通 `new` 的底层分配失败时先调用已安装的 `new_handler`，若它返回就重试；没有处理器时抛出 `std::bad_alloc`[^global-new]。互斥锁保护槽位分配与归还，因为替换的全局分配和释放函数也必须支持并发调用[^global-new]。`Solution` 仍只通过 `next` 找交点，**不能**把连续分配的地址当作链表连接关系。
-
-这是一种**评测环境定向**的优化：全局 `operator new` 只能看到申请大小，任何恰好与 `ListNode` 同尺寸、通过普通 `new` 分配的对象也会进入池；额外对齐对象的 `new` 会优先选择 C++17 的对齐版本，类专属分配函数也可能接管调用[^new-expression]。固定池会占用常驻内存，锁与所有权检查也有开销；评测器如何创建节点、是否多组输入重用进程，都会影响收益。代码没有修改求交算法的 $O(m + n)$ 时间、$O(1)$ 额外空间；它在提交环境中可能减少节点的底层分配次数，但不能仅凭源码保证更快。
+这类实验依赖评测器实际使用的分配入口，手动封装的池不会自动接管评测器建链。替换全局分配函数还会影响同尺寸的其他对象，必须正确处理对齐、配对释放、池耗尽和并发；固定池的常驻内存与同步开销也可能抵消收益。因此这里只保留实验边界，不把分配器实现作为求交答案的一部分，也不能用地址连续性代替 `next` 连接关系。
 
 [^identity]: [Python 文档：比较运算](https://docs.python.org/3/library/stdtypes.html#comparisons)——区分对象身份比较 `is` 与可由类自定义的相等比较 `==`。
-
-[^global-new]: [cppreference：`operator new` 的全局替换](https://en.cppreference.com/w/cpp/memory/new/operator_new.html)——说明全局普通分配函数可替换、默认对齐要求、失败时调用 `new_handler`，以及替换函数的线程安全要求。
-
-[^cpp-alignas]: [cppreference：`alignas` 说明符](https://en.cppreference.com/w/cpp/language/alignas.html)——说明显式指定类型或对象的对齐要求，配合 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 满足全局标量 `operator new` 的默认对齐契约。
-
-[^cpp-pointer-interconvertible]: [cppreference：`reinterpret_cast` 与指针可互转性](https://en.cppreference.com/w/cpp/language/reinterpret_cast.html)——说明标准布局结构体对象与其首个非静态数据成员指针可互转（pointer-interconvertible），因此可将 `slot->storage` 的返回地址安全转回 `Slot*`。
-
-[^global-delete]: [cppreference：`operator delete` 的全局替换](https://en.cppreference.com/w/cpp/memory/new/operator_delete.html)——说明全局释放函数可替换，编译器可选择 C++14 起提供的带大小释放重载。
-
-[^std-less]: [cppreference：`std::less`](https://en.cppreference.com/w/cpp/utility/functional/less.html)——说明指针特化保证严格全序，即使两个指针并不指向同一个数组，也可安全比较先后顺序。
-
-[^new-expression]: [cppreference：`new` 表达式](https://en.cppreference.com/w/cpp/language/new.html)——说明类专属分配函数的查找，以及 C++17 对超出默认对齐的类型选择对齐版本分配函数。

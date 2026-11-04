@@ -72,7 +72,7 @@ public:
 };
 ```
 
-设树高为 $h$。算法首先沿左链下行至多 $h$ 步到达最小节点，随后每确认一个元素至多向右下行并压栈一条路径，在第 $k$ 次出栈时立即停止，因此时间复杂度为 $O(h + k)$（平衡树上为 $O(\log n + k)$，最坏退化为链时为 $O(n)$）。显式栈中同时保存的节点数不超过树高，辅助空间复杂度为 $O(h)$。
+设树高为 $h$。停止时已出栈 $k$ 个节点，尚留在栈中的节点至多有 $h$ 个，因而总压栈数至多为 $k + h$，时间复杂度为 $O(h + k)$（平衡树为 $O(\log n + k)$，最坏链状树为 $O(n)$）。显式栈辅助空间为 $O(h)$，返回值占常数空间；两种语言的实现都只读输入树。递归同样可以通过传播终止状态达到这一时间界，显式栈的优势是退出控制更直接。Morris 会临时改写树，不能在找到目标后直接返回，否则可能留下未拆除的线索。
 
 ## 进阶：频繁修改下的顺序统计树
 
@@ -90,17 +90,17 @@ $$
 2. 若 $k < r_x$，说明目标位于左子树中，直接向 $l$ 递归或迭代查找第 $k$ 小元素。
 3. 若 $k > r_x$，说明目标位于右子树中，且左子树与根节点已排在它前面（共 $r_x$ 个元素），因此转向右子节点 $r$ 查找第 $k - r_x$ 小元素。
 
-| 方案 | 节点额外字段 | 单次插入 / 删除代价 | 单次查找第 $k$ 小代价 |
-| :--- | :--- | :--- | :--- |
-| 显式栈中序迭代 | 无 | $O(h)$ | $O(h + k)$ |
-| 顺序统计树（平衡 BST 扩充） | 子树节点数 $\text{size}(x)$ | $O(\log n)$ | $O(\log n)$ |
+| 方案                        | 节点额外字段                | 单次插入 / 删除代价 | 单次查找第 $k$ 小代价 |
+| :-------------------------- | :-------------------------- | :------------------ | :-------------------- |
+| 显式栈中序迭代              | 无                          | $O(h)$              | $O(h + k)$            |
+| 顺序统计树（平衡 BST 扩充） | 子树节点数 $\text{size}(x)$ | $O(\log n)$         | $O(\log n)$           |
 
 当底层采用红黑树或 AVL 树维护平衡时，插入或删除节点只需沿访问路径更新 $\text{size}$ 字段，并在左旋、右旋操作中以 $O(1)$ 时间局部重算受影响的两个节点的 $\text{size}$ 值[^clrs-ost]。这样单次修改与单次按秩查询的时间复杂度均稳定在 $O(\log n)$。
 
-[^clrs-bst]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章证明二叉搜索树的中序遍历按非递减序输出所有节点关键字。
+[^clrs-bst]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章证明二叉搜索树的中序遍历按非递减序输出所有节点关键字。
 
-[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明 Python `list` 尾部 `append()` 与 `pop()` 具有平摊 $O(1)$ 时间复杂度。
+[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明用尾部 `append()` 与 `pop()` 实现栈；平摊时间界见 [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)。
 
 [^cpp-vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明 `std::vector` 在堆上维护动态连续内存，尾部压入与弹出为平摊常数时间。
 
-[^clrs-ost]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 14.1 节定义顺序统计树（Order-Statistic Tree）的 $\text{size}$ 扩充不变量、`OS-Select` 的 $O(\log n)$ 查找算法及旋转操作中的常数时间规模维护。
+[^clrs-ost]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 17.1 节 “Dynamic order statistics” 介绍 $\text{size}$ 扩充、按秩选择及旋转中的规模维护；章节与版次可由 [MIT Press 第四版目录](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/11599/4e_toc.pdf)核对。

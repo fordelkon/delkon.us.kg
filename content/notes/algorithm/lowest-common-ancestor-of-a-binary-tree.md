@@ -4,7 +4,7 @@ publishDate: "2026-11-12T12:00:00+08:00"
 description: "LeetCode 236：剖析自底向上后序分治的状态汇聚契约，说明命中目标节点提前返回的正确性，并给出 Python 与 C++ 实现。"
 ---
 
-[LeetCode 236. 二叉树的最近公共祖先](https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree/)（Hot 100）要求在给定二叉树中找到两个指定节点 `p` 和 `q` 的**最近公共祖先**（lowest common ancestor, LCA）：即同时拥有 `p` 和 `q` 作为后代（允许节点作为自身的后代）且深度尽可能大的节点[^clrs-tree]。题目保证树中所有节点值唯一，且 `p` 和 `q` 均存在于该二叉树中。
+[LeetCode 236. 二叉树的最近公共祖先](https://leetcode.cn/problems/lowest-common-ancestor-of-a-binary-tree/)（Hot 100）要求在给定二叉树中找到两个指定节点 `p` 和 `q` 的**最近公共祖先**（lowest common ancestor, LCA）：即同时拥有 `p` 和 `q` 作为后代（允许节点作为自身的后代）且深度尽可能大的节点[^clrs-tree]。题目保证树中所有节点值唯一，`p`、`q` 是两个不同且均存在于树中的节点。下面按节点身份比较，不修改输入树；返回值借用原树中的节点，节点所有权不变。若取消“均存在”的保证，当前算法可能返回唯一存在的目标，需另行验证两者存在性。
 
 从树上简单路径的角度看，树中任意两节点 `p` 与 `q` 之间存在唯一一条简单路径，而它们的最近公共祖先正是这条路径上**深度最小的唯一最高拐点**——这与[《二叉树的直径：单侧深度贡献与拐点路径全局结算》](/notes/algorithm/diameter-of-binary-tree/)及[《二叉树中的最大路径和：负收益归零剪枝与树上后序贡献》](/notes/algorithm/binary-tree-maximum-path-sum/)中“枚举树上路径最高拐点并在后序位置汇总两侧分支信息”的拓扑模型一致。具体而言，节点 `root` 成为 `p` 和 `q` 的最近公共祖先，当且仅当满足以下两种情形之一：
 
@@ -84,8 +84,8 @@ public:
 
 如果先用哈希表预处理记录每个节点的父指针 `parent[node]`（或者树节点本身带有 `parent` 指针），从 `p` 和 `q` 分别向根节点回溯的路径就构成了两条最终汇聚于根节点 `root` 的单链表。此时寻找最近公共祖先的问题，等价于[《相交链表：把状态判定收进循环条件》](/notes/algorithm/linked-list-intersection/)中求两条单链表的首个公共交点。
 
-对比两种方案，父指针哈希表法需要显式维护 `parent` 映射与已访问集合，时间和额外空间复杂度均为 $O(n)$；而后序递归分治无需建立额外的父指针表，在单次 DFS 中每个节点最多被访问一次，时间复杂度为 $O(n)$，辅助空间开销仅来自递归调用栈 $O(h)$（其中 $h$ 为树高，平衡树为 $O(\log n)$，最坏链状树为 $O(n)$）。
+对比两种方案，新建父指针哈希表并用集合记录一侧祖先时，平均时间与辅助空间均为 $O(n)$，极端哈希冲突下时间可达 $O(n^2)$；若节点已有父指针，也可以沿两条祖先链用双指针在 $O(h)$ 时间、$O(1)$ 辅助空间内求交点。而后序递归分治无需建立额外的父指针表，在单次 DFS 中每个节点最多被访问一次，时间复杂度为 $O(n)$，辅助空间开销仅来自递归调用栈 $O(h)$（其中 $h$ 为树高，平衡树为 $O(\log n)$，最坏链状树为 $O(n)$）。递归虽能在命中目标时提前返回，但深层目标仍可能触及 Python 递归限制或耗尽 C++ 线程栈。
 
-[^clrs-tree]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 给出有根树中祖先（ancestor）、后代（descendant）及树上简单路径唯一性的标准定义。
+[^clrs-tree]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 给出有根树中祖先（ancestor）、后代（descendant）及树上简单路径唯一性的标准定义。
 
 [^py-is]: [Python 文档：身份比较](https://docs.python.org/3/reference/expressions.html#is-not)——说明 `is` 与 `is not` 检验两个引用是否指向内存中的同一个对象实例，适用于树节点指针判等与 `None` 检查。

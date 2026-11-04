@@ -96,11 +96,11 @@ public:
 
 ## 复杂度与同构问题对比
 
-后序遍历对全部 $n$ 个节点各访问一次，每次回退仅执行常数次比较与加法运算，总时间复杂度为 $O(n)$。辅助空间取决于递归调用栈的最大深度，即树的高度 $h$，空间复杂度为 $O(h)$（平衡树下为 $O(\log n)$，最坏退化为链状树时为 $O(n)$）。
+后序遍历对全部 $n$ 个节点各访问一次，每次回退仅执行常数次比较与加法运算，总时间复杂度为 $O(n)$。两种实现都只读输入树，返回一个整数；辅助空间取决于递归调用栈的最大深度，即树高 $h$，为 $O(h)$（平衡树为 $O(\log n)$，最坏链状树为 $O(n)$）。题目给定范围内，任意路径和的绝对值不超过 $3 \times 10^7$，可由 32 位有符号整数容纳；若扩大输入范围，C++ 需相应拓宽累加类型。树高可达 $3 \times 10^4$，Python 递归可能触及解释器限制，C++ 也可能耗尽线程栈；深树需要显式栈保存后序计算状态。
 
 如果将本题中每个节点的贡献换成固定边权 $1$ 且去掉负权剪枝，问题就退化为[《二叉树的直径：单侧深度贡献与拐点路径全局结算》](/notes/algorithm/diameter-of-binary-tree/)。反之，如果题目禁止路径在拐点处折返连接左右子树，要求路径必须严格沿着父节点向子节点单向行进，并统计路径和恰好等于目标值的方案数，则思考方向需要从“自底向上的后序贡献汇报”切换为“自顶向下的前缀和传递与回溯恢复”，详见[《路径总和 III：树上前缀和与回溯状态恢复》](/notes/algorithm/path-sum-iii/)。
 
-[^clrs-trees]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 关于树上任意两点间简单路径唯一性及其最高顶点（LCA）的结构性质。
+[^clrs-trees]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——Appendix B.5 介绍树的基础概念；本文据树上唯一路径推导最高拐点及两侧贡献的组合。
 
 [^sicp-tree]: [SICP §2.2.2: Hierarchical Structures](https://sicp.sourceacademy.org/chapters/2.2.2.html)——阐述树形递归中子问题解的归纳合成方法。
 

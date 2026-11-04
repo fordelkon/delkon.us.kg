@@ -32,7 +32,7 @@ class Solution:
         return result
 ```
 
-设二叉树共有 $n$ 个节点，树高为 $h$。每个节点恰好触发一次函数调用与一次常数时间的列表追加 `result.append(node.val)`[^py-list]，时间复杂度为 $O(n)$。不计存储返回结果所需的空间，辅助空间取决于递归调用栈的最大深度 $O(h)$：在平衡二叉树上为 $O(\log n)$，而在退化为单链表的极端树形下达到 $O(n)$。
+设二叉树共有 $n$ 个节点，树高为 $h$。每个非空节点访问一次，空节点调用总数也为 $O(n)$；列表追加 `result.append(node.val)` 的平摊开销为 $O(1)$[^py-list]，总时间复杂度为 $O(n)$。返回序列占 $O(n)$ 空间，另计的辅助空间取决于递归调用栈深度，为 $O(h)$：平衡树为 $O(\log n)$，退化单链为 $O(n)$。递归与下文显式栈实现都不修改输入树；Python 深树还可能触及解释器递归限制。
 
 ## C++：显式栈模拟深入与回溯
 
@@ -76,7 +76,7 @@ public:
 1. 若 `pred->right == nullptr`，说明左子树尚未访问。此时令 `pred->right = curr` 建立临时回溯线索，随后将 `curr` 移向 `curr->left`。
 2. 若 `pred->right == curr`，说明之前建立的线索刚刚将控制流从左子树末端带回 `curr`，即左子树已完整遍历。此时将 `pred->right` 重置为 `nullptr` 以恢复原树拓扑，收集 `curr->val`，再将 `curr` 移向 `curr->right`。
 
-这与[《二叉树展开为链表：逆先序递归与前驱节点就地嫁接》](/notes/algorithm/flatten-binary-tree-to-linked-list/)形成了清晰的对照：后者同样在左子树中寻找最右侧节点，但目的是将原右子树永久嫁接过去并清空 `left` 指针以完成先序原地展开；而 Morris 中序遍历借用 `pred->right` 建立临时环路，并在第二次经过 `curr` 时拆桥复原，在遍历结束时保持原树结构完全不变。
+这与[《二叉树展开为链表：逆先序递归与前驱节点就地嫁接》](/notes/algorithm/flatten-binary-tree-to-linked-list/)形成了清晰的对照：后者同样在左子树中寻找最右侧节点，但目的是将原右子树永久嫁接过去并清空 `left` 指针以完成先序原地展开；而 Morris 中序遍历借用 `pred->right` 建立临时环路，并在第二次经过 `curr` 时拆桥复原，在正常完成遍历后保持原树结构不变。若直接提前返回或中途异常退出，尚未拆除的线索可能残留，因此不能照搬显式栈的提前终止方式。
 
 ```cpp
 #include <vector>
@@ -117,16 +117,16 @@ public:
 
 虽然每次在 `curr` 处寻找前驱 `pred` 都需要沿左子树的右边界向下探测，但树中每条左子树的右边界在整场遍历中只会经历“建线索时向下走一次”与“拆线索时向下走一次”。树中全部 $n-1$ 条边被访问的次数上限为常数，总时间复杂度依然保持为 $O(n)$；由于全程仅维护 `curr` 与 `pred` 两个游标指针，额外辅助空间严格降至 $O(1)$。
 
-| 实现策略 | 时间复杂度 | 辅助空间复杂度 | 树结构影响 | 适用场景 |
-| :--- | :--- | :--- | :--- | :--- |
-| 递归 DFS | $O(n)$ | $O(h)$ | 只读不修改 | 代码紧凑，树高受控场景 |
-| 显式栈迭代 | $O(n)$ | $O(h)$ | 只读不修改 | 支持随时中断（如在 BST 中提前终止查找） |
-| Morris 线索化 | $O(n)$ | $O(1)$ | 遍历中临时改写指针，结束时复原 | 严苛内存受限且允许遍历期间独占写树节点 |
+| 实现策略      | 时间复杂度 | 辅助空间复杂度 | 树结构影响                   | 适用场景                                |
+| :------------ | :--------- | :------------- | :--------------------------- | :-------------------------------------- |
+| 递归 DFS      | $O(n)$     | $O(h)$         | 只读不修改                   | 代码紧凑，树高受控场景                  |
+| 显式栈迭代    | $O(n)$     | $O(h)$         | 只读不修改                   | 支持随时中断（如在 BST 中提前终止查找） |
+| Morris 线索化 | $O(n)$     | $O(1)$         | 临时改写指针，正常完成后复原 | 严苛内存受限且允许遍历期间独占写树节点  |
 
 [^sicp-recursion]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——阐述递归过程在深入子调用时如何利用调用栈保存尚未完成的上下文，并在子问题返回后恢复执行。
 
-[^py-list]: [Python 文档：列表操作](https://docs.python.org/3/tutorial/datastructures.html#more-on-lists)——说明 Python `list.append` 在动态数组末尾追加元素的平摊 $O(1)$ 时间开销。
+[^py-list]: [Python 文档：列表操作](https://docs.python.org/3/tutorial/datastructures.html#more-on-lists)——说明 `list.append` 的追加接口；平摊 $O(1)$ 时间界见 [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)。
 
 [^cpp-vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明 `std::vector` 以连续内存存储元素，支持在尾部以平摊常数时间执行 `push_back` 与常数时间执行 `pop_back`，适合作为显式栈容器。
 
-[^morris-1979]: [J. M. Morris: *Traversing binary trees simply and cheaply* (Information Processing Letters, 1979)](https://doi.org/10.1016/0020-0190(79)90068-1)——提出利用空闲右指针临时构建回溯线索、在 $O(1)$ 辅助空间与 $O(n)$ 时间内完成二叉树遍历并恢复原树结构的算法。
+[^morris-1979]: [J. M. Morris: _Traversing binary trees simply and cheaply_ (Information Processing Letters, 1979)](<https://doi.org/10.1016/0020-0190(79)90068-1>)——提出利用空闲右指针临时构建回溯线索、在 $O(1)$ 辅助空间与 $O(n)$ 时间内完成二叉树遍历并恢复原树结构的算法。
