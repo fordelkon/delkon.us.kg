@@ -1,27 +1,16 @@
 ---
 title: "二叉树展开为链表：逆先序递归与前驱节点就地嫁接"
 publishDate: "2026-11-06T12:00:00+08:00"
-description: "LeetCode 114：对比先序破坏性修改与逆先序后序连接，再利用 Morris 前驱线索化将左子树就地嫁接到右侧，实现 O(1) 辅助空间展开。"
+description: "LeetCode 114：对比先序破坏性修改与逆先序后序连接，再利用左子树最右节点就地嫁接右子树，实现 O(1) 辅助空间展开。"
 ---
 
-[LeetCode 114. 二叉树展开为链表](https://leetcode.cn/problems/flatten-binary-tree-to-linked-list/)（Hot 100）要求将给定的二叉树就地展开为单链表：展开后的节点顺序必须严格与二叉树的先序遍历（根节点 $\to$ 左子树 $\to$ 右子树）一致，且展开后每个节点的 `left` 指针必须置为 `nullptr`，`right` 指针作为单链表的后继指针指向下一个节点。
+[LeetCode 114. 二叉树展开为链表](https://leetcode.cn/problems/flatten-binary-tree-to-linked-list/)（Hot 100）要求将给定的二叉树原地展开为单链表：展开后的节点顺序必须与二叉树的**先序遍历**（preorder traversal，根 $\to$ 左子树 $\to$ 右子树）一致，其中每个节点的 `right` 指针指向链表中的下一个节点，而 `left` 指针一律置为空。
 
-展开契约的关键在于**就地破坏性修改的保护机制**：若尝试在常规先序遍历（根 $\to$ 左 $\to$ 右）中直接将当前节点的 `right` 指针重定向为左子树展开链表，原本的 `root->right` 指针就会被立即覆盖，导致尚未遍历的右子树失去寻址入口。
+如果在正向先序遍历过程中直接执行 `node.right = node.left`，原本挂在 `node.right` 下的右子树引用就会在尚未被访问前被覆盖丢失。正如[《从调用栈理解递归》](/posts/understanding-recursion/#前序中序与后序是操作位置的区别)所分析的，当原地修改会破坏后续子问题所需的指针时，要么把改写动作推迟到子问题全部返回之后，要么在改写前提前为原右子树在左子树中找到正确的挂载位置。
 
-## 指针重构的演进：从状态缓存到原地借用
+## Python：逆先序递归与头插回溯
 
-这一指针冲突与单链表在就地重构时的挑战高度相通。在[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)中，深拷贝操作面临着 `random` 指针跨节点寻址时被提前覆盖的风险；交织节点法通过将副本节点就地插入到原节点之后，原地借用原链表结构传递关系，从而将辅助空间由哈希表的 $O(n)$ 压缩为 $O(1)$。
-
-在二叉树展开为链表的问题中，同样存在两类经典的结构重构策略：
-1. **逆先序递归（右 $\to$ 左 $\to$ 根）**：反向先序拓扑，先展开右子树并维护全局链表头指针，自底向上返回时当前节点可以直接接入后续已完成的单链表，避开指针覆盖冲突；
-2. **Morris 前驱节点就地嫁接**：借用二叉树中叶节点的空指针域，将右子树提前拼接到左子树的末尾，彻底摆脱递归调用栈，在严格 $O(1)$ 辅助空间下完成原地结构变形[^morris-threading]。
-
-## Python：逆先序 DFS 自底向上缝合
-
-常规先序遍历的生成序列为：`[根, [左子树先序], [右子树先序]]`。
-若将访问顺序完全倒置为“**右子树 $\to$ 左子树 $\to$ 根节点**”，序列则变为：`[[右子树逆先序], [左子树逆先序], 根]`。
-
-在这一顺序下，整棵树的根节点恰好是最后一个被处理的节点。我们只需在外部维护一个指针 `prev`，记录“已经组装完毕的链表头部”（初始为 `None`）。当访问当前节点 `node` 时，其右子树与左子树均已完成转换并按序串联在 `prev` 之后，此时可直接执行单链表拼接操作：
+正向先序遍历的访问顺序是“根 $\to$ 左 $\to$ 右”。如果反过来按照“右子树 $\to$ 左子树 $\to$ 根”的**逆先序**（reverse preorder）次序执行递归并在回溯时改写指针，那么当控制流退回当前节点 `node` 时，其右子树和左子树都已经各自展开成了有序链表，且外部维护的指针 `prev` 恰好指向“紧随 `node` 之后的先序后继链表头”[^py-nonlocal]。此时只需令 `node.right = prev`、`node.left = None`，再将 `prev` 更新为 `node`，即可安全完成头插而不会丢失任何未访问分支[^sicp-recursion]：
 
 ```python
 from typing import Optional
@@ -29,75 +18,63 @@ from typing import Optional
 
 class Solution:
     def flatten(self, root: Optional[TreeNode]) -> None:
-        """Do not return anything, modify root in-place instead."""
         prev: Optional[TreeNode] = None
 
-        def reverse_preorder(node: Optional[TreeNode]) -> None:
+        def dfs(node: Optional[TreeNode]) -> None:
             nonlocal prev
             if node is None:
                 return
-
-            # Traverse right child first, then left child, finally current node.
-            reverse_preorder(node.right)
-            reverse_preorder(node.left)
-
-            # Re-wire pointers: link current node to the already flattened chain.
+            # Process right then left so `prev` always holds the already-flattened preorder successor.
+            dfs(node.right)
+            dfs(node.left)
             node.right = prev
             node.left = None
             prev = node
 
-        reverse_preorder(root)
+        dfs(root)
 ```
 
-逆先序递归由于将收集与拼接延后到子树递归完成之后，巧妙避免了任何显式栈与集合存储，但在树高度较大时仍需要 $O(h)$ 的调用栈空间。
+设二叉树共有 $n$ 个节点，树高为 $h$。每个节点恰好被访问一次并执行常数次指针赋值，时间复杂度为 $O(n)$；递归调用栈的深度取决于树高，辅助空间复杂度为 $O(h)$。
 
-## C++：Morris 前驱节点就地嫁接（常量辅助空间）
+## C++：左子树最右节点就地嫁接
 
-为了达成常数辅助空间的终极优化，我们需要从拓扑顺序中挖掘出二叉树先序遍历的几何性质：
-- 在先序遍历中，`root->right` 节点在何时被访问？
-- 答案是：**必须在 `root->left` 子树的所有节点全部遍历完毕后**，才轮到 `root->right`！
-- 而 `root->left` 子树中最后一个被先序遍历访问的节点，正是 `root->left` 的**最右叶子节点**（即 `root->right` 在先序遍历序列中的前驱节点）。
+要将辅助空间进一步压缩至 $O(1)$，可以借鉴[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)中利用原结构指针暂存拓扑关系的思路，以及[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)中寻找左子树最右节点的技巧，在迭代推进中直接完成子树嫁接[^morris-1979]。
 
-因此，如果 `current->left != nullptr`：
-1. 沿着 `current->left` 一路向右，定位到左子树的最右节点 `predecessor`；
-2. 将 `predecessor->right` 指向原 `current->right`（将右子树无缝嫁接到左子树的末端）；
-3. 将 `current->right` 重定向为 `current->left`，并将 `current->left` 清空为 `nullptr`；
-4. `current` 沿右指针推进至 `current->right`，重复上述过程，直至整棵树被拉直为单向右链表[^sedgewick-algs]。
+考察当前节点 `curr`。若 `curr->left` 为空，则 `curr` 已经满足单链表形态，直接令 `curr = curr->right` 推进即可。若 `curr->left` 非空，按照先序遍历“根 $\to$ 左子树 $\to$ 右子树”的规则，原右子树 `curr->right` 应当紧接在整棵左子树所有节点访问完毕之后被访问。
+
+为什么只需从 `curr->left` 出发一路沿 `right` 指针走到底找到最右节点 `predecessor`，并将 `curr->right` 嫁接到 `predecessor->right` 即可？需要注意，这里的 `predecessor` 是左子树**中序遍历**的最后一个节点；当 `predecessor` 自身还带有非空左子树 `predecessor->left` 时，它还不是左子树当前时刻先序遍历的最后一个节点（先序末端位于 `predecessor->left` 内部）。但这一嫁接依然严格正确：在先序遍历中，`curr->left` 下所有非 `predecessor` 的右路祖先节点，其左子树均会在沿右链下探到达 `predecessor` 之前被优先展开并插入右链；而当主循环的游标 `curr` 稍后推进到 `predecessor` 本身时，若 `predecessor->left` 非空，同一嫁接规则会再次把刚刚挂在 `predecessor->right` 上的原右子树继续下推到 `predecessor->left` 的最右端。因此，在局部每一步维持如下**子树嫁接不变量**——将 `curr->right` 挂到 `curr->left` 最右节点 `predecessor` 的空 `right` 指针上，再令 `curr->right = curr->left` 并置 `curr->left = nullptr`——经归纳即可保证整棵树按先序顺序完整展平。
+
+与[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)相比，中序 Morris 遍历将 `predecessor->right` 临时指向当前根节点 `curr` 并在第二次经过时恢复为 `nullptr`；而本题的目标本就是将原树重排为单链表，因此直接将 `predecessor->right` 永久指向 `curr->right`，随后沿着改写后的 `curr = curr->right` 单向推进，无需回溯拆桥：
 
 ```cpp
 class Solution {
 public:
     void flatten(TreeNode* root) {
-        TreeNode* current = root;
-
-        while (current != nullptr) {
-            if (current->left != nullptr) {
-                // Find the rightmost node of the left subtree (inorder predecessor).
-                TreeNode* predecessor = current->left;
+        TreeNode* curr = root;
+        while (curr != nullptr) {
+            if (curr->left != nullptr) {
+                TreeNode* predecessor = curr->left;
                 while (predecessor->right != nullptr) {
                     predecessor = predecessor->right;
                 }
-
-                // Graft the original right subtree to the predecessor's right pointer.
-                predecessor->right = current->right;
-
-                // Move the left subtree to the right, and clear the left child.
-                current->right = current->left;
-                current->left = nullptr;
+                // Graft original right subtree onto the rightmost node of the left subtree
+                // so it is visited immediately after the entire left subtree finishes.
+                predecessor->right = curr->right;
+                curr->right = curr->left;
+                curr->left = nullptr;
             }
-
-            // Advance downward along the newly formed right branch.
-            current = current->right;
+            curr = curr->right;
         }
     }
 };
 ```
 
-### 复杂度分析
+外层游标 `curr` 沿右链单向走过全部 $n$ 个节点；内层指针 `predecessor` 仅在左子树的右边界上向下滑动，每条原本属于左子树右边界的边至多被内层循环滑过一次，随后便随着上层左子树的右移汇入主链，总时间复杂度严格为 $O(n)$。由于全程仅使用 `curr` 与 `predecessor` 两个指针变量，额外辅助空间复杂度为 $O(1)$[^sicp-iter]。
 
-- **时间复杂度 $O(n)$**：外层循环遍历展开后的每个节点；内层寻找最右节点的操作中，树中的每一条边至多被 `predecessor` 遍历访问 2 次。因此所有边转移的总次数与边数 $n-1$ 成严格线性比例，总时间复杂度为 $O(n)$。
-- **辅助空间复杂度 $O(1)$**：算法完全在原树节点指针域上进行原地修改，不需要任何显式栈、哈希表或系统递归栈帧开销。
+[^py-nonlocal]: [Python 文档：`nonlocal` 语句](https://docs.python.org/3/reference/simple_stmts.html#the-nonlocal-statement)——说明内层嵌套函数如何绑定并更新外层函数作用域中的变量 `prev`。
 
-[^morris-threading]: [J. M. Morris (1979): "Traversing binary trees simply and cheaply"](https://doi.org/10.1016/0020-0190(79)90068-1)——讨论通过动态重定位树节点的指针实现无栈原位遍历与拓扑重构的构造范式。
+[^sicp-recursion]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——阐述递归调用如何借由系统栈暂存外层节点上下文，使子树的指针重连得以在子调用返回后安全执行。
 
-[^sedgewick-algs]: [Robert Sedgewick & Kevin Wayne: 《算法》(Algorithms 4th Edition)](https://algs4.cs.princeton.edu/)——第 3 章树型数据结构的指针修改与不变量维护。
+[^morris-1979]: [J. M. Morris: *Traversing binary trees simply and cheaply* (Information Processing Letters, 1979)](https://doi.org/10.1016/0020-0190(79)90068-1)——提出利用左子树最右节点的空闲右指针编码后续访问路径的思想，本题在此基础上将临时回溯线索改为对原右子树的永久嫁接。
+
+[^sicp-iter]: [SICP §1.2.1: Linear Recursion and Iteration](https://sicp.sourceacademy.org/chapters/1.2.1.html)——对比需要维护延迟操作链的递归过程与仅靠固定数量状态变量推进的常数空间迭代过程。

@@ -4,15 +4,13 @@ publishDate: "2026-11-04T12:00:00+08:00"
 description: "LeetCode 102：利用先进先出队列维护探索前沿，通过单轮快照层级大小实现逐层批量提取，并与深度优先记录做时空对照。"
 ---
 
-[LeetCode 102. 二叉树的层序遍历](https://leetcode.cn/problems/binary-tree-level-order-traversal/)（Hot 100）要求按照从根节点到叶节点、从左向右的顺序逐层返回所有节点的值，结果组织为二维数组。
+[LeetCode 102. 二叉树的层序遍历](https://leetcode.cn/problems/binary-tree-level-order-traversal/)（Hot 100）要求逐层、从左到右访问二叉树的所有节点，并将每一层的节点值分别组织为独立的子数组返回。
 
-二叉树层序遍历的本质是基于图的广度优先搜索（BFS）[^clrs-bfs]。其搜索前沿在演化过程中始终满足**双深度窗口不变量**（Two-Level Window Invariant）：在先进先出（FIFO）队列中，若队首节点的深度为 $d$，则队列中任意节点的深度必然属于区间 $[d, d+1]$。
+标准**广度优先搜索**（breadth-first search, BFS）借由先进先出（FIFO）队列维护待扩展的探索前沿，天然保证深度为 $d$ 的节点总是先于深度为 $d+1$ 的节点出队[^clrs-bfs]。但普通单队列 BFS 会把相邻两层的节点首尾相接存放在同一个队列中，若不加定界，输出只会是一维扁平序列。要在不使用双队列交替拷贝的前提下完成按层分组，关键在于每次进入外层循环时先记录当前队列长度快照 `level_size = len(queue)`。此时队列中恰好且仅包含第 $d$ 层的全部节点；固定循环弹出这 `level_size` 个节点，并将它们的非空左右孩子追加到队尾，即可在单队列内严格隔离第 $d$ 层的消费与第 $d+1$ 层的生产。这一按层定界模式也是[《二叉树的右视图：层序末项与逆先序深度覆盖》](/notes/algorithm/binary-tree-right-side-view/)提取每层最右节点的直接基础。
 
-要将展平的一维节点流按层切分为独立的二维子列表，关键在于**快照当前层的队列容量**：在每一层循环迭代开始时，队列中现存的元素个数 $k = |\text{queue}|$ 恰好严格代表了深度为 $d$ 的所有节点。只要在本轮内层循环中连续弹出恰好 $k$ 个节点，新生成的下一层子节点（深度 $d+1$）虽然被依次追加到队尾，但绝不会干扰本层的批量弹出边界。
+## Python：双端队列与层级长度快照
 
-## Python：双端队列与单轮快照提取
-
-Python 标准库提供了基于双向链表/块列表实现的 `collections.deque`，其两端插入和删除操作均具有严格的 $O(1)$ 时间复杂度保证[^python-deque]。
+在 Python 中，若使用内置 `list.pop(0)` 从头部弹出元素，会导致后续所有元素在连续内存中整体前移，单次出队退化为 $O(k)$。因此应当选用 `collections.deque`，通过 `popleft()` 与 `append()` 在两端以 $O(1)$ 时间维护探索前沿[^py-deque]：
 
 ```python
 from collections import deque
@@ -28,14 +26,13 @@ class Solution:
         queue: deque[TreeNode] = deque([root])
 
         while queue:
-            # Snapshot the number of nodes present at the current level.
+            # Snapshot current frontier size so newly enqueued children stay in the next level.
             level_size = len(queue)
             current_level: list[int] = []
 
             for _ in range(level_size):
                 node = queue.popleft()
                 current_level.append(node.val)
-
                 if node.left is not None:
                     queue.append(node.left)
                 if node.right is not None:
@@ -46,13 +43,12 @@ class Solution:
         return result
 ```
 
-代码中利用 `level_size = len(queue)` 在每轮外层循环头部完成层容量捕获，避免了通过特殊占位符（如插入 `None` 分隔标记）所带来的判空分支与状态混乱。
+## C++：队列容器适配与单层预分配
 
-## C++：显式队列与预留容量优化
-
-在 C++ 中，标准库提供了容器适配器 `std::queue`，其底层默认封装 `std::deque`，能够按需分块分配内存，避免了大块连续内存频繁重定位的开销[^cpp-queue]。为了优化每层收集子向量的吞吐，可针对获取到的 `level_size` 显式调用 `reserve`，并通过移动语义转交所有权。
+C++ 实现使用 `std::queue<TreeNode*>` 管理节点指针[^cpp-queue]。由于每层开始时已知该层精确节点数 `level_size`，提前调用 `current_level.reserve(level_size)` 可以一次性分配当前层所需的连续内存，避免内层循环 `push_back` 触发多次倍增扩容[^cpp-reserve]；本层收集完毕后通过 `std::move` 将 `current_level` 的缓冲区所有权直接转移进 `result`[^cpp-move]：
 
 ```cpp
+#include <cstddef>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -60,17 +56,18 @@ class Solution:
 class Solution {
 public:
     std::vector<std::vector<int>> levelOrder(TreeNode* root) {
+        std::vector<std::vector<int>> result;
         if (root == nullptr) {
-            return {};
+            return result;
         }
 
-        std::vector<std::vector<int>> result;
         std::queue<TreeNode*> q;
         q.push(root);
 
         while (!q.empty()) {
-            const auto level_size = q.size();
+            const std::size_t level_size = q.size();
             std::vector<int> current_level;
+            // Pre-allocate exact capacity for the current depth to avoid reallocations.
             current_level.reserve(level_size);
 
             for (std::size_t i = 0; i < level_size; ++i) {
@@ -85,7 +82,6 @@ public:
                     q.push(node->right);
                 }
             }
-
             result.push_back(std::move(current_level));
         }
 
@@ -94,24 +90,25 @@ public:
 };
 ```
 
-每个节点入队出队恰好一次，总体时间复杂度为 $O(n)$。在内存方面，`current_level.reserve(level_size)` 避免了单层收集时的多次动态扩容重分配，`std::move(current_level)` 则消除了向外层二维容器追加时的深拷贝。
+## 复杂度与树形空间权衡
 
-## 延伸探讨：与右视图的演化权衡
+设二叉树共有 $n$ 个节点，最大层宽为 $w$，最大深度（树高）为 $h$。每个节点恰好入队一次、出队一次，时间复杂度为 $O(n)$。不计结果数组 `result` 本身的存储，队列在任意时刻至多同时持有相邻两层的节点，辅助空间复杂度取决于树的最大宽度 $O(w)$。
 
-层序遍历构建了整棵树的全局水平分层骨架。在后续题目[《二叉树的右视图：层序末项与逆先序深度覆盖》](/notes/algorithm/binary-tree-right-side-view/)中，我们只需获取每一层的最右侧投影。
+将这里的 BFS 队列与[《二叉树的最大深度：后序分解合并与调用栈深度》](/notes/algorithm/maximum-depth-of-binary-tree/)中的 DFS 递归栈对比，可以看出不同树形对辅助空间的反向影响：
 
-若直接基于当前层序遍历解题，只需在内层循环中提取索引为 `level_size - 1` 的节点值。然而，BFS 的内在瓶颈在于它必须完整持有整层节点。在完全二叉树中，最后一层的节点数达到 $w \approx \lceil n/2 \rceil$，导致队列的辅助空间开销达到 $O(n)$。而在右视图中转向“根 $\to$ 右 $\to$ 左”逆先序 DFS 时，由于利用深度索引进行了即时行级过滤，辅助空间将大幅回退至调用栈深度 $O(h)$（平衡树时仅为 $O(\log n)$）。
+| 树形特征 | 最大层宽 $w$（BFS 队列空间） | 树高 $h$（DFS 调用栈空间） | 空间表现对比 |
+| :--- | :--- | :--- | :--- |
+| 退化为单链表 | $w = 1$，空间 $O(1)$ | $h = n$，空间 $O(n)$ | BFS 队列始终仅驻留 1 个节点，显著优于递归栈 |
+| 满二叉树 | 底层叶节点数 $\lceil n / 2 \rceil$，空间 $O(n)$ | $h = \lfloor \log_2 n \rfloor + 1$，空间 $O(\log n)$ | BFS 在底层达到容量峰值，而 DFS 调用栈仅需对数级空间 |
 
-## 复杂度分析
+若改用前序 DFS 实现层序遍历（递归携带当前深度 `depth`，当 `depth == result.size()` 时新建子数组并追加 `node->val`），时间复杂度同为 $O(n)$，但辅助空间由 $O(w)$ 变为 $O(h)$。在扁平宽阔的完全二叉树上，按深度索引归档的 DFS 具有更低的峰值辅助内存；而在深度不可控的退化树形上，基于队列的迭代 BFS 则能避免调用栈溢出。
 
-- **时间复杂度 $O(n)$**：二叉树中的每个节点恰好进入队列一次，并从队头弹出一次。在内层循环中，左右子节点的判空与入队均为常数时间操作。
-- **辅助空间复杂度 $O(w)$**：队列在任一时刻保存的节点数量取决于二叉树的最大层宽度 $w$。
-  - 在最好情况下（二叉树退化为单支链表），每层节点数 $w = 1$，辅助队列空间为 $O(1)$。
-  - 在最坏情况下（满二叉树或完全二叉树），最底层包含约 $n/2$ 个节点，辅助队列空间达到 $O(n)$。
-- **输出空间 $O(n)$**：外层二维列表最终存储全部 $n$ 个节点的值。
+[^clrs-bfs]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 20.2 节论证广度优先搜索队列中节点深度至多相差 1 的双层前沿性质。
 
-[^clrs-bfs]: [Cormen et al.: 《算法导论》(CLRS)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 22 章论证广度优先搜索前沿（Frontier）扩展的单调性与逐层遍历性质。
+[^py-deque]: [Python 文档：`collections.deque`](https://docs.python.org/3/library/collections.html#collections.deque)——说明 `deque` 基于双向链表块实现，支持在两端以 $O(1)$ 时间复杂度执行 `append` 与 `popleft`。
 
-[^python-deque]: [Python 文档：`collections.deque`](https://docs.python.org/3/library/collections.html#collections.deque)——说明双端队列的两端弹出与追加操作具有严格 $O(1)$ 时间保证，优于基于连续数组列表切片的 $O(k)$ 开销。
+[^cpp-queue]: [cppreference：`std::queue`](https://en.cppreference.com/w/cpp/container/queue.html)——说明容器适配器 `std::queue` 提供先进先出接口，默认以 `std::deque` 作为底层容器实现常数时间的入队 `push` 与出队 `pop`。
 
-[^cpp-queue]: [cppreference: `std::queue`](https://en.cppreference.com/w/cpp/container/queue)——说明队列适配器在默认底层容器 `std::deque` 上的 FIFO 保证。
+[^cpp-reserve]: [cppreference：`std::vector::reserve`](https://en.cppreference.com/w/cpp/container/vector/reserve.html)——说明 `reserve` 可预先分配指定容量，避免在已知元素数量时因多次 `push_back` 触发重分配与元素拷贝。
+
+[^cpp-move]: [cppreference：`std::move`](https://en.cppreference.com/w/cpp/utility/move.html)——说明通过右值引用转换触发 `std::vector` 的移动语义，将内部缓冲区指针以 $O(1)$ 时间转移至外层结果容器。

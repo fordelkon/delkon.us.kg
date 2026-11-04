@@ -1,32 +1,26 @@
 ---
 title: "二叉树的最大深度：后序分解合并与调用栈深度"
 publishDate: "2026-11-07T12:00:00+08:00"
-description: "LeetCode 104：从树形递归的分解与合并模型出发，对比 Python 后序递归与 BFS 层序遍历，再用 C++ 栈上标量求值规避堆开销，推导调用栈深度与树高的映射关系。"
+description: "LeetCode 104：从树形递归的分解与合并模型出发，对比后序递归与层序遍历的空间边界，推导调用栈深度与树高的映射关系。"
 ---
 
-[LeetCode 104. 二叉树的最大深度](https://leetcode.cn/problems/maximum-depth-of-binary-tree/)（Hot 100）给定二叉树的根节点 `root`，要求返回其最大深度。最大深度是指从根节点到最远叶子节点的最长路径上的节点数（空树深度为 0，单根节点深度为 1）。
+[LeetCode 104. 二叉树的最大深度](https://leetcode.cn/problems/maximum-depth-of-binary-tree/)（Hot 100）要求计算给定二叉树的**最大深度**（maximum depth），即从根节点到最远叶子节点的最长路径上的节点总数（空树深度为 0，单节点树深度为 1）[^sicp-tree]。
 
-二叉树天然由“根节点、左子树、右子树”递归构成。计算整棵树深度的前提，是必须先获知左右两棵子树各自的最大深度。这种“等待子问题返回结果、再在当前层结算合并”的依赖关系，正是标准的后序分治模式，其求值机制与[《从调用栈理解递归》中的分解与合并](/posts/understanding-recursion/#分解与合并用子问题结果求当前答案)所拆解的 `height` 递归原型完全一致。
+二叉树自身具有递归结构：任意非空节点 `node` 都由根节点本身、左子树 `node.left` 和右子树 `node.right` 构成。求整棵树的最大深度，可以直接映射为[《从调用栈理解递归》](/posts/understanding-recursion/#分解与合并用子问题结果求当前答案)中讨论的**分解与合并**（divide and merge）模型：
 
-## 递归模型：分治、不变量与后序合并
-
-将规模为 $n$ 的二叉树问题拆解为其子结构：
+1. 基本情况：若当前节点为空（`node is None`），路径上不包含任何节点，深度为 $0$。
+2. 子问题分解：分别求左子树 `node.left` 的最大深度 $d_L$ 与右子树 `node.right` 的最大深度 $d_R$。
+3. 后序合并：当前子树的最大深度等于左右子树最大深度的较大值加上当前节点自身贡献的 $1$ 层：
 
 $$
-\text{depth}(\text{node}) =
-\begin{cases}
-0, & \text{node 为空} \\
-1 + \max(\text{depth}(\text{node.left}), \text{depth}(\text{node.right})), & \text{node 非空}
-\end{cases}
+d(u) = \max(d_L, d_R) + 1
 $$
 
-该递归成立的不变量是：**以任意节点为根的子树，其最大深度必然等于左右子树最大深度的较大者加 1**。
+由于父节点的深度依赖左右子树的深度结果，合并计算必须发生在左右子树递归调用返回之后的后序位置。这种“后序回退汇总单侧深度贡献”的模式是许多树形路径问题的共同骨架——例如在[《二叉树的直径：单侧深度贡献与拐点路径全局结算》](/notes/algorithm/diameter-of-binary-tree/)中，递归函数返回值完全复用此处的最大深度定义，仅在后序合并时额外用左右深度的和 $d_L + d_R$ 更新全局最长路径。
 
-由于父节点必须使用左右子树的计算产物，当前栈帧无法在深入子节点之前得出答案。在递归执行模型中，当前栈帧被保存在调用栈中，程序控制流依次向下展开直到叶子节点的空指针（基准条件，返回 0），随后在**回溯（退栈）阶段**完成 $+1$ 的合并操作。
+## Python：后序分治实现
 
-### Python 简洁实现
-
-Python 实现通过类型注解 `Optional[TreeNode]` 清晰表达指针可能为空的语义：
+在 Python 中，可以直接按照上述递推关系写出后序分治实现[^py-max]：
 
 ```python
 from typing import Optional
@@ -36,92 +30,49 @@ class Solution:
     def maxDepth(self, root: Optional[TreeNode]) -> int:
         if root is None:
             return 0
-
-        # Subproblem decomposition: compute depths of left and right subtrees.
+        # Post-order merge: a parent's depth can only be resolved after
+        # both subtrees have returned their maximum root-to-leaf depths.
         left_depth = self.maxDepth(root.left)
         right_depth = self.maxDepth(root.right)
-
-        # Merge step: current height is 1 + maximum of both subtrees.
-        return 1 + max(left_depth, right_depth)
+        return max(left_depth, right_depth) + 1
 ```
 
-代码中也可以紧凑地缩写为 `return 1 + max(self.maxDepth(root.left), self.maxDepth(root.right)) if root else 0`。拆分成局部变量 `left_depth` 和 `right_depth` 则使调试断点和调用栈分析更加直观。
+递归执行期间，调用栈中同时存活的栈帧对应从根节点到当前访问节点的单条树路径。当递归深入左子树时，右子树的调用尚未发生；当左子树全部回退完毕并释放栈帧后，右子树才开始入栈。因此，调用栈的峰值深度严格等于树的最大深度 $h$。
 
-### 广度优先（BFS）层序迭代对照
+## C++：后序递归与求值顺序约束
 
-除了基于调用栈的深度优先分解，还可以通过广度优先搜索（BFS）按层推进。每处理完一整层节点，深度计数器累加 1：
-
-```python
-from collections import deque
-from typing import Optional
-
-
-class SolutionBFS:
-    def maxDepth(self, root: Optional[TreeNode]) -> int:
-        if root is None:
-            return 0
-
-        queue: deque[TreeNode] = deque([root])
-        depth = 0
-
-        while queue:
-            # Process all nodes at the current level.
-            level_size = len(queue)
-            for _ in range(level_size):
-                curr = queue.popleft()
-                if curr.left is not None:
-                    queue.append(curr.left)
-                if curr.right is not None:
-                    queue.append(curr.right)
-            depth += 1
-
-        return depth
-```
-
-两种思路展现了空间占用的不同切面：
-- **DFS（递归）**的空间开销取决于树的**垂直高度** $h$（调用栈的最大深度）；
-- **BFS（队列）**的空间开销取决于树的**水平宽度** $w$（单层最多节点数）。
-
-对于满二叉树，$w = \lceil n / 2 \rceil \in O(n)$，此时 BFS 队列峰值远大于 DFS 调用栈深度 $O(\log n)$；而在极端退化的链状树中，$w = 1$，BFS 仅占用 $O(1)$ 辅助空间，DFS 递归栈则深达 $O(n)$。
-
-## C++ 实现：栈上标量与求值顺序
-
-在 C++ 中，可以通过标量局部变量与内联递归规避任何堆动态分配。
+在 C++ 中实现相同的后序分治时，建议将 `maxDepth(root->left)` 与 `maxDepth(root->right)` 拆分为两条独立语句，再传入 `std::max`[^cpp-max]：
 
 ```cpp
 #include <algorithm>
 
 class Solution {
 public:
-    int maxDepth(const TreeNode* root) {
+    int maxDepth(const TreeNode* root) const {
         if (root == nullptr) {
             return 0;
         }
-
-        // Explicitly sequence left and right sub-evaluations.
-        const int leftDepth = maxDepth(root->left);
-        const int rightDepth = maxDepth(root->right);
-
-        return 1 + std::max(leftDepth, rightDepth);
+        // Sequence the two recursive calls explicitly; function argument
+        // evaluation order in C++ is unspecified inside std::max(f(), g()).
+        const int left_depth = maxDepth(root->left);
+        const int right_depth = maxDepth(root->right);
+        return std::max(left_depth, right_depth) + 1;
     }
 };
 ```
 
-这里将 `leftDepth` 和 `rightDepth` 分开声明，不仅提升可读性，还明确固定了先左后右的调用顺序。若直接写为 `std::max(maxDepth(root->left), maxDepth(root->right))`，根据 C++ 标准，函数实参之间的求值顺序是未指定的（unspecified）[^eval-order]，由编译器决定先计算哪一边。
+C++ 标准规定函数实参的求值顺序是未指定的（unspecified）[^cpp-eval]。虽然求最大深度是无副作用的只读调用、先走左子树还是先走右子树不影响返回结果，但在带有共享状态或访问顺序要求的树形 DFS 中，显式绑定 `left_depth` 与 `right_depth` 能够保证确定的左子树优先遍历顺序，并在调试时直接观察两侧子树的返回值。
 
-该实现仅使用基本整型标量，所有中间状态都保存在执行栈帧中，无需引入任何额外数据结构。
+## 空间边界对比：调用栈深度与队列前沿宽度
 
-## 复杂度分析与调用栈深度
+除后序 DFS 外，也可以复用[《二叉树的层序遍历：队列前沿管理与批量按层弹出》](/notes/algorithm/binary-tree-level-order-traversal/)中的按层推进框架：每次在循环开头锁定当前层节点数 `level_size = q.size()`，将该层节点全部弹出并推入下一层非空子节点，每完成一层批处理就将层数计数器加 $1$。
 
-- **时间复杂度**：$O(n)$。二叉树中的每个节点恰好被访问一次，每次访问仅执行空指针判断与常数次标量比较、加法。
-- **空间复杂度**：$O(h)$，其中 $h$ 为树的高度。辅助空间完全由递归调用栈帧占用：
-  - **最佳情况（树高度平衡）**：$h = \lfloor \log_2 n \rfloor + 1 \in O(\log n)$；
-  - **最坏情况（树完全倾斜退化为链表）**：$h = n \in O(n)$，此时可能面临深度调用栈溢出风险。
+两种方案在时间开销上都必须访问全部 $n$ 个节点，每次访问仅执行常数次指针判空与算术比较，时间复杂度均为 $O(n)$。二者的核心差异体现在辅助空间复杂度的树形依赖上：后序 DFS 的辅助空间取决于树的高度 $h$，即 $O(h)$；在平衡二叉树中 $h = O(\log n)$，而在退化为单链表的极端情况下 $h = n$。与之相对，层序 BFS 的辅助空间取决于树的最大层宽 $w$，即 $O(w)$；在退化链状树上每层仅有 $1$ 个节点，队列峰值空间为 $O(1)$，但在满二叉树的最底层包含约 $\lceil n / 2 \rceil$ 个叶子节点，队列峰值空间达到 $O(n)$。当树高极大但每层较窄时适合用层序 BFS 规避调用栈溢出；当树接近完全二叉树且层宽较大时，后序 DFS 的 $O(\log n)$ 栈空间更为紧凑。
 
-树形递归的本质是自顶向下拆分至最小项、自底向上合成规约[^sicp-tree]。理解这种后序依赖，不仅是求解树高、平衡树判定的基础，也是后续更复杂的树形动态规划（如直径计算与最大路径和）的通用思维锚点。
+[^sicp-tree]: [SICP §2.2.2: Hierarchical Structures](https://sicp.sourceacademy.org/chapters/2.2.2.html)——将树视为由分支递归构成的层次结构，树上的聚合性质可分解为子树同一性质的递归组合。
 
-## References
+[^py-max]: [Python 文档：内置函数 `max`](https://docs.python.org/3/library/functions.html#max)——说明 `max(arg1, arg2)` 返回两个参数中的较大值，用于后序合并左右子树深度。
 
-[^eval-order]: [cppreference: Order of evaluation](https://en.cppreference.com/w/cpp/language/eval_order.html)——说明 C++ 中函数参数的求值顺序在 C++17 之后虽有细化，但同一函数调用的多个参数之间仍未指定先后顺序。
+[^cpp-max]: [cppreference：`std::max`](https://en.cppreference.com/w/cpp/algorithm/max.html)——说明 `<algorithm>` 中的最大值比较函数接口与常数时间保证。
 
-[^sicp-tree]: [SICP Section 2.2.2: Hierarchical Structures](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/6515/sicp.zip/index.html)——剖析树形结构（Tree Recursion）上的封闭分治过程与子树规约机制。
+[^cpp-eval]: [cppreference：求值顺序](https://en.cppreference.com/w/cpp/language/eval_order.html)——说明 C++ 函数调用中各实参表达式的求值顺序未指定，分句求值可确立确定的遍历次序。

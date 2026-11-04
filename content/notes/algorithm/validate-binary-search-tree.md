@@ -1,67 +1,57 @@
 ---
 title: "验证二叉搜索树：开区间上下界收缩与中序严格单调"
 publishDate: "2026-11-13T12:00:00+08:00"
-description: "LeetCode 98 验证二叉搜索树，剖析仅比对子节点的局部判定陷阱，详解开区间上下界收缩与中序严格递增两种判定范式，以及 C++ 应对 INT_MIN/MAX 边界的类型安全策略。"
+description: "LeetCode 98：剖析仅比对直接子节点的局部判定陷阱，对比开区间上下界收缩与中序严格递增两种判定方式，并处理 C++ 整型极值边界。"
 ---
 
-[LeetCode 98. 验证二叉搜索树](https://leetcode.cn/problems/validate-binary-search-tree/)（Hot 100）要求判断给定的二叉树是否为有效的二叉搜索树（Binary Search Tree, BST）。
+[LeetCode 98. 验证二叉搜索树](https://leetcode.cn/problems/validate-binary-search-tree/)（Hot 100）要求判断给定的二叉树是否是一个有效的**二叉搜索树**（binary search tree, BST）。有效二叉搜索树满足以下定义[^clrs-bst]：
 
-根据二叉搜索树的严格定义，一个有效的 BST 必须满足：
-1. 节点的左子树只包含**小于**当前节点的所有键值；
-2. 节点的右子树只包含**大于**当前节点的所有键值；
-3. 节点的左右子树各自也必须是二叉搜索树。
+1. 节点的左子树只包含严格小于当前节点的数。
+2. 节点的右子树只包含严格大于当前节点的数。
+3. 所有左子树和右子树自身必须也是二叉搜索树。
 
-## 局部判定的经典陷阱
+## 局部判定的陷阱
 
-初学者容易写出仅在局部检查直接子节点的错误代码：
+初学者常见的实现误区是只检查每个节点与其左右直接子节点的大小关系，即对当前节点 `node` 仅测试 `node.left.val < node.val` 与 `node.right.val > node.val`。这种局部检查在如下层序输入 `[5, 4, 6, null, null, 3, 7]` 上会给出错误结果：
 
 ```text
-// 错误示例：仅作局部比较
-if (node.left && node.left.val >= node.val) return false;
-if (node.right && node.right.val <= node.val) return false;
-return isValid(node.left) && isValid(node.right);
+      5
+     / \
+    4   6
+       / \
+      3   7
 ```
 
-以树 `[5, 4, 6, null, null, 3, 7]` 为例：根节点为 `5`，其右孩子为 `6`，`6` 的左孩子为 `3`。
-- 在节点 `6` 处局部观察：$3 < 6 < 7$，左右孩子完全符合局部大小关系；
-- 但从整棵树的全局约束来看，节点 `3` 位于根节点 `5` 的右子树中，右子树的所有节点值都必须严格大于 `5`，因此节点 `3` 违反了 BST 的全局不变量。
+在节点 `6` 处，其左子节点 `3` 和右子节点 `7` 满足 $3 < 6 < 7$；在根节点 `5` 处，直接子节点满足 $4 < 5 < 6$。然而节点 `3` 位于根节点 `5` 的右子树内部，却违反了“右子树所有节点必须严格大于 $5$”的全局约束。因此，合法性判定不能只看父子相邻两层，而必须把祖先节点的约束传递到整棵子树，或者将其转化为全局序列的单调性检验。
 
-BST 的约束是全局性的，子树中的每个节点都背负着所有祖先节点施加的累积约束。
+## 两种核心判定范式
 
-## 范式一：开区间上下界自顶向下收缩
+围绕祖先约束的传递方向，可以得到两种等价的判定方法，分别对应[《从调用栈理解递归》](/posts/understanding-recursion/)中讨论的两种跨层数据流动通道：
 
-将全局约束自顶向下传递，等价于为每个子树维护一个合法开区间 $(l, r)$：
-- 根节点的初始合法范围为 $(-\infty, +\infty)$；
-- 递归进入左子树时，当前节点成为左子树所有节点的严格上界，右边界收缩：$(l, \text{node.val})$；
-- 递归进入右子树时，当前节点成为右子树所有节点的严格下界，左边界收缩：$(\text{node.val}, r)$；
-- 任意节点只要其值不严格落在开区间 $(l, r)$ 内（即 $\text{val} \le l$ 或 $\text{val} \ge r$），整棵树即判定非法。
+### 范式一：自顶向下收缩开区间
 
-### C++ 中整型极值的溢出陷阱
+第一种思路通过函数参数自顶向下传递合法的取值开区间 $(l, r)$。根节点没有祖先限制，初始区间为 $(-\infty, +\infty)$。当检查当前节点值 $x$（对应代码中的 `node.val`）时：
 
-LeetCode 给定的节点值范围覆盖了 32 位有符号整型的全部取值 $[-2^{31}, 2^{31}-1]$。
-如果使用 `int` 传递上下界，将初始界限设为 `INT_MIN` 与 `INT_MAX`：
-- 若根节点本身就是 `INT_MIN`，判断条件 `node->val <= low` 会误报非法；
-- 若将区间转为闭区间试图加减 1，`INT_MAX + 1` 会直接触发有符号整型溢出的未定义行为（Undefined Behavior）。
+- 若 $x \le l$ 或 $x \ge r$，说明当前节点越过了某个祖先设定的边界，直接返回 `false`。
+- 递归进入左子树时，左子树所有节点必须严格小于 $x$，因此上界收紧为 $x$，合法区间变为 $(l, x)$。
+- 递归进入右子树时，右子树所有节点必须严格大于 $x$，因此下界收紧为 $x$，合法区间变为 $(x, r)$。
 
-稳妥的解决方案有两种：
-1. **拓宽数据类型**：将边界提升为 `long long`，使用更宽广的数域避免截断；
-2. **`std::optional<int>`**：更具类型安全的现代 C++ 写法[^cpp-optional]，用 `std::nullopt` 原生表达“无上界”或“无下界”，完全解耦对数值类型位宽的假设。
+刚才的反例 `[5, 4, 6, null, null, 3, 7]` 中，根节点 `5` 向右子树传入区间 $(5, +\infty)$，节点 `6` 再向左子树传入收紧后的区间 $(5, 6)$。当检查节点 `3` 时，因 $3 \notin (5, 6)$ 立即识别出非法。
 
-## 范式二：中序遍历与严格单调递增映射
+### 范式二：中序遍历验证严格递增
 
-二叉搜索树与中序遍历之间存在一条核心定理：**一棵二叉树是有效的二叉搜索树，当且仅当它的中序遍历访问序列是严格单调递增的**[^clrs-bst]。
+根据二叉搜索树的结构性质，按“左子树 $\to$ 根节点 $\to$ 右子树”顺序执行中序遍历时，访问到的节点值序列必然单调递增[^clrs-bst]。在题目要求严格不等号的前提下，整棵树是合法 BST 当且仅当其中序序列严格递增。
 
-在[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)中，我们详细分析了中序遍历“左 $\to$ 根 $\to$ 右”的访问顺序。只要在遍历过程中维护前驱节点的值 `prev`，在每次访问当前节点时校验：
+这与[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)及[《二叉搜索树中第 K 小的元素：中序遍历与迭代提前终止》](/notes/algorithm/kth-smallest-element-in-a-bst/)共享同一性质。实现时无需先将整棵树的值收集到数组中再做二次扫描，只需在遍历过程中维护前驱节点值 `prev`：每访问一个当前节点 `curr`，立即校验 `curr.val > prev` 是否成立，随后将 `prev` 更新为 `curr.val`。一旦遇到 `curr.val <= prev` 即可提前返回 `False`。
 
-$$
-\text{prev} < \text{curr.val}
-$$
+| 判定范式 | 跨层状态通道 | 核心不变量 | 提前终止时机 |
+| :--- | :--- | :--- | :--- |
+| 开区间收缩 | 递归参数向下传值 `(low, high)` | 当前子树内所有节点值 $v \in (l, r)$ | 首次遇到 $v \le l$ 或 $v \ge r$ |
+| 中序单调性检验 | 遍历状态记录前驱 `prev` | 当前访问值严格大于中序前驱值 | 首次遇到 `curr.val <= prev` |
 
-一旦遇到 $\text{curr.val} \le \text{prev}$，说明存在逆序或相等重复值，可立刻提前终止。
+## Python：显式栈中序遍历与前驱校验
 
-## Python：开区间与中序比较
-
-Python 的整数支持任意精度，且内置 `float("-inf")` 与 `None`，表达开区间非常直观：
+Python 的 `float("-inf")` 可以直接与任意整数比较[^python-compare]。利用显式栈模拟中序遍历，既消除了深层树上的函数调用开销，又能在发现逆序对时直接返回：
 
 ```python
 from typing import Optional
@@ -69,93 +59,66 @@ from typing import Optional
 
 class Solution:
     def isValidBST(self, root: Optional[TreeNode]) -> bool:
-        # In-order traversal tracking the strictly preceding value.
-        prev: Optional[int] = None
+        stack: list[TreeNode] = []
+        curr = root
+        prev = float("-inf")
 
-        def inorder(node: Optional[TreeNode]) -> bool:
-            nonlocal prev
-            if node is None:
-                return True
-
-            if not inorder(node.left):
+        # Inorder traversal of a valid BST must yield a strictly increasing sequence.
+        while curr is not None or stack:
+            while curr is not None:
+                stack.append(curr)
+                curr = curr.left
+            curr = stack.pop()
+            if curr.val <= prev:
                 return False
+            prev = curr.val
+            curr = curr.right
 
-            # BST invariant requires strictly increasing sequence.
-            if prev is not None and node.val <= prev:
-                return False
-            prev = node.val
-
-            return inorder(node.right)
-
-        return inorder(root)
+        return True
 ```
 
-## C++：开区间收缩与可选值边界
+设树中节点总数为 $n$，树高为 $h$。每个节点至多入栈、出栈各一次，时间复杂度为 $O(n)$；栈中同时保留的节点数不超过从根到当前节点的路径长度，辅助空间复杂度为 $O(h)$，在平衡树上为 $O(\log n)$，最坏退化为链状树时为 $O(n)$。
 
-以下给出基于开区间自顶向下收缩的 C++ 实现，采用 `long long` 拓宽边界，逻辑清晰高效：
+## C++：开区间递归与整型极值边界
+
+在 C++ 中实现开区间收缩法时，需要特别处理 32 位有符号整数的极值边界。如果用 `INT_MIN` 和 `INT_MAX` 作为初始开区间 `(low, high)`[^cpp-climits]，当测试用例恰好只有单个节点 `[2147483647]`（即 `INT_MAX`）时，开区间判定 `node->val >= high` 会将该合法节点误判为越界。
+
+工程上有两种常见的无歧义边界写法：
+
+1. 将上下界类型拓宽为 64 位整数 `long long`，并用 `LLONG_MIN` 与 `LLONG_MAX` 初始化开区间[^cpp-climits]。因为 32 位 `int` 的全部取值都严格落在 `(LLONG_MIN, LLONG_MAX)` 内部，根节点不会在初始边界上触发假阳性。
+2. 若节点值本身已经是 `long long` 或泛化比较类型，无法继续拓宽位宽，则可将上下界声明为 `std::optional<int>`（或传入 `const TreeNode*` 边界指针），用 `std::nullopt` 显式表达“尚无上界/下界”[^cpp-optional]。
+
+下面给出位宽拓宽的递归实现：
 
 ```cpp
 #include <climits>
 
 class Solution {
-public:
-    bool isValidBST(TreeNode* root) {
-        // Expand bounds to 64-bit integer to prevent INT_MIN / INT_MAX overflow.
-        return validate(root, LLONG_MIN, LLONG_MAX);
-    }
-
-private:
-    bool validate(TreeNode* node, long long low, long long high) {
+    bool validate(const TreeNode* node, long long low, long long high) const {
         if (node == nullptr) {
             return true;
         }
-
-        // Current node must strictly reside in open interval (low, high).
+        // Every node in the current subtree must stay strictly inside (low, high).
         if (node->val <= low || node->val >= high) {
             return false;
         }
-
-        // Left branch tightens high bound; right branch tightens low bound.
         return validate(node->left, low, node->val) &&
                validate(node->right, node->val, high);
     }
-};
-```
 
-若使用 `std::optional<int>` 编写，代码不依赖宽整型，直接表达开区间的存在性：
-
-```cpp
-#include <optional>
-
-class Solution {
 public:
-    bool isValidBST(TreeNode* root) {
-        return validate(root, std::nullopt, std::nullopt);
-    }
-
-private:
-    bool validate(TreeNode* node, std::optional<int> low, std::optional<int> high) {
-        if (node == nullptr) {
-            return true;
-        }
-
-        if ((low.has_value() && node->val <= *low) ||
-            (high.has_value() && node->val >= *high)) {
-            return false;
-        }
-
-        return validate(node->left, low, node->val) &&
-               validate(node->right, node->val, high);
+    bool isValidBST(const TreeNode* root) const {
+        return validate(root, LLONG_MIN, LLONG_MAX);
     }
 };
 ```
 
-## 复杂度对比
+递归过程对每个节点访问一次，每次调用仅做常数次比较，时间复杂度为 $O(n)$；递归调用栈的最大深度等于树高 $h$，辅助空间复杂度为 $O(h)$。
 
-- **时间复杂度**：两种方法均为 $O(n)$。在最坏情况下需要检查所有 $n$ 个节点；一旦检测到破坏单调性或越界的情况，均能提前返回剪枝。
-- **空间复杂度**：$O(h)$，其中 $h$ 为树高。调用栈在平衡树下为 $O(\log n)$，在单支退化树下为 $O(n)$。
+[^clrs-bst]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章给出二叉搜索树的定义及定理 12.1（Inorder tree walk prints the keys of a binary search tree in sorted order）。
 
-开区间法在自顶向下的前序阶段即刻进行区间剪枝；中序单调法则便于与迭代显式栈配合，在流式处理中尽早发现逆序对。
+[^python-compare]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明 Python 数值类型 `int` 与 `float('-inf')` 跨类型比较时的全序规则。
 
-[^clrs-bst]: Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein. *Introduction to Algorithms*, 4th Edition. MIT Press, 2022. 定理 12.1（Inorder Tree Walk）：如果 $x$ 是一棵包含 $n$ 个结点的二叉搜索树的根，则中序遍历将在 $\Theta(n)$ 时间内按关键字的递增顺序输出树中的所有键。
-[^cpp-optional]: [cppreference: `std::optional`](https://en.cppreference.com/w/cpp/utility/optional)——说明可选对象的语义与无值哨兵的表达规范。
+[^cpp-climits]: [cppreference：`<climits>`](https://en.cppreference.com/w/cpp/types/climits.html)——定义 `INT_MIN`、`INT_MAX` 与 `LLONG_MIN`、`LLONG_MAX` 等整型极值宏，支撑将 `int` 节点边界拓宽至 `long long` 的范围安全性。
+
+[^cpp-optional]: [cppreference：`std::optional`](https://en.cppreference.com/w/cpp/utility/optional.html)——说明可选值包装器的语义，适合在不拓宽整数位宽时无歧义地表达“无上下界”状态。

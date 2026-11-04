@@ -4,23 +4,30 @@ publishDate: "2026-11-15T12:00:00+08:00"
 description: "LeetCode 108：利用升序数组随机访问特性二分选取根节点，在闭区间内递归构建高度平衡二叉搜索树，对比链表二分开销与递归栈空间。"
 ---
 
-[LeetCode 108. 将有序数组转换为二叉搜索树](https://leetcode.cn/problems/convert-sorted-array-to-binary-search-tree/)（Hot 100）要求将一个升序排列的整数数组转换为一棵**高度平衡**的二叉搜索树（BST）。一棵高度平衡二叉树的几何契约是：每个节点的左右子树高度差绝对值不超过 1（即 $|h_L - h_R| \le 1$）。
+[LeetCode 108. 将有序数组转换为二叉搜索树](https://leetcode.cn/problems/convert-sorted-array-to-binary-search-tree/)（Hot 100）给定一个元素已按升序排列的整数数组 `nums`，要求将其转换为一棵**高度平衡**（height-balanced）二叉搜索树。高度平衡二叉树是指每个节点的左右两个子树的高度差的绝对值不超过 $1$。
 
-二叉搜索树的中序遍历序列天然具有严格升序性质；反过来，题目给出的升序数组便构成了目标 BST 的中序遍历序列。但仅靠中序遍历无法唯一确定一棵树的拓扑形态——若每次取最左元素为根，整棵树将退化为深达 $O(n)$ 的单链。为了满足高度平衡约束，必须使任意子树的左右节点数尽可能均分，即左右子树的节点数量差满足 $|n_L - n_R| \le 1$。通过数学归纳法可知，选择当前区间正中位置的元素作为子树根节点，能保证生成的二叉树总高度被严格压至 $\lceil \log_2(n + 1) \rceil \le O(\log n)$。
+在[《验证二叉搜索树：开区间上下界收缩与中序严格单调》](/notes/algorithm/validate-binary-search-tree/)中，我们利用“BST 的中序遍历序列严格递增”这一性质将二维树结构还原为一维有序序列。本题恰好是这一映射的逆过程：给定严格递增的中序序列 `nums`，将其折叠还原为一棵二叉搜索树[^sicp-trees]。
 
-## 数组随机访问与链表快慢指针的开销差异
-
-在数组上实现二分划分极其高效：由于连续内存块支持常数时间的随机访问[^cpp-vector]，计算中点下标 `mid = left + (right - left) / 2` 并读取 `nums[mid]` 仅需 $O(1)$ 时间，因此递归关系式为：
+仅靠一维中序序列无法唯一确定二叉树的形态——任选序列中的一个元素作为根节点，其左侧子数组作为左子树、右侧子数组作为右子树，递归构造出的树都满足 BST 的大小约束。但题目额外要求树必须**高度平衡**。若每次选区间首元素作为根，整棵树会退化为高度为 $n$ 的单支斜树；要使左右子树高度尽可能接近，直接的策略是在闭区间 $[l, r]$（对应代码中的下标区间 `[left, right]`）内选取区间中点：
 
 $$
-T(n) = 2T(n / 2) + O(1) = O(n)
+m = l + \lfloor (r - l) / 2 \rfloor
 $$
 
-这与链表上的二分构建形成鲜明对照。在[《排序链表：递归归并与自底向上归并》](/notes/algorithm/sort-list/)中，单链表节点在内存中离散分布且缺乏随机访问能力；为了定位链表中点，必须使用快慢双指针从头推进扫描 $O(m)$ 步。如果在链表上套用相同的自顶向下二分切分，递归方程将变为 $T(n) = 2T(n / 2) + O(n) = O(n \log n)$，必须改用全局顺序遍历推进指针模拟中序遍历才能做回 $O(n)$。数组的连续布局与随机寻址特性消除了所有中间搜寻开销，使自顶向下分治构建天然达到线性下界。
+将中点元素作为当前子树的根节点后，左子区间 $[l, m - 1]$ 的节点数为 $n_L = m - l$，右子区间 $[m + 1, r]$ 的节点数为 $n_R = r - m$。由于向下取整的性质，左右子树的规模差始终满足 $\lvert n_L - n_R \rvert \le 1$。在每一层递归中保持节点数量均分，归纳可知生成树的总高度不超过 $\lceil \log_2(n + 1) \rceil$，任意节点的左右子树高度差绝对值必然不超过 $1$，这也是[《从调用栈理解递归》](/posts/understanding-recursion/#分解与合并用子问题结果求当前答案)中典型的分治构造过程。
 
-## Python：闭区间递归与避免切片拷贝
+当区间长度 $r - l + 1$ 为偶数时，取左中点 $m = l + \lfloor (r - l) / 2 \rfloor$ 或右中点 $m = l + \lceil (r - l) / 2 \rceil$ 会生成形态不同但同样高度平衡的合法 BST。
 
-若直接写 `nums[:mid]` 与 `nums[mid + 1:]`，每次切片都会为子序列分配新的列表对象，使递归过程总共产生 $O(n \log n)$ 的额外内存分配与数据搬运。通过辅助函数传递闭区间下标 $[left, right]$，可以直接在原始列表上原地定位，保持每层递归的 $O(1)$ 局部辅助空间：
+## 数组随机访问与链表中点扫描对比
+
+同样是对有序序列做中点切分，底层容器的访问模型决定了分治的时间复杂度：
+
+- 在本题的连续数组中，通过下标 `mid` 可以在 $O(1)$ 时间内直接随机访问中点元素[^cpp-vector]，无需拷贝切片或扫描区间。递推关系式为 $T(n) = 2T(n / 2) + O(1)$，总时间复杂度为 $O(n)$。
+- 若输入改为单向有序链表（如 [LeetCode 109. 有序链表转换二叉搜索树](https://leetcode.cn/problems/convert-sorted-list-to-binary-search-tree/)），或者像[《排序链表：递归归并与自底向上归并》](/notes/algorithm/sort-list/)那样用快慢指针寻找链表中点，单次定位中点需要 $O(n)$ 的线性扫描开销，朴素顶层二分的递推式会变为 $T(n) = 2T(n / 2) + O(n)$，总时间上升为 $O(n \log n)$（链表场景下需结合中序遍历顺序同步推进链表头指针，才能降回 $O(n)$）。
+
+## Python：闭区间下标递归
+
+在 Python 实现中，切忌写成 `sortedArrayToBST(nums[:mid])` 和 `sortedArrayToBST(nums[mid + 1:])`——列表切片会在每层递归额外分配新列表并拷贝元素，把总体时间和辅助空间开销推高到 $O(n \log n)$。应当始终传递原数组引用与闭区间边界下标 `left`、`right`：
 
 ```python
 from typing import Optional
@@ -32,8 +39,8 @@ class Solution:
             if left > right:
                 return None
 
-            # Pick the middle element to ensure subtree sizes differ by at most 1.
-            mid = left + (right - left) // 2
+            # Choosing the midpoint keeps the left and right subtree sizes balanced.
+            mid = (left + right) // 2
             root = TreeNode(nums[mid])
             root.left = build(left, mid - 1)
             root.right = build(mid + 1, right)
@@ -42,48 +49,37 @@ class Solution:
         return build(0, len(nums) - 1)
 ```
 
-当 $left > right$ 时区间为空，返回 `None` 作为子树叶子节点的空指针哨兵。选取 $mid = \lfloor (left + right) / 2 \rfloor$ 时，偶数长度区间的左子树比右子树少 1 个节点；若改选上中点 $\lceil (left + right) / 2 \rceil$，右子树比左子树少 1 个节点。两种选法均完全满足题目对高度平衡的定义。
+## C++：闭区间分治与节点所有权
 
-## C++：常引用传递与紧凑递归栈
-
-C++ 实现中将 `nums` 以常引用传递，杜绝函数调用中的容器拷贝；闭区间边界传入整型下标，中点计算采用 `left + (right - left) / 2` 避免有符号 32 位整数相加潜在的溢出风险。
+C++ 实现同样以 `const std::vector<int>&` 只读引用传递原数组[^cpp-vector]，并用 `left + (right - left) / 2` 计算中点下标 `mid`。递归函数每次通过 `new TreeNode(nums[mid])` 在堆上动态分配树节点[^cpp-new]，构造完成的整棵二叉树节点所有权交由调用方或评测框架在生命周期结束时统一管理与销毁：
 
 ```cpp
 #include <vector>
 
-// Definition for a binary tree node.
 class Solution {
-    TreeNode* build(const std::vector<int>& nums, int left, int right) {
+    TreeNode* build(const std::vector<int>& nums, int left, int right) const {
         if (left > right) {
             return nullptr;
         }
-
-        // Midpoint selection guarantees |size(left) - size(right)| <= 1.
+        // Selecting the middle element keeps subtree sizes differing by at most 1.
         const int mid = left + (right - left) / 2;
-        auto* root = new TreeNode(nums[mid]);
+        TreeNode* root = new TreeNode(nums[mid]);
         root->left = build(nums, left, mid - 1);
         root->right = build(nums, mid + 1, right);
         return root;
     }
 
 public:
-    TreeNode* sortedArrayToBST(const std::vector<int>& nums) {
+    TreeNode* sortedArrayToBST(const std::vector<int>& nums) const {
         return build(nums, 0, static_cast<int>(nums.size()) - 1);
     }
 };
 ```
 
-## 平衡性归纳与时空复杂度
+设数组长度为 $n$。数组中每个元素恰好作为中点被选作根节点一次，单次递归调用只做常数次算术与指针赋值，因此时间复杂度为 $O(n)$。不计返回树本身的 $n$ 个节点，递归调用栈的深度严格受平衡树高度限制，辅助空间复杂度为 $O(\log n)$。
 
-令包含 $k$ 个元素的闭区间被中点划分为两部分。当选择 $mid = left + \lfloor (k - 1) / 2 \rfloor$ 时：
-- 左子树包含元素个数 $n_L = \lfloor (k - 1) / 2 \rfloor$；
-- 右子树包含元素个数 $n_R = k - 1 - n_L = \lceil (k - 1) / 2 \rceil$。
+[^sicp-trees]: [SICP §2.3.3: Example: Representing Sets](https://sicp.sourceacademy.org/chapters/2.3.3.html)——阐述有序表与平衡二叉搜索树的对应关系，以及通过折半递归在 $O(n)$ 步内由有序序列构造平衡树的过程。
 
-显然 $|n_L - n_R| \le 1$。对于完全由尺寸相差至多为 1 的子树递归构造而成的二叉树，其高度严格满足 $h = \lceil \log_2(n + 1) \rceil$[^sicp-tree]，因而必然满足高度平衡二叉搜索树 $|h_L - h_R| \le 1$ 的定义要求。
+[^cpp-vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明连续存储与 $O(1)$ 随机访问 `operator[]` 的保证，使按下标取中点无需额外拷贝。
 
-- **时间复杂度**：每个数组元素恰好被读取一次并构造为一个 `TreeNode` 实例，不存在任何冗余遍历或重复查找。主定理下 $T(n) = 2T(n / 2) + O(1) = O(n)$。
-- **空间复杂度**：由于构建出的树结构严格平衡，递归调用栈的深度等于树的最大高度 $\lceil \log_2(n + 1) \rceil$，即递归调用栈空间为 $O(\log n)$。若不计返回结果所需的 $n$ 个树节点内存，纯辅助空间为 $O(\log n)$。
-
-[^cpp-vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明 `vector` 的元素在内存中连续存储，支持常数时间随机访问迭代器。
-
-[^sicp-tree]: [SICP Section 2.3.3: Representing Sets](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/6515/sicp.zip/index.html)——阐述将有序列表等额二分转换为高度平衡二叉搜索树（`list->tree`）的递归构建与对数高度性质。
+[^cpp-new]: [cppreference：`new` 表达式](https://en.cppreference.com/w/cpp/language/new.html)——说明在动态存储区分配并初始化 `TreeNode` 对象的行为，其生命周期持续至调用方显式释放。

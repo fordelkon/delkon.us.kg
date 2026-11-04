@@ -1,32 +1,22 @@
 ---
 title: "二叉搜索树中第 K 小的元素：中序遍历与迭代提前终止"
 publishDate: "2026-11-14T12:00:00+08:00"
-description: "LeetCode 230 二叉搜索树中第 K 小的元素，利用中序遍历严格单调特性，通过显式栈迭代在第 k 次出栈时提前终止剪枝，探讨频繁插入删除场景下的红黑树或树节点计数改造。"
+description: "LeetCode 230：利用二叉搜索树中序遍历严格递增的性质，通过显式栈迭代在第 k 次出栈时提前返回，并讨论频繁修改下的顺序统计树扩充。"
 ---
 
-[LeetCode 230. 二叉搜索树中第 K 小的元素](https://leetcode.cn/problems/kth-smallest-element-in-a-bst/)（Hot 100）给定一棵二叉搜索树的根节点 `root` 和一个整数 $k$（$1 \le k \le n$，其中 $n$ 为树中节点总数），要求找出树中按升序排序后第 $k$ 小的节点值。
+[LeetCode 230. 二叉搜索树中第 K 小的元素](https://leetcode.cn/problems/kth-smallest-element-in-a-bst/)（Hot 100）给定一棵二叉搜索树的根节点 `root` 和一个整数 `k`（$1 \le k \le n$，其中 $n$ 为节点总数），要求查找其中按升序排列的第 $k$ 小的元素（从 $1$ 开始计数）。
 
-## 中序单调性与第 $k$ 位的等价转换
+## 中序单调性与显式栈提前终止
 
-根据二叉搜索树的根本性质，对其执行中序遍历（左子树 $\to$ 根节点 $\to$ 右子树）所访问的节点序列，严格保持非降（且在节点值各不相同时为严格递增）的顺序[^clrs-bst]。
+正如[《验证二叉搜索树：开区间上下界收缩与中序严格单调》](/notes/algorithm/validate-binary-search-tree/)中所分析的，二叉搜索树的中序遍历（左子树 $\to$ 根节点 $\to$ 右子树）会严格按从小到大的顺序访问所有节点[^clrs-bst]。因此，寻找第 $k$ 小的元素等价于求中序遍历序列中的第 $k$ 个访问节点。
 
-因此，“寻找第 $k$ 小的元素”完全等价于：**在中序遍历访问序列中，找到第 $k$ 个被访问的节点**。
+如果采用朴素的递归中序遍历，把全部 $n$ 个节点的值依次写入列表后再读取下标 `k - 1`，无论 $k$ 多小都必须完整遍历整棵树，耗时与额外空间均为 $O(n)$。即便在递归函数内部维护计数器，命中第 $k$ 个节点后也仍需逐层检查终止标志并退回外层递归调用栈。
 
-直接进行完整的递归中序遍历，并将遍历结果存入动态数组后再取下标 $k - 1$，固然能解决问题，但其时间与空间复杂度均为 $O(n)$。即便是查找最小元素（$k = 1$），这种朴素做法仍会强行访问剩余的 $n - 1$ 个节点，造成了巨大的冗余开销。
+参照[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)与[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)中的显式栈模式，将递归调用栈改写为显式维护的节点栈后，控制流完全收敛在单层循环内：每从栈顶弹出一个节点，就代表按升序确认了一个元素；将计数器 `k` 减 $1$，一旦 `k == 0` 即可立即通过 `return` 直接退出函数，无需访问剩余节点。
 
-## 显式栈迭代与提前终止剪枝
+## Python：显式栈迭代与提前返回
 
-要实现按需遍历并提前终止，最自然且高效的方法是将递归调用栈转化为**显式栈迭代**：
-
-1. 维护一个显式栈 `stack` 与当前扫描游标 `curr`（初始指向 `root`）；
-2. **一路向左压栈**：只要 `curr` 非空，便将其压入栈中，并向左推进 `curr = curr.left`。当 `curr` 达到 `nullptr` 时，栈顶即为当前尚未访问的子树中值最小的节点；
-3. **出栈并计数**：弹出栈顶节点 `node`，这就是中序遍历的当前访问节点。将计数器 $k$ 递减 1；
-4. **提前终止**：若 $k$ 递减后等于 0，说明当前弹出的节点恰好就是整棵树中第 $k$ 小的元素，立即将其数值返回，直接退出遍历；
-5. **转向右子树**：若 $k > 0$，令 `curr = node.right`，回到第 2 步继续处理右分支。
-
-这种方式的优势在于**流式消费（Streaming / Lazy Evaluation）**：算法仅遍历到第 $k$ 小的节点便立刻中断，完全避开了右侧庞大子树的无效遍历。
-
-## Python：显式栈迭代提前终止
+使用 Python 的 `list` 作为显式栈时，每次先沿着左子链一路压栈到底，弹出栈顶节点时恰好按升序结算当前最小元素[^python-list-stack]：
 
 ```python
 from typing import Optional
@@ -35,87 +25,82 @@ from typing import Optional
 class Solution:
     def kthSmallest(self, root: Optional[TreeNode], k: int) -> int:
         stack: list[TreeNode] = []
-        curr: Optional[TreeNode] = root
+        curr = root
 
+        # Each pop from the explicit inorder stack yields the next smallest element.
         while curr is not None or stack:
-            # Dive deep into the leftmost branch.
             while curr is not None:
                 stack.append(curr)
                 curr = curr.left
-
-            # Process the next smallest element in inorder sequence.
             curr = stack.pop()
             k -= 1
             if k == 0:
                 return curr.val
-
-            # Traverse the right subtree.
             curr = curr.right
 
         return -1
 ```
 
-## C++：零额外堆分配的栈迭代
+## C++：基于 `std::vector` 的显式栈迭代
 
-在 C++ 中使用标准库容器 `std::stack`，无需递归函数的栈帧额外开销：
+在 C++ 中，既可以使用容器适配器 `std::stack<TreeNode*>`，也可以直接使用 `std::vector<TreeNode*>` 作为显式栈。需要注意[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)中强调的内存模型事实：无论选用 `std::vector` 还是 `std::stack`（默认底层为 `std::deque`），容器中的节点指针依然分配在**堆内存**（动态存储区）上，并非“零堆分配”[^cpp-vector]。显式栈的优势在于省去了线程调用栈帧（返回地址、寄存器保存区与局部变量）的开销，并且允许在命中第 $k$ 个节点时直接退出整个函数：
 
 ```cpp
-#include <stack>
+#include <vector>
 
 class Solution {
 public:
-    int kthSmallest(TreeNode* root, int k) {
-        std::stack<TreeNode*> stack;
-        TreeNode* curr = root;
+    int kthSmallest(const TreeNode* root, int k) const {
+        std::vector<const TreeNode*> st;
+        const TreeNode* curr = root;
 
-        while (curr != nullptr || !stack.empty()) {
-            // Push all left ancestors onto the explicit stack.
+        // Maintain ancestors whose left subtrees are still being explored.
+        while (curr != nullptr || !st.empty()) {
             while (curr != nullptr) {
-                stack.push(curr);
+                st.push_back(curr);
                 curr = curr->left;
             }
-
-            // Pop the current in-order element.
-            curr = stack.top();
-            stack.pop();
-
-            // Decrement remaining count and terminate early once reached.
+            curr = st.back();
+            st.pop_back();
             if (--k == 0) {
                 return curr->val;
             }
-
-            // Move to the right child to resume traversal.
             curr = curr->right;
         }
-
         return -1;
     }
 };
 ```
 
-## 复杂度分析
+设树高为 $h$。算法首先沿左链下行至多 $h$ 步到达最小节点，随后每确认一个元素至多向右下行并压栈一条路径，在第 $k$ 次出栈时立即停止，因此时间复杂度为 $O(h + k)$（平衡树上为 $O(\log n + k)$，最坏退化为链时为 $O(n)$）。显式栈中同时保存的节点数不超过树高，辅助空间复杂度为 $O(h)$。
 
-- **时间复杂度**：$O(h + k)$，其中 $h$ 为二叉搜索树的高度。首先需要 $O(h)$ 步沿左分支下潜到树的最左叶子节点，随后每弹出并访问一个元素需要分摊 $O(1)$ 时间，共计访问 $k$ 个元素后立即终止。在平衡树下 $h = O(\log n)$，因此总时间为 $O(\log n + k)$；若 $k \ll n$，其效率远优于全树扫描的 $O(n)$。
-- **空间复杂度**：$O(h)$。显式栈在任何时刻保存的节点数量均不超过树的高度 $h$。
+## 进阶：频繁修改下的顺序统计树
 
-## 进阶思考：频繁修改场景下的顺序统计树
+题目进阶追问：如果二叉搜索树经常被修改（插入、删除操作）而且需要频繁地查找第 $k$ 小的值，该如何优化？
 
-题目提出了进一步的拓展：若这棵二叉搜索树经常被修改（频繁执行插入与删除操作），并且需要频繁查询第 $k$ 小的元素，如何优化数据结构？
+在单次查询场景下，$O(h + k)$ 的中序迭代已经足够高效；但在高频查询且 $k$ 较大的动态场景下，每次重新走过前 $k$ 个节点的线性部分会成为瓶颈。此时可以将普通 BST 扩充为**顺序统计树**（order-statistic tree）[^clrs-ost]，在每个节点 $x$ 中额外维护一个字段 $\text{size}(x)$，记录以 $x$ 为根的子树所包含的节点总数（定义空节点 $\text{size}(\text{nil}) = 0$），满足如下结构不变量：
 
-在此场景下，若每次查询都消耗 $O(h + k)$，在 $k$ 接近 $n$ 时仍退化为 $O(n)$。标准解法是引入**顺序统计树（Order-Statistic Tree）**[^clrs-ost]：
+$$
+\text{size}(x) = \text{size}(l) + \text{size}(r) + 1
+$$
 
-1. **节点结构增强**：为树中的每个节点额外维护一个元数据字段 `size`，记录以当前节点为根的子树中的节点总数：
-   $$
-   \text{size}(x) = \text{size}(x.\text{left}) + \text{size}(x.\text{right}) + 1
-   $$
-2. **基于计数的二分查找**：
-   - 设当前节点左子树节点数为 $s = \text{size}(\text{curr}.\text{left})$；
-   - 若 $k = s + 1$，则当前节点恰好是第 $k$ 小的元素；
-   - 若 $k \le s$，说明第 $k$ 小的元素必然落在左子树中，递归进入左子树寻找第 $k$ 小；
-   - 若 $k > s + 1$，说明目标落在右子树中，递归进入右子树寻找第 $k - s - 1$ 小。
-3. **动态维护成本**：
-   - 在红黑树或 AVL 树的基础上维护 `size`，单次查询时间仅为 $O(h) = O(\log n)$，完全与 $k$ 的大小无关；
-   - 插入与删除操作在沿着树高回溯并进行旋转调整时，仅需伴随常数次子树大小重算，整体插入与删除的时间复杂度依旧稳定保持在 $O(\log n)$。
+其中 $l$ 与 $r$ 分别为节点 $x$ 的左、右子节点。借助子树规模信息，查找以 $x$ 为根的子树中第 $k$ 小元素的过程可以直接转化为类似二分查找的单路下行：记左子树规模与根节点构成的当前相对秩为 $r_x = \text{size}(l) + 1$，则：
 
-[^clrs-bst]: Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein. *Introduction to Algorithms*, 4th Edition. MIT Press, 2022. 第 12 章二叉搜索树及其遍历性质。
-[^clrs-ost]: Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein. *Introduction to Algorithms*, 4th Edition. MIT Press, 2022. 第 14.1 节（顺序统计树）：讨论通过在红黑树节点中扩充子树节点计数字段 `size`，在 $O(\log n)$ 时间内完成选择与秩计算。
+1. 若 $k = r_x$，说明左子树恰好有 $k - 1$ 个严格小于 $x$ 的元素，当前根节点 $x$ 即为第 $k$ 小元素，直接返回。
+2. 若 $k < r_x$，说明目标位于左子树中，直接向 $l$ 递归或迭代查找第 $k$ 小元素。
+3. 若 $k > r_x$，说明目标位于右子树中，且左子树与根节点已排在它前面（共 $r_x$ 个元素），因此转向右子节点 $r$ 查找第 $k - r_x$ 小元素。
+
+| 方案 | 节点额外字段 | 单次插入 / 删除代价 | 单次查找第 $k$ 小代价 |
+| :--- | :--- | :--- | :--- |
+| 显式栈中序迭代 | 无 | $O(h)$ | $O(h + k)$ |
+| 顺序统计树（平衡 BST 扩充） | 子树节点数 $\text{size}(x)$ | $O(\log n)$ | $O(\log n)$ |
+
+当底层采用红黑树或 AVL 树维护平衡时，插入或删除节点只需沿访问路径更新 $\text{size}$ 字段，并在左旋、右旋操作中以 $O(1)$ 时间局部重算受影响的两个节点的 $\text{size}$ 值[^clrs-ost]。这样单次修改与单次按秩查询的时间复杂度均稳定在 $O(\log n)$。
+
+[^clrs-bst]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章证明二叉搜索树的中序遍历按非递减序输出所有节点关键字。
+
+[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明 Python `list` 尾部 `append()` 与 `pop()` 具有平摊 $O(1)$ 时间复杂度。
+
+[^cpp-vector]: [cppreference：`std::vector`](https://en.cppreference.com/w/cpp/container/vector.html)——说明 `std::vector` 在堆上维护动态连续内存，尾部压入与弹出为平摊常数时间。
+
+[^clrs-ost]: [CLRS: *Introduction to Algorithms* (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 14.1 节定义顺序统计树（Order-Statistic Tree）的 $\text{size}$ 扩充不变量、`OS-Select` 的 $O(\log n)$ 查找算法及旋转操作中的常数时间规模维护。

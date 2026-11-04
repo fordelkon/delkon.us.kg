@@ -4,53 +4,49 @@ publishDate: "2026-11-17T12:00:00+08:00"
 description: "LeetCode 437：将一维连续子数组前缀和移植到树形路径，分析路径单向性与前缀和溢出风险，阐明回溯离开节点时从全局哈希表中撤销频次的不变式与生命周期契约。"
 ---
 
-[LeetCode 437. 路径总和 III](https://leetcode.cn/problems/path-sum-iii/)（Hot 100）要求计算二叉树中路径和等于目标值 `targetSum` 的路径数量。路径不需要从根节点开始，也不需要在叶子节点结束，但必须**从父节点向下延伸至子节点**（即只能沿单向祖先到后代路径移动）。
+[LeetCode 437. 路径总和 III](https://leetcode.cn/problems/path-sum-iii/)（Hot 100）要求计算二叉树中节点值之和等于目标值 `targetSum` 的路径数目。路径不需要从根节点开始，也不需要在叶子节点结束，但方向必须向下（只能从父节点指向子节点）。树中节点总数在 $[0, 1000]$ 范围内，节点值范围为 $[-10^9, 10^9]$。
 
-这一方向约束非常关键：它排除了经过最近公共祖先向上折返再向下的两翼路径（那种模式属于最大路径和等跨子树问题），限定了任意合法路径本质上就是某条从根到叶的单向直链上的**一段连续子段**。
+## 从一维前缀和到树上回溯
 
-## 树上前缀和与差值转换
+与[《二叉树中的最大路径和：负收益归零剪枝与树上后序贡献》](/notes/algorithm/binary-tree-maximum-path-sum/)不同，本题明确要求路径方向只能从父节点指向子节点——路径不能在某个拐点处折返连接左右两棵子树，而必然是某条“从根节点 `root` 到叶子节点的向下路径”上的一个连续片段。
 
-既然合法路径是根到当前节点直链上的连续节点段，我们便能将连续区间和的差值思想移植到树上。
-
-设树的根节点到当前节点 $u$ 的路径节点值之和为前缀和 $P_u$。若 $a$ 是 $u$ 的某一个祖先节点，其对应的前缀和为 $P_a$。那么，从 $a$ 的子节点沿着树枝单向延伸至 $u$ 的这段连续树上路径的和恰好为两前缀和之差：
+一旦把目光聚焦在从根节点 `root` 到当前节点 $u$ 的唯一向下路径上，这条路径就退化成了一个标准的一维数组。我们可以直接复用[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)中的前缀和差分思想：记从根节点 `root` 到节点 $u$ 的路径节点总和为**树上前缀和**（tree prefix sum）$P_u$，目标和 `targetSum` 记为 $t$。若从 $u$ 的某个祖先节点 $a$ 的下一层开始、到 $u$ 结束的向下路径和恰好等于 $t$，则必然满足：
 
 $$
-P_u - P_a = \text{targetSum} \iff P_a = P_u - \text{targetSum}
+P_u - P_a = t \iff P_a = P_u - t
 $$
 
-当扫描到节点 $u$ 时，只要知道在其**所有合法祖先节点**中，前缀和为 $P_u - \text{targetSum}$ 的节点出现过多少次，就能直接求出以 $u$ 为终点且和为 `targetSum` 的路径总数。为了涵盖整条路径恰好以根节点为起点的边界情况（即 $P_u = \text{targetSum}$），算法开始前需预设一个虚拟空前缀 $P_0 = 0$ 且频次为 1。
+因此，当深度优先搜索（DFS）到达节点 $u$ 时，以 $u$ 为底端终点的合法路径条数，恰好等于从 `root` 到 $u$ 的直系祖先链上前缀和等于 $P_u - t$ 的出现次数。为了涵盖“从根节点 `root` 直接开始到 $u$ 结束”（即 $P_u = t$）的合法路径，需要在搜索开始前预先在哈希表 `prefix_count` 中放入空前缀基准状态 `0: 1`。
 
-## 一维线性滑动 vs 树形多分支回溯
+### 为什么在树上必须显式执行状态回溯？
 
-在[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)中，我们在连续数组上一维单向扫描。一维数组是一条单一的时间线，先前访问过的所有前缀和天然就是后续所有位置的合法前驱，哈希表只需单调写入频次，永不撤销。
+在一维数组中，索引从左向右单向推进，左侧的所有位置永远是右侧位置的合法前驱，哈希表只需单向累加频次；但在二叉树中，DFS 会依次探索不同的子树分支。假设节点 $u$ 的左子树中存在某个节点 $x$，当递归从左子树返回并转而进入 $u$ 的右子树节点 $y$ 时，$x$ 并不是 $y$ 的祖先——从 $x$ 到 $y$ 的路径需要向上经过 $u$ 再折向下，违反了“只能从父节点指向子节点”的单向约束。
 
-但二叉树的拓扑结构不同：深度优先搜索（DFS）会在每个分叉点进入平行的左右子树。当递归探索完左子树的所有节点、返回到当前节点并准备转向右子树时，**左子树内部所产生的所有节点前缀和，绝不是右子树节点的祖先**！
+```text
+          root
+           |
+           u
+          / \
+         x   y   <-- 探索右分支 y 时，左分支节点 x 的前缀和不能残留在 prefix_count 中
+```
 
-如果任由左子树的前缀和留在全局哈希表中，右子树中的节点在查询时就会误把左侧堂兄弟或侄子节点的前缀和当作自己的祖先，从而错误匹配出横跨两棵不连通子树的非法“飞线”路径。
+这正对应了[《从调用栈理解递归》](/posts/understanding-recursion/#哪些状态需要显式恢复)中关于状态生命周期的区分：
 
-因此，树上前缀和算法必须维持严格的**路径状态不变量**：
+1. 当前累加和 `current_sum` 作为函数参数按值传递，属于每个调用栈帧私有的局部状态，函数返回时随栈帧弹出自动销毁，无需手动恢复。
+2. 哈希表 `prefix_count` 是跨递归调用共享的可变容器。为了维持**祖先链不变量**——即在访问任意节点 $u$ 时，`prefix_count` 中仅保存从根节点到 $u$ 的当前直系祖先链上的前缀和频次——必须在递归进入左右子树之前将 `current_sum` 的频次加 $1$，并在左右子树探索完毕、即将离开当前节点回退给父节点之前，将 `prefix_count[current_sum]` 减 $1$ 恢复原状。
 
-> 在 DFS 访问任意节点 $u$ 的生命周期内，全局哈希表 `prefix_count` 中有且仅有从根节点到节点 $u$ 的当前祖先链条上的前缀和频次。
+## Python：先查后记与回溯恢复
 
-[《从调用栈理解递归》中“哪些状态需要显式恢复”的讨论](/posts/understanding-recursion/#哪些状态需要显式恢复)区分了栈帧私有状态与跨层共享状态：
-- 像累加前缀和 `current_sum` 这样的参数是**每层栈帧私有的局部值**，随着递归调用的深入与返回，调用栈会自动将其保留与恢复；
-- 而哈希表 `prefix_count` 属于**跨层共享的可变状态**。谁在当前栈帧向共享表登记了状态，谁就必须在当前帧即将退栈前履行回溯契约——显式执行 `--prefix_count[current_sum]`，将当前节点产生的影响彻底抹除，恢复共享容器给父节点与其他兄弟分支。
-
-## 64 位整数防溢出
-
-根据题目约束，二叉树的节点值范围为 $[-10^9, 10^9]$，树节点数最多可达 $1000$。在最坏情况下（例如整棵树退化为单链且节点值全为 $10^9$），累加的前缀和可以达到 $10^{12}$，远超 32 位有符号整型上限 `INT_MAX`（$\approx 2.14 \times 10^9$）[^cpp-limits]。因此，在 C++ 实现中，必须将累加前缀和变量、差值查找以及哈希表的键类型显式提升为 64 位的 `long long`。
-
-## Python：闭包字典与回溯对称
-
-在 Python 中，通过在进入左右子树前计数并注册当前节点、在遍历结束后将当前前缀和频次减 1，形成完美对称的回溯节奏：
+在每个节点上，必须遵循与[《和为 K 的子数组：先查前缀，再记录频次》](/notes/algorithm/subarray-sum-equals-k/)一致的更新时序：**先查询 `current_sum - targetSum` 的频次，再将 `current_sum` 计入表中**。若顺序颠倒，当 `targetSum == 0` 时，`current_sum - 0 == current_sum` 会把刚刚写入的当前节点自身算作前驱，从而把长度为 $0$ 的空路径误计入答案。
 
 ```python
+from collections import defaultdict
 from typing import Optional
 
 
 class Solution:
     def pathSum(self, root: Optional[TreeNode], targetSum: int) -> int:
-        prefix_count: dict[int, int] = {0: 1}
+        prefix_count: dict[int, int] = defaultdict(int, {0: 1})
 
         def dfs(node: Optional[TreeNode], current_sum: int) -> int:
             if node is None:
@@ -58,17 +54,14 @@ class Solution:
 
             current_sum += node.val
 
-            # Query matching ancestor prefix sum before registering current node.
-            paths = prefix_count.get(current_sum - targetSum, 0)
+            # Query ancestor prefixes before recording `current_sum` so that
+            # targetSum == 0 does not match an empty zero-node path at `node`.
+            paths = prefix_count[current_sum - targetSum]
 
-            # Register current prefix sum into shared table for child calls.
-            prefix_count[current_sum] = prefix_count.get(current_sum, 0) + 1
-
-            # Recurse into left and right subtrees.
+            prefix_count[current_sum] += 1
             paths += dfs(node.left, current_sum)
             paths += dfs(node.right, current_sum)
-
-            # Backtrack: restore shared frequency table before returning to parent.
+            # Remove `node`'s prefix sum before returning to sibling/parent branches.
             prefix_count[current_sum] -= 1
 
             return paths
@@ -76,65 +69,63 @@ class Solution:
         return dfs(root, 0)
 ```
 
-## C++：防溢出键与迭代器精细查找
+回溯时必须执行 `prefix_count[current_sum] -= 1`，而不能直接删除键 `del prefix_count[current_sum]`。因为树中存在正负节点相互抵消的情况，同一条祖先链上可能出现多个节点拥有相同的前缀和，离开当前节点时只能核销当前节点贡献的那 $1$ 次频次[^py-defaultdict]。
 
-C++ 实现中，哈希表的键为 `long long`，避免数值越界。查询时使用 `find` 取得迭代器，避免使用 `operator[]` 导致不存在的键被意外插入[^cpp-unordered-find]：
+## C++：64 位前缀和防溢出与只读查找
+
+题目中单个节点值可达 $\pm 10^9$，树高可达 $1000$，沿单链累加时前缀和最大可达 $10^{12}$，超出 32 位有符号整数 `int` 的上限（约 $2.14 \times 10^9$）。Python 的 `int` 支持任意精度整数，而在 C++ 中必须使用 64 位有符号整型（如 `<cstdint>` 的 `std::int64_t` 或 `long long`）[^cpp-int] 存储前缀和与哈希表键类型。此外，查询 `current_sum - target_sum` 时使用 `unordered_map::find`[^cpp-find] 而非 `operator[]`[^cpp-op-at]，可以避免因查询不存在的键而在哈希表中插入值为 $0$ 的冗余条目：
 
 ```cpp
+#include <cstdint>
 #include <unordered_map>
 
-// Definition for a binary tree node.
 class Solution {
-    int dfs(TreeNode* node,
-            long long current_sum,
-            long long target_sum,
-            std::unordered_map<long long, int>& prefix_count) {
+    int dfs(const TreeNode* node,
+            std::int64_t current_sum,
+            std::int64_t target_sum,
+            std::unordered_map<std::int64_t, int>& prefix_count) const {
         if (node == nullptr) {
             return 0;
         }
 
         current_sum += node->val;
 
-        // Query the number of valid ancestor prefixes that yield target_sum.
-        int total_paths = 0;
-        const auto it = prefix_count.find(current_sum - target_sum);
-        if (it != prefix_count.end()) {
-            total_paths += it->second;
+        int paths = 0;
+        // Use `find` instead of `operator[]` to avoid inserting zero-count entries on misses.
+        if (auto it = prefix_count.find(current_sum - target_sum);
+            it != prefix_count.end()) {
+            paths += it->second;
         }
 
-        // Register current prefix sum for children.
         ++prefix_count[current_sum];
-
-        // Search both child branches.
-        total_paths += dfs(node->left, current_sum, target_sum, prefix_count);
-        total_paths += dfs(node->right, current_sum, target_sum, prefix_count);
-
-        // Backtrack: strictly restore shared frequency table.
+        paths += dfs(node->left, current_sum, target_sum, prefix_count);
+        paths += dfs(node->right, current_sum, target_sum, prefix_count);
+        // Restore invariant: only active ancestors of the current node remain counted.
         --prefix_count[current_sum];
 
-        return total_paths;
+        return paths;
     }
 
 public:
-    int pathSum(TreeNode* root, int targetSum) {
-        std::unordered_map<long long, int> prefix_count;
-        // Base case: an empty path has sum 0 with frequency 1.
-        prefix_count.emplace(0LL, 1);
-        return dfs(root, 0LL, targetSum, prefix_count);
+    int pathSum(const TreeNode* root, int targetSum) const {
+        std::unordered_map<std::int64_t, int> prefix_count{{0, 1}};
+        return dfs(root, 0, targetSum, prefix_count);
     }
 };
 ```
 
 ## 复杂度与双重递归对比
 
-传统的暴力做法是**双重递归**：外层递归遍历每个节点作为路径起点，内层递归向下求和搜索满足条件的路径。在外层每个节点处都需要遍历其整个子树，在退化链表上总时间高达 $O(n^2)$，在平衡二叉树上也需要 $O(n \log n)$。
+如果采用朴素的双重递归（外层遍历每个节点作为起点，内层向下遍历子树累加求和），在平衡树上耗时 $O(n \log n)$，而在退化单链上会达到 $O(n^2)$。引入前缀和哈希表与回溯恢复后，每个节点仅被 DFS 访问一次，单节点上的字典/哈希表查找、频次递增与回溯递减均为平均 $O(1)$ 时间开销[^py-complexity][^cpp-find]，总体时间复杂度降至平均 $O(n)$（极端哈希冲突下最坏 $O(n^2)$）。
 
-相比之下，树上前缀和结合回溯恢复将多分支搜索剪裁为单次遍历：
-- **时间复杂度**：二叉树中的每个节点恰好被访问一次。在每个节点上的哈希查找、递增与递减回溯均为平均 $O(1)$ 操作[^sicp-tree]，整体时间复杂度为平均 $O(n)$。在极端哈希碰撞的最坏情况下为 $O(n^2)$。
-- **空间复杂度**：由于回溯机制在离开节点时严格撤销了当前前缀，哈希表中同时存在的条目数**永远不会超过当前递归深度加 1**，即不超过树的高度 $h$；系统调用栈的深度同样为 $O(h)$。对于高度平衡二叉树，空间复杂度为 $O(\log n)$；对于退化单链，最坏空间复杂度为 $O(n)$。
+空间复杂度方面，递归调用栈的深度不超过树高 $h$，为 $O(h)$；哈希表中有效活跃（频次大于 0）的前缀和条目数同样不超过当前路径长度 $h + 1$。在不主动擦除零频次键的实现中，哈希表至多保存 $n + 1$ 个不同前缀和，总辅助空间不超过 $O(n)$。
 
-[^cpp-limits]: [cppreference：`std::numeric_limits`](https://en.cppreference.com/w/cpp/types/numeric_limits.html)——说明算术类型的极值边界，提示在累加极端节点值时预防 32 位有符号整型溢出。
+[^py-defaultdict]: [Python 文档：`collections.defaultdict`](https://docs.python.org/3/library/collections.html#collections.defaultdict)——说明为缺失键提供默认工厂函数值（`int()` 返回 `0`）的字典子类行为。
 
-[^cpp-unordered-find]: [cppreference：`std::unordered_map::find`](https://en.cppreference.com/w/cpp/container/unordered_map/find.html)——说明使用迭代器查找避免使用 `operator[]` 时对缺失键产生无意的默认值插入。
+[^py-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 Python `dict` 查找与写入操作的平均时间复杂度为 $O(1)$。
 
-[^sicp-tree]: [SICP Section 2.3.3: Representing Sets](https://mitp-content-server.mit.edu/books/content/sectbyfn/books_pres_0/6515/sicp.zip/index.html)——阐述树形递归过程中的状态累加与子树遍历的不变量保持。
+[^cpp-int]: [cppreference：定宽整数类型](https://en.cppreference.com/w/cpp/types/integer.html)——说明 `<cstdint>` 中固定 64 位有符号整型 `std::int64_t` 的定义与范围。
+
+[^cpp-find]: [cppreference：`std::unordered_map::find`](https://en.cppreference.com/w/cpp/container/unordered_map/find.html)——说明平均常数时间复杂度的只读键查找接口，未命中时返回 `end()` 而不插入新元素。
+
+[^cpp-op-at]: [cppreference：`std::unordered_map::operator[]`](https://en.cppreference.com/w/cpp/container/unordered_map/operator_at.html)——说明当键不存在时会默认构造并插入新元素。
