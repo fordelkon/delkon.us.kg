@@ -55,7 +55,7 @@ Example English and Chinese writing lives in `content/posts/` and `content/notes
 
 Posts display a section index in the desktop gutter. Algorithm articles live in
 `content/posts/algorithm/`, with topic and language tags; their series remains at
-`/series/algorithm/`. Legacy note URLs redirect through `public/_redirects`.
+`/series/algorithm/`.
 Overflowing prose tables expose a scroll hint and a keyboard-focusable scroll region. Search indexes each formula once from its semantic MathML, excluding
 the duplicate visual HTML and TeX annotation.
 
