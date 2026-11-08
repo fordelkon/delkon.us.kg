@@ -1,0 +1,15 @@
+---
+interface Props {
+	current?: "posts" | "tags";
+}
+
+const { current } = Astro.props;
+
+const links = [
+	{ id: "posts", href: "/posts/", title: "按时间" },
+	{ id: "tags", href: "/tags/", title: "按主题" },
+];
+---
+<nav aria-label="Browse writing" class="my-6 flex flex-wrap gap-x-6 gap-y-3 border-b border-dashed border-printer-ink/15 pb-4 font-mono text-xs">
+ {links.map((link) => <a href={link.href} aria-current={current === link.id ? "page" : undefined} class:list={["printer-link py-1", current === link.id ? "text-printer-accent" : "text-printer-ink-light"]}>{link.title}</a>)}
+</nav>

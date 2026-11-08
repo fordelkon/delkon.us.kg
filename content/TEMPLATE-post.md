@@ -60,7 +60,9 @@ Filename slugs use kebab-case naming the topic, such as
 
 ## Series
 
-For a series member, copy this template into `content/posts/<series>/<slug>.md` (or the note template into `content/notes/<series>/<slug>.md`). Add `content/series/<series>.md` with optional `title` and `description` frontmatter; its body introduces the series. A directory without a definition remains ordinary content, and an empty series is not listed. Preserve the `<series>/` prefix when overriding a member's slug. Posts and notes with the same top-level directory share a series.
+For a series member, copy this template into `content/posts/<series>/<slug>.md` (or the note template into `content/notes/<series>/<slug>.md`). Add `content/series/<series>.md` with optional `title` and `description` frontmatter; its body introduces the series. A directory without a definition remains ordinary content, and an empty series is not listed. Preserve the `<series>/` prefix when overriding a member's slug. Posts and notes with the same top-level directory share a series. Members remain visible in chronological archives and on the home page.
+
+For curated ordering, topic sections, and related tags, follow the [series metadata contract](../docs/writing.md#series); publication dates do not need to be changed to rearrange chapters.
 
 ## Emphasis and Cross-references
 

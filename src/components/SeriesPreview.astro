@@ -1,7 +1,7 @@
 ---
 import type { HTMLTag, Polymorphic } from "astro/types";
 import { seriesUrl } from "@/data/routes";
-import type { SeriesGroup } from "@/data/series";
+import type { SeriesEntry, SeriesGroup } from "@/data/series";
 import { getFormattedDate } from "@/utils/date";
 
 type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
@@ -16,8 +16,9 @@ const { as: Tag = "div", group } = Astro.props;
 // of contents. Single-entry series show one full date instead of a degenerate
 // "20 Oct – 20 Oct" range. `year: undefined` clears the site
 // default so short ranges stay year-less.
-const firstDate = group.entries[0].data.publishDate;
-const lastDate = group.entries.at(-1).data.publishDate;
+const dates = group.entries.map((entry: SeriesEntry) => entry.data.publishDate.getTime());
+const firstDate = new Date(Math.min(...dates));
+const lastDate = new Date(Math.max(...dates));
 
 const fullDate = getFormattedDate(firstDate);
 

@@ -1,0 +1,16 @@
+---
+import { getCollection } from "astro:content";
+import { tagUrl } from "@/data/routes";
+
+interface Props {
+	tags: string[];
+	indexed?: boolean;
+}
+
+const { tags, indexed = false } = Astro.props;
+const definitions = await getCollection("tag");
+const titles = new Map(definitions.map((tag) => [tag.id, tag.data.title ?? tag.id]));
+---
+{tags.length > 0 && <div class="mt-4 flex flex-wrap gap-2">
+ {tags.map((tag) => <a class="inline-flex items-center rounded-sm border border-printer-ink/10 px-2 py-1 font-mono text-xs text-printer-ink-light hover:border-printer-accent/30 hover:text-printer-accent focus-visible:text-printer-accent" data-pagefind-filter={indexed ? `tag:${tag}` : undefined} href={tagUrl(tag)}><span aria-hidden="true" class="me-1">#</span>{titles.get(tag) ?? tag}</a>)}
+</div>}

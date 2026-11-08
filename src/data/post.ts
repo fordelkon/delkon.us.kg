@@ -1,4 +1,5 @@
 import { type CollectionEntry, getCollection } from "astro:content";
+import type { Entry } from "./ordering";
 
 /** filter out draft posts based on the environment */
 export async function getAllPosts(): Promise<CollectionEntry<"post">[]> {
@@ -43,24 +44,24 @@ export function groupPostsByYear(
 		.toSorted(([a], [b]) => Number(b) - Number(a));
 }
 
-/** returns all tags created from posts (inc duplicate tags)
+/** returns all tags created from entries (inc duplicate tags)
  *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
-export function getAllTags(posts: CollectionEntry<"post">[]) {
+export function getAllTags(posts: Entry[]) {
 	return posts.flatMap((post) => [...post.data.tags]);
 }
 
-/** returns all unique tags created from posts
+/** returns all unique tags created from entries
  *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
-export function getUniqueTags(posts: CollectionEntry<"post">[]) {
+export function getUniqueTags(posts: Entry[]) {
 	return [...new Set(getAllTags(posts))];
 }
 
 /** returns a count of each unique tag - [[tagName, count], ...]
  *  Note: this doesn't filter drafts; pass it the result of getPublishedPosts() in data/entries.ts.
  *  */
-export function getUniqueTagsWithCount(posts: CollectionEntry<"post">[]): [string, number][] {
+export function getUniqueTagsWithCount(posts: Entry[]): [string, number][] {
 	return [
 		...getAllTags(posts).reduce(
 			(acc, t) => acc.set(t, (acc.get(t) ?? 0) + 1),

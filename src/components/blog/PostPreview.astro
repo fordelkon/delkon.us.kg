@@ -2,14 +2,17 @@
 import type { CollectionEntry } from "astro:content";
 import type { HTMLTag, Polymorphic } from "astro/types";
 import FormattedDate from "@/components/FormattedDate.astro";
-import { entryUrl } from "@/data/routes";
+import { entryUrl, seriesUrl } from "@/data/routes";
+import { getSeriesContext } from "@/data/series";
 
 type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 	post: CollectionEntry<"post">;
 	withDesc?: boolean;
+	showSeries?: boolean;
 };
 
-const { as: Tag = "div", post, withDesc = false } = Astro.props;
+const { as: Tag = "div", post, withDesc = false, showSeries = false } = Astro.props;
+const series = showSeries ? await getSeriesContext(post) : undefined;
 ---
 
 <div
@@ -30,6 +33,7 @@ const { as: Tag = "div", post, withDesc = false } = Astro.props;
 			{post.data.title}
 		</a>
 	</Tag>
+	{series && <a class="w-fit print-label text-printer-ink-light hover:text-printer-accent" href={seriesUrl(series.group.id)}>{series.group.title}</a>}
 	{
 		withDesc && (
 			<q class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">

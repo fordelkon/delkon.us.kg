@@ -6,6 +6,8 @@ function removeDupsAndLowerCase(array: string[]) {
 	return [...new Set(array.map((str) => str.toLowerCase()))];
 }
 
+const tagsSchema = z.array(z.string()).default([]).transform(removeDupsAndLowerCase);
+
 const titleSchema = z.string().max(60);
 
 const baseSchema = z.object({
@@ -25,7 +27,7 @@ const post = defineCollection({
 				.optional(),
 			draft: z.boolean().default(false),
 			ogImage: z.string().optional(),
-			tags: z.array(z.string()).default([]).transform(removeDupsAndLowerCase),
+			tags: tagsSchema,
 			publishDate: z
 				.string()
 				.or(z.date())
@@ -41,6 +43,7 @@ const post = defineCollection({
 const note = defineCollection({
 	loader: glob({ base: "./content/notes", pattern: "**/*.{md,mdx}" }),
 	schema: baseSchema.extend({
+		tags: tagsSchema,
 		description: z.string().optional(),
 		publishDate: z.iso
 			.datetime({ offset: true }) // Ensures ISO 8601 format with offsets allowed (e.g. "2024-01-01T00:00:00Z" and "2024-01-01T00:00:00+02:00")
@@ -51,6 +54,8 @@ const note = defineCollection({
 const tag = defineCollection({
 	loader: glob({ base: "./content/tags", pattern: "**/*.{md,mdx}" }),
 	schema: z.object({
+		group: z.enum(["topic", "concept", "language"]).default("concept"),
+		featured: z.number().int().nonnegative().optional(),
 		title: titleSchema.optional(),
 		description: z.string().optional(),
 	}),
@@ -59,6 +64,9 @@ const tag = defineCollection({
 const series = defineCollection({
 	loader: glob({ base: "./content/series", pattern: "*.md" }),
 	schema: z.object({
+		tags: tagsSchema,
+		order: z.array(z.string()).default([]),
+		sections: z.array(z.object({ tag: z.string(), title: titleSchema })).default([]),
 		title: titleSchema.optional(),
 		description: z.string().optional(),
 	}),

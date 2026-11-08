@@ -3,6 +3,7 @@ import { type CollectionEntry, render } from "astro:content";
 import type { HTMLTag, Polymorphic } from "astro/types";
 import FormattedDate from "@/components/FormattedDate.astro";
 import SeriesBadge from "@/components/SeriesBadge.astro";
+import TagLinks from "@/components/TagLinks.astro";
 import { entryUrl } from "@/data/routes";
 import type { SeriesContext } from "@/data/series";
 
@@ -24,7 +25,7 @@ const { Content } = await render(note);
 		isPreview &&
 			"receipt-row group hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
 	]}
-	data-pagefind-body={isPreview ? false : true}
+	data-pagefind-body={isPreview ? undefined : true}
 >
 	<Tag
 		class:list={[
@@ -63,6 +64,7 @@ const { Content } = await render(note);
 			<SeriesBadge series={series} />
 		</div>
 	)}
+	{!isPreview && <TagLinks tags={note.data.tags} indexed />}
 	{!compact && (
 		<div
 			class="prose prose-sm mt-3 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:overflow-x-auto"

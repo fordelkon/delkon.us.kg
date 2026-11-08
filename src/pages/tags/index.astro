@@ -1,38 +1,23 @@
 ---
-import { getPublishedPosts } from "@/data/entries";
-import { getUniqueTagsWithCount } from "@/data/post";
+import BrowseNav from "@/components/BrowseNav.astro";
 import { tagUrl } from "@/data/routes";
+import { getTagDirectory, tagGroups } from "@/data/tags";
 import PageLayout from "@/layouts/Base.astro";
 
-const allTags = getUniqueTagsWithCount(await getPublishedPosts());
-
-const meta = {
-	description: "A list of all the topics I've written about in my posts",
-	title: "All Tags",
-};
+const tags = await getTagDirectory();
 ---
-
-<PageLayout meta={meta}>
-	<header class="mb-6">
-		<h1 class="receipt-title">Tags</h1>
-	</header>
-	<ul role="list">
-		{
-			allTags.map(([tag, val]) => (
-				<li class="group flex items-baseline justify-between gap-4 border-b border-dotted border-printer-ink/10 py-3">
-					<a
-						class="font-serif text-base transition-colors group-hover:text-printer-accent focus-visible:text-printer-accent"
-						href={tagUrl(tag)}
-						title={`View posts with the tag: ${tag}`}
-					>
-						<span aria-hidden="true" class="me-0.5 font-mono text-xs text-printer-ink-light">#</span>
-						{tag}
-					</a>
-					<span class="print-label text-printer-ink-light tabular-nums">
-						{val} {val > 1 ? "posts" : "post"}
-					</span>
-				</li>
-			))
-		}
-	</ul>
+<PageLayout meta={{ title: "Tags", description: "按主题、方法与语言查找文章和笔记。" }}>
+ <h1 class="receipt-title">Tags</h1>
+ <BrowseNav current="tags" />
+ <p class="mb-8 font-serif text-sm text-printer-ink-light">按主题查阅文章与笔记，或从系列目录开始系统阅读。</p>
+ {tagGroups.map((group) => {
+ const members = tags.filter((tag) => tag.group === group.id);
+ return members.length > 0 && <section class="mb-8" aria-labelledby={`group-${group.id}`}>
+ <h2 id={`group-${group.id}`} class="mb-3 print-label-wide text-printer-ink-light">{group.title}</h2>
+ <ul role="list">{members.map((tag) => <li class="flex items-baseline justify-between gap-4 border-b border-dotted border-printer-ink/10 py-3">
+ <a class="printer-link font-serif text-base" href={tagUrl(tag.id)}>{tag.title}</a>
+ <span class="shrink-0 print-label text-printer-ink-light">{tag.count} 篇</span>
+ </li>)}</ul>
+ </section>;
+ })}
 </PageLayout>

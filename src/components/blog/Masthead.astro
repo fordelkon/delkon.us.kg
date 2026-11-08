@@ -3,7 +3,7 @@ import { Image } from "astro:assets";
 import type { CollectionEntry } from "astro:content";
 import FormattedDate from "@/components/FormattedDate.astro";
 import SeriesBadge from "@/components/SeriesBadge.astro";
-import { tagUrl } from "@/data/routes";
+import TagLinks from "@/components/TagLinks.astro";
 import type { SeriesContext } from "@/data/series";
 
 interface Props {
@@ -53,20 +53,4 @@ const {
 		)
 	}
 </div>
-{
-	!!data.tags?.length && (
-		<div class="mt-4 flex flex-wrap gap-1.5">
-			{data.tags.map((tag) => (
-				<a
-					class="inline-flex items-center rounded-sm border border-printer-ink/10 px-2 py-[3px] print-label text-printer-ink-light transition-colors hover:border-printer-accent/30 hover:text-printer-accent focus-visible:border-printer-accent/30 focus-visible:text-printer-accent"
-					data-pagefind-filter={`tag:${tag}`}
-					href={tagUrl(tag)}
-				>
-					<span aria-hidden="true" class="me-0.5">#</span>
-					<span class="sr-only">View more blogs with the tag&nbsp;</span>
-					{tag}
-				</a>
-			))}
-		</div>
-	)
-}
+<TagLinks tags={data.tags} indexed />

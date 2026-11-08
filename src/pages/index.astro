@@ -6,7 +6,7 @@ import PrintedSection from "@/components/printed/PrintedSection.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
 import SocialList from "@/components/SocialList.astro";
 import WorksGrid from "@/components/work/WorksGrid.astro";
-import { getStandaloneNotes, getStandalonePosts } from "@/data/entries";
+import { getPublishedNotes, getPublishedPosts } from "@/data/entries";
 import { getPinnedPosts } from "@/data/post";
 import { getSeriesGroups } from "@/data/series";
 import { works } from "@/data/works";
@@ -14,15 +14,18 @@ import PageLayout from "@/layouts/Base.astro";
 
 // Posts
 const MAX_POSTS = 5;
-const standalonePosts = await getStandalonePosts();
-const latestPosts = standalonePosts.slice(0, MAX_POSTS);
+const publishedPosts = await getPublishedPosts();
 
-// Series members surface through their series page, not the home page.
-const pinnedPosts = getPinnedPosts(standalonePosts);
+// Series membership does not hide entries from the chronological flow.
+const pinnedPosts = getPinnedPosts(publishedPosts);
+
+const latestPosts = publishedPosts
+	.filter((post) => !pinnedPosts.includes(post))
+	.slice(0, MAX_POSTS);
 
 // Notes, set to a max of 4
 const MAX_NOTES = 4;
-const latestNotes = (await getStandaloneNotes()).slice(0, MAX_NOTES);
+const latestNotes = (await getPublishedNotes()).slice(0, MAX_NOTES);
 
 // Folder rows give series a single home-page entry point per collection.
 const [postSeriesGroups, noteSeriesGroups] = await Promise.all([
@@ -60,7 +63,7 @@ const meta = { title: "Home" };
 	<PrintedDivider style="dashed" />
 
 	<section>
-		<PrintedSection label="Posts">
+		<PrintedSection label="Latest posts">
 			<a
 				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
 				href="/posts/"
@@ -75,7 +78,7 @@ const meta = { title: "Home" };
 				<ul role="list" class="space-y-1">
 					{pinnedPosts.map((p) => (
 						<li>
-							<PostPreview post={p} />
+							<PostPreview showSeries post={p} />
 						</li>
 					))}
 				</ul>
@@ -84,7 +87,7 @@ const meta = { title: "Home" };
 		<ul role="list" class="space-y-1">
 			{latestPosts.map((p) => (
 				<li>
-					<PostPreview post={p} />
+					<PostPreview showSeries post={p} />
 				</li>
 			))}
 		</ul>

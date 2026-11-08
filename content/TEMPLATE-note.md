@@ -19,6 +19,7 @@ Frontmatter schema (see src/content.config.ts, "note" collection):
 - title:        required, max 60 chars
 - publishDate:  required, must be ISO 8601 with a UTC offset
                 (e.g. "2026-10-02T14:05:00Z" or "2026-10-02T14:05:00+08:00")
+- tags:         optional, reusable topic/language slugs shared with posts
 - description:  optional; NOT used in list previews — the notes list and the
                 homepage always render the beginning of the body instead
                 (line-clamped). It only becomes the note detail page's meta
@@ -27,7 +28,7 @@ Frontmatter schema (see src/content.config.ts, "note" collection):
 Shared editorial policy: docs/writing.md. For shared Markdown details, use
 TEMPLATE-post.md; the examples below demonstrate the same conventions.
 
-Unlike posts, notes have no tags, draft, coverImage, ogImage, pinned or
+Unlike posts, notes have no draft, coverImage, ogImage, pinned or
 updatedDate fields — a note is either published or deleted. Notes are also not
 in the main RSS feed; they have their own feed at /notes/rss.xml.
 -->

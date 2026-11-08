@@ -1,4 +1,12 @@
 ---
+tags: [concurrency]
+order:
+  - post/concurrency/parallelism-execution-units
+  - post/concurrency/locks-condvars-shared-memory-sync
+  - post/concurrency/atomics-memory-model
+  - post/concurrency/deadlock-livelock-correctness
+  - post/concurrency/message-passing-workers-backpressure
+  - post/concurrency/async-concurrency-task-lifecycle
 title: "并发编程系列"
 description: "从执行单元到任务生命周期，串起并发编程的主线。"
 ---

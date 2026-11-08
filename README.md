@@ -47,19 +47,24 @@ site's lamp, snail, and draggable stickers are outside this version.
 
 Example English and Chinese writing lives in `content/posts/` and `content/notes/`. Replace it with your own writing. Both languages share the existing routes; this version does not introduce locale prefixes or translation dictionaries.
 
-[Content collection schemas](src/content.config.ts) are the source of truth for frontmatter. [Entry selection](src/data/entries.ts) provides published and standalone listings, backed by shared [ordering](src/data/ordering.ts) and [series membership](src/data/series.ts).
+[Content collection schemas](src/content.config.ts) are the source of truth for frontmatter. [Entry selection](src/data/entries.ts) provides chronological listings including series members, backed by shared [ordering](src/data/ordering.ts) and [series membership](src/data/series.ts).
+
+The posts archive summarizes series first, then lists standalone posts by year.
+Its pagination and pinned section include only standalone posts; series members
+remain available through their series pages, tags, feeds, and search.
 
 - Posts: `content/posts/**/*.{md,mdx}`; required `title`, `description`, and `publishDate`. Optional tags, pinned status, draft status, cover image, update date, and custom social image.
-- Notes: `content/notes/`; required `title` and an ISO 8601 `publishDate` with timezone offset, for example `2026-10-02T14:05:00Z`.
-- Tags: `content/tags/`; optional title and description. Match the filename to a tag used by a post.
+- Notes: `content/notes/`; required `title` and an ISO 8601 `publishDate` with timezone offset, for example `2026-10-02T14:05:00Z`; optional topic tags.
+- Tags: `content/tags/`; titles, descriptions, display groups, and optional featured ranks. Match the filename to a tag used by a post or note.
 
 Posts display a section index in the desktop gutter. Algorithm articles live in
 `content/posts/algorithm/`, with topic and language tags; their series remains at
-`/series/algorithm/`.
+`/series/algorithm/`, grouped by topic. Series definitions can specify editorial
+ordering independently of publication dates; see [writing conventions](docs/writing.md#series).
 Overflowing prose tables expose a scroll hint and a keyboard-focusable scroll region. Search indexes each formula once from its semantic MathML, excluding
 the duplicate visual HTML and TeX annotation.
 
-Pagefind indexes articles and notes through `data-pagefind-body`; tag filters use the article masthead. Feeds are available at `/rss.xml` and `/notes/rss.xml`.
+Pagefind indexes articles and notes through `data-pagefind-body`; tag filters use article and note metadata. Feeds are available at `/rss.xml` and `/notes/rss.xml`.
 
 ## Verification and deployment
 

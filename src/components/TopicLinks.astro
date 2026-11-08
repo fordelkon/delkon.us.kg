@@ -1,0 +1,11 @@
+---
+import { tagUrl } from "@/data/routes";
+import { getTagDirectory } from "@/data/tags";
+
+const tags = (await getTagDirectory())
+	.filter((tag) => tag.featured !== undefined)
+	.sort((a, b) => (a.featured ?? 0) - (b.featured ?? 0));
+---
+<nav aria-label="Featured topics" class="mb-(--receipt-group-gap) flex flex-wrap gap-x-4 gap-y-2 font-mono text-xs text-printer-ink-light">
+ {tags.map((tag) => <a class="printer-link py-1" href={tagUrl(tag.id)}>{tag.title}</a>)}
+</nav>

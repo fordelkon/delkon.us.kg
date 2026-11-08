@@ -2,14 +2,17 @@
 import { render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
+import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
-import { getPublishedPosts } from "@/data/entries";
+import SeriesArchive from "@/components/SeriesArchive.astro";
+import { getPublishedEntries } from "@/data/entries";
 import { getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
+import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	// Tags are topic filters: series members stay in tag listings (docs/writing.md).
-	const sortedPosts = await getPublishedPosts();
+	const sortedPosts = await getPublishedEntries();
 	const uniqueTags = getUniqueTags(sortedPosts);
 
 	return uniqueTags.flatMap((tag) => {
@@ -28,10 +31,11 @@ const { page } = Astro.props;
 const { tag } = Astro.params;
 const tagMeta = await getTagMeta(tag);
 
+const relatedSeries = (await getSeriesGroups()).filter((group) => group.tags.includes(tag));
 const TagContent = tagMeta ? (await render(tagMeta)).Content : null;
 
 const meta = {
-	description: tagMeta?.data.description ?? `View all posts with the tag - ${tag}`,
+	description: tagMeta?.data.description ?? `View all entries with the tag - ${tag}`,
 	title: tagMeta?.data.title ?? `Posts about ${tag}`,
 };
 ---
@@ -47,7 +51,7 @@ const meta = {
 			<li aria-hidden="true" class="text-printer-ink-light">/</li>
 			<li aria-current="page" class="text-printer-ink">
 				<span aria-hidden="true">#</span>
-				{tag}
+				{tagMeta?.data.title ?? tag}
 			</li>
 		</ul>
 	</nav>
@@ -62,14 +66,15 @@ const meta = {
 		)
 	}
 	{TagContent && <div class="prose prose-sm mt-4 max-w-none font-serif"><TagContent /></div>}
+	{relatedSeries.length > 0 && <section aria-label="Related series" class="mt-6"><p class="mb-3 font-serif text-sm text-printer-ink-light">按系列阅读</p><SeriesArchive groups={relatedSeries} /></section>}
 	<ul class="mt-8 divide-y divide-dotted divide-printer-ink/10" role="list">
 		{
 			page.data.map((p) => (
 				<li class="py-2">
-					<PostPreview as="h2" post={p} />
+					{p.collection === "post" ? <PostPreview showSeries as="h2" post={p} /> : <Note as="h2" note={p} isPreview compact />}
 				</li>
 			))
 		}
 	</ul>
-	<Pagination page={page} labels={{ next: "Next Tags →", prev: "← Previous Tags" }} />
+	<Pagination page={page} labels={{ next: "下一页 →", prev: "← 上一页" }} />
 </PageLayout>

@@ -5,18 +5,18 @@ import { Icon } from "astro-icon/components";
 import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
 import SeriesArchive from "@/components/SeriesArchive.astro";
-import { getStandaloneNotes } from "@/data/entries";
+import { getPublishedNotes } from "@/data/entries";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
-	const standaloneNotes = await getStandaloneNotes();
+	const publishedNotes = await getPublishedNotes();
 
 	// Folders scoped to notes: only series with note members become folders.
 	const seriesGroups = await getSeriesGroups("note");
 
-	return paginate(standaloneNotes, {
+	return paginate(publishedNotes, {
 		pageSize: MAX_NOTES_PER_PAGE,
 		props: { seriesGroups },
 	});

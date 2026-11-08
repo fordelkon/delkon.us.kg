@@ -3,6 +3,7 @@ import { getEntry, render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Note from "@/components/note/Note.astro";
+import TagLinks from "@/components/TagLinks.astro";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
@@ -16,6 +17,11 @@ type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
 const { group } = Astro.props;
 const definition = await getEntry("series", group.id);
+
+const sections = group.sections.length
+	? group.sections
+	: [{ id: "chapters", title: "阅读顺序", entries: group.entries }];
+
 const Content = definition ? (await render(definition)).Content : null;
 ---
 
@@ -41,21 +47,20 @@ const Content = definition ? (await render(definition)).Content : null;
 			</p>
 		)}
 		<p class="mt-4 print-label text-printer-ink-light">{group.entries.length} 篇</p>
+		<TagLinks tags={group.tags} />
 	</header>
 	{Content && (
 		<div class="prose prose-sm mt-6 max-w-none font-serif">
 			<Content />
 		</div>
 	)}
-	<ol class="mt-6 divide-y divide-dashed divide-printer-ink/25 sm:mt-8">
-		{group.entries.map((entry) => (
-			<li>
-				{entry.collection === "post" ? (
-					<PostPreview as="h2" post={entry} />
-				) : (
-					<Note note={entry} as="h2" isPreview compact />
-				)}
-			</li>
-		))}
-	</ol>
+ {group.sections.length > 0 && <nav aria-label="Series topics" class="my-6 flex flex-wrap gap-x-5 gap-y-3 border-y border-dashed border-printer-ink/15 py-4 font-mono text-xs">
+ {sections.map((section) => <a class="printer-link text-printer-accent" href={`#section-${section.id}`}>{section.title} <span class="text-printer-ink-light">{section.entries.length}</span></a>)}
+ </nav>}
+ {sections.map((section) => <section class="mt-8" aria-labelledby={`section-${section.id}`}>
+ <h2 id={`section-${section.id}`} class="mb-3 print-label-wide text-printer-ink-light">{section.title}</h2>
+ <ol class="divide-y divide-dashed divide-printer-ink/15">
+ {section.entries.map((entry) => <li>{entry.collection === "post" ? <PostPreview as="h3" post={entry} /> : <Note note={entry} as="h3" isPreview compact />}</li>)}
+ </ol>
+ </section>)}
 </PageLayout>
