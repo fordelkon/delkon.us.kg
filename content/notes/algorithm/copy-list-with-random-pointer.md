@@ -12,7 +12,7 @@ description: "LeetCode 138：用 Python 两趟哈希映射完成深拷贝，用 
 
 ## Python：两趟扫描建立映射
 
-迭代哈希表法将上述图克隆平铺为两趟线性扫描：第一趟只创建节点并记录对应关系，第二趟再连接指针。这样无论 `random` 指向前面还是后面，目标节点的副本都已经存在，且无需承担递归栈帧开销。
+迭代哈希表法沿 `next` 进行两趟线性扫描：第一趟只创建节点并记录对应关系，第二趟再连接指针。这样无论 `random` 指向前面还是后面，目标节点的副本都已经存在，且无需承担递归栈帧开销。
 
 ```python
 from typing import Optional
@@ -20,6 +20,7 @@ from typing import Optional
 
 class Solution:
     def copyRandomList(self, head: Optional[Node]) -> Optional[Node]:
+        # Node identity, not node value, determines which copy an edge targets.
         copies = {None: None}
 
         current = head
@@ -45,7 +46,7 @@ class Solution:
 
 ## C++：把对应关系放在相邻节点之间
 
-如果允许临时修改原链表，可以把每个新节点插到对应原节点的后面。原节点的 `next` 就能直接指向它的副本，不再需要外部映射表。原链表本身在此充当了隐式的映射标记，将辅助空间由哈希表的 $O(n)$ 彻底压缩为 $O(1)$。
+如果允许临时修改原链表，可以把每个新节点插到对应原节点的后面。原节点的 `next` 就能直接指向它的副本，不再需要外部映射表。原链表本身在此充当了隐式的映射标记，将辅助空间由哈希表的 $O(n)$ 降为 $O(1)$。这两种算法都能用 Python 或 C++ 实现，空间差异来自是否交织节点，与语言选择无关。
 
 ```text
 原始: A -> B -> C -> nullptr
@@ -115,6 +116,6 @@ Python 哈希表版本用显式映射换取清晰的控制流程；C++ 交织版
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明 `d[key]` 在键缺失时抛出 `KeyError`，而 `get(key)` 默认返回 `None`。
 
-[^cpp-new]: [cppreference：`operator new`](https://en.cppreference.com/w/cpp/memory/new/operator_new.html)——说明默认分配函数在内存分配失败时抛出 `std::bad_alloc` 异常。
+[^cpp-new]: [C++ 工作草案：单对象分配函数](https://eel.is/c++draft/new.delete.single)——说明默认分配函数在内存分配失败时抛出 `std::bad_alloc` 异常。
 
 [^cpp-exception-safety]: [cppreference：异常安全保证](https://en.cppreference.com/w/cpp/language/exceptions.html#Exception_safety)——说明强异常保证要求操作失败时状态完全回滚到调用前，中途改写原链表且未回滚已分配节点不属于强异常保证。

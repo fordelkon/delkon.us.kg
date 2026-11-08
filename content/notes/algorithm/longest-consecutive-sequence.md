@@ -41,7 +41,7 @@ class Solution:
 
 这里有三处保持通用性的细节：
 
-- **遍历 `num_set` 而非 `nums`**：若原数组包含大量重复的链起点（如一万个 `1` 和一个 `2`），遍历 `nums` 会让每个 `1` 都重新走一遍整条链；在 `num_set` 上迭代则保证每个唯一值至多作为起点进入内层循环一次。
+- **遍历 `num_set` 而非 `nums`**：若遍历 `nums` 且不另行标记已扫描起点，同一个起点每重复一次就会重新扫描整条链。取两条长度均为 $L$ 的不相连整数链、一个孤立值，再额外重复第一条链的起点 $L$ 次：唯一值有 $2L+1$ 个，最长链不足一半，过半剪枝不会触发；重复扫描耗时 $\Theta(L^2)$，而输入长度仅为 $3L+1$。在 `num_set` 上迭代则保证每个唯一值至多作为起点进入内层循环一次。
 - **过半剪枝比较 `len(num_set)` 而非 `len(nums)`**：去重后的集合大小 $u \le n$ 是所有互斥连续链共享的真实顶点池；只要已知最长链占去至少一半唯一元素（$2 \cdot \text{max\_length} \ge u$），余下顶点数 $u - \text{max\_length} \le \text{max\_length}$ 就无法构造出更长的链。当原数组存在重复值时，用 `len(num_set)` 加上 `>=` 比用 `len(nums)` 的 `>` 界限更紧。
 - **去重与查询复杂度**：`set(nums)` 需要处理全部 $n$ 项，建表总时间平均为 $O(n)$；单次成员查询平均为 $O(1)$，插入在平均散列条件下将扩容成本平摊后为 $O(1)$，不能把整次建表说成常数时间[^hash-lookup]。外层循环至多执行 $u$ 次前驱检查；内层 `while` 每成功推进一次都对应链上的一个后继元素，每个唯一元素至多作为后继被推进一次、在链尾再触发一次失败查找。因此哈希查询总次数不超过 $3u \le 3n$，平均时间复杂度为 $O(n)$，额外空间复杂度为 $O(n)$。
 
@@ -61,6 +61,8 @@ class Solution:
 2. 查询左邻点记录的长度 $L$（`boundary_len` 中键 $x - 1$ 的值，不存在则为 $0$）与右邻点记录的长度 $R$（键 $x + 1$ 的值，不存在则为 $0$）；
 3. $x$ 将左右两段拼接为闭区间 $[x - L, x + R]$，新区间总长度为 $\text{current\_total} = L + 1 + R$，其中 $1$ 对应本次新加入的整数 $x$；
 4. 先把 `boundary_len[x]` 写入表中标记 $x$ 已访问，再将新区间**最左端点** $x - L$（当 $L > 0$）与**最右端点** $x + R$（当 $R > 0$）的长度更新为 $\text{current\_total}$。
+
+下面两份 C++ 代码均要求 C++17，并沿用题目输入规模，使链长和元素个数可用 `int` 表示。
 
 ```cpp
 #include <algorithm>
@@ -200,6 +202,6 @@ public:
 
 [^unordered-set-reserve]: [cppreference：`unordered_set::reserve`](https://en.cppreference.com/w/cpp/container/unordered_set/reserve.html)——参数是预期容纳的元素数量，实际桶数还取决于最大负载因子。
 
-[^cpp-vector-bool]: [cppreference：`std::vector<bool>`](https://en.cppreference.com/w/cpp/container/vector_bool.html)——说明标准库仅对 `std::vector<bool>` 做了按位压缩特化，而 `std::vector<char>` 按普通连续字节数组存储。
+[^cpp-vector-bool]: [C++ 标准草案：`vector<bool>`](https://eel.is/c++draft/vector.bool)——说明 `vector<bool>` 是特殊表示的特化，标准建议紧凑表示但并不强制按位压缩；本文使用普通 `vector<char>`，每个标记占一个 `char`。
 
 [^cpp-minmax-element]: [cppreference：`std::minmax_element`](https://en.cppreference.com/w/cpp/algorithm/minmax_element.html)——说明在单趟遍历中同时找出范围的最小与最大元素，至多执行 $\max(\lfloor\frac{3}{2}(n - 1)\rfloor, 0)$ 次比较。

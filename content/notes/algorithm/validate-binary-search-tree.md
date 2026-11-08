@@ -4,7 +4,7 @@ publishDate: "2026-11-13T12:00:00+08:00"
 description: "LeetCode 98：剖析仅比对直接子节点的局部判定陷阱，对比开区间上下界收缩与中序严格递增两种判定方式，并处理 C++ 整型极值边界。"
 ---
 
-[LeetCode 98. 验证二叉搜索树](https://leetcode.cn/problems/validate-binary-search-tree/)（Hot 100）要求判断给定的二叉树是否是一个有效的**二叉搜索树**（binary search tree, BST）。有效二叉搜索树满足以下定义[^clrs-bst]：
+[LeetCode 98. 验证二叉搜索树](https://leetcode.cn/problems/validate-binary-search-tree/)（Hot 100）要求判断给定的二叉树是否是一个有效的**二叉搜索树**（binary search tree, BST）。本题采用不允许重复键的严格 BST 定义；教材中的一般 BST 定义可能允许相等键，不能直接混用其不等号[^clrs-bst]：
 
 1. 节点的左子树只包含严格小于当前节点的数。
 2. 节点的右子树只包含严格大于当前节点的数。
@@ -77,7 +77,7 @@ class Solution:
         return True
 ```
 
-设树中节点总数为 $n$，树高为 $h$。每个节点至多入栈、出栈各一次，时间复杂度为 $O(n)$；栈中同时保留的节点数不超过从根到当前节点的路径长度，辅助空间复杂度为 $O(h)$，在平衡树上为 $O(\log n)$，最坏退化为链状树时为 $O(n)$。
+设树中节点总数为 $n$，树高为 $h$（按节点层数计）。每个节点至多入栈、出栈各一次，时间复杂度为 $O(n)$；栈中同时保留的节点数不超过从根到当前节点的路径长度，辅助空间复杂度为 $O(h)$，在平衡树上为 $O(\log n)$，最坏退化为链状树时为 $O(n)$。
 
 ## C++：开区间递归与整型极值边界
 
@@ -115,9 +115,9 @@ public:
 
 递归过程在失败时会短路，每个节点至多访问一次，最坏时间为 $O(n)$；递归栈深度为 $O(h)$，平衡树为 $O(\log n)$，最坏单链为 $O(n)$，深树可能耗尽 C++ 线程栈。两种方法都只读输入树，返回布尔值；显式栈实现可直接提前退出，若改用 Morris，则须先确保所有临时线索都已恢复。
 
-[^clrs-bst]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章给出二叉搜索树的定义及定理 12.1（Inorder tree walk prints the keys of a binary search tree in sorted order）。
+[^clrs-bst]: [CLRS: _Introduction to Algorithms_ (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 12 章介绍 BST 与中序有序性；教材允许重复键时得到非递减序，本题的严格递增要求来自题目禁止重复键的定义。
 
-[^python-compare]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明 Python 数值类型 `int` 与 `float('-inf')` 跨类型比较时的全序规则。
+[^python-compare]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明可比较的内置数值类型按数值比较；本文仅将整数与负无穷比较，不将含 NaN 的浮点数关系称为全序。
 
 [^cpp-climits]: [cppreference：`<climits>`](https://en.cppreference.com/w/cpp/types/climits.html)——定义 `INT_MIN`、`INT_MAX` 与 `LLONG_MIN`、`LLONG_MAX` 等整型极值宏，支撑将 `int` 节点边界拓宽至 `long long` 的范围安全性。
 

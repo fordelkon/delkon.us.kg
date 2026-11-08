@@ -8,7 +8,7 @@ description: "LeetCode Hot 100 的回文链表，用 Python 拆解快慢指针�
 
 ## Python 解法：切分、反转、比较并复原
 
-最直观的做法是先把节点值放进列表，再与反向列表比较，但会复制整条链表的元素并占用 $O(n)$ 额外空间[^python-seq]。另一种不显式分配数组的方法是利用函数调用栈“后进先出”的特性进行递归：在递归返回阶段逆序访问每个节点，并与外部前序推进的指针逐一比对。这属于单分支深入的典型**线性递归**（详见[《从调用栈理解递归》中的线性递归分析](/posts/understanding-recursion/#线性递归一个子问题进入与返回)），在不依赖尾调用优化时，必须先走到表尾才能开始返回比对，最深调用链为 $O(n)$，辅助空间也是 $O(n)$。
+最直观的做法是先把节点值放进列表，再与反向列表比较，但会收集各节点值的引用，反向切片还会新建一个列表，并占用 $O(n)$ 额外空间[^python-seq]。另一种不显式分配数组的方法是利用函数调用栈“后进先出”的特性进行递归：在递归返回阶段逆序访问每个节点，并与外部前序推进的指针逐一比对。这属于单分支深入的典型**线性递归**（详见[《从调用栈理解递归》中的线性递归分析](/posts/understanding-recursion/#线性递归一个子问题进入与返回)），在不依赖尾调用优化时，必须先走到表尾才能开始返回比对，最深调用链为 $O(n)$，辅助空间也是 $O(n)$。
 
 题目的进阶要求是 $O(n)$ 时间、$O(1)$ 额外空间：通过快慢指针定位中点，原地反转后半段让它能与前半段同步比对，比较完成后再反转一次以恢复原链表。下面两版均假设 `next` 构成有限无环链表、节点值为整数，运行期间独占对链接的修改；不分配或释放链表节点，C++ 也不接管输入节点的所有权。
 
@@ -90,7 +90,7 @@ class Solution:
 
 ## C++ 进阶：找中点时反转前半段
 
-Python 版分开找中点、反转和比对，每一步都容易检查。C++ 版可以在快慢指针前进时，同时反转慢指针走过的前半段：快指针每轮走两步，慢指针每轮走一步并把当前节点接到 `reversed` 前面。到达中点后，`reversed` 从中点朝表头排列，后半段从中点朝表尾排列，可以同步比较；比较结束再把前半段接回去。
+下面换用另一种指针安排；它同样可以用 Python 实现。前一版分开找中点、反转和比对，这一版可以在快慢指针前进时，同时反转慢指针走过的前半段：快指针每轮走两步，慢指针每轮走一步并把当前节点接到 `reversed` 前面。到达中点后，`reversed` 从中点朝表头排列，后半段从中点朝表尾排列，可以同步比较；比较结束再把前半段接回去。
 
 ```cpp
 class Solution {
@@ -101,6 +101,7 @@ public:
         ListNode* reversed = nullptr;
 
         while (fast != nullptr && fast->next != nullptr) {
+            // Advance fast before rewiring slow: they initially share head.
             fast = fast->next->next;
             ListNode* next = slow->next;
             slow->next = reversed;
@@ -139,4 +140,4 @@ public:
 
 [^python-seq]: [Python 文档：通用序列操作](https://docs.python.org/3/library/stdtypes.html#common-sequence-operations)——说明列表按序保存元素，复制或反向切片都会分配新的序列存储。
 
-[^cpp-memory-model]: [cppreference：内存模型与数据竞争](https://en.cppreference.com/w/cpp/language/memory_model.html)——说明多个线程在无同步下并发读写同一内存位置会产生数据竞争，因此原地改写链表指针的做法不适用于并发只读场景。
+[^cpp-memory-model]: [C++ 工作草案：数据竞争](https://eel.is/c++draft/intro.races)——说明不同线程之间无先行发生关系、至少一方非原子的冲突访问会构成数据竞争。这里读写普通 `next` 指针需要相应同步。

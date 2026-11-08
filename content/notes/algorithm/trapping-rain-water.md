@@ -33,7 +33,7 @@ class Solution:
         for i in range(n - 2, -1, -1):
             right_max[i] = max(right_max[i + 1], height[i])
 
-        # Each column's water level is bounded by the shorter of its two outer maxima.
+        # Both maxima include this column, so the resulting water depth is nonnegative.
         return sum(
             min(left_max[i], right_max[i]) - height[i]
             for i in range(n)
@@ -83,7 +83,7 @@ public:
 - **当 `left_max < right_max` 时**：结合包含关系有 $L_l = \mathrm{left\_max} < \mathrm{right\_max} \le R_l$，因此 $\min(L_l, R_l) = \mathrm{left\_max}$ 已经完全确定，无须知道开区间 $(l, r)$ 之间是否还有更高的柱子。直接结算 `left_max - height[left]` 并右移 `left`。
 - **当 `right_max <= left_max` 时**：对称地有 $R_r = \mathrm{right\_max} \le \mathrm{left\_max} \le L_r$，因此 $\min(L_r, R_r) = \mathrm{right\_max}$，直接结算右侧并左移 `right`。
 
-例如 `[2, 0, 3]` 首轮更新后 `left_max = 2 < right_max = 3`，第 0 列结算 `2 - 2 = 0` 并右移 `left`；次轮 `left = 1`，`left_max` 保持 2，立即确定中间列水深为 `2 - 0 = 2`；而 `[1, 2, 3]` 进入中间列时会将 `left_max` 更新为 2，结算 `2 - 2 = 0`，不会把旧极值误当成新列的水位。由于每步都移动极值较小的一侧，两指针最终会在全局最高柱处相遇；最高柱自身无法积水（贡献为 0），循环在 `left == right` 时自然终止。
+例如 `[2, 0, 3]` 首轮更新后 `left_max = 2 < right_max = 3`，第 0 列结算 `2 - 2 = 0` 并右移 `left`；次轮 `left = 1`，`left_max` 保持 2，立即确定中间列水深为 `2 - 0 = 2`；而 `[1, 2, 3]` 进入中间列时会将 `left_max` 更新为 2，结算 `2 - 2 = 0`，不会把旧极值误当成新列的水位。由于每步都移动极值较小的一侧，至少一根全局最高柱会留在未结算区间内：若某侧边界是最高柱而另一侧历史极值较小，就只会移动另一侧；若两侧历史极值都已达全局最大值，尚未移走的最高柱仍能作为边界保留。因而最终相遇处也是全局最高柱，其积水贡献为 0，`left == right` 时无需再结算。
 
 当 $n \ge 1$ 时，两个指针合计移动 $n - 1$ 次，时间复杂度为 $O(n)$，额外空间为 $O(1)$。这里比较的是两侧已扫描部分的最高柱，而非仅比较当前两根柱子。[《盛最多水的容器：短板内移与候选排除》](/notes/algorithm/container-with-most-water/)每步排除一组不可能改善答案的数对；本题每步确定一列的最终水深，再将其累加。
 
@@ -130,6 +130,6 @@ $$
 
 迁移到 [LeetCode 84. 柱状图中最大的矩形](https://leetcode.cn/problems/largest-rectangle-in-histogram/) 时，仍可在栈中保存尚未确定右边界的下标，但弹栈条件改为遇到更矮的柱子。接雨水用两壁较矮者减去槽底高度，计算新增水层；最大矩形用弹出柱自身的高度乘以可延伸宽度，计算候选面积。等高柱子的保留或合并方式要与各自的边界定义配套，不能直接照搬。
 
-[^cpp-max]: [cppreference：`std::max`](https://en.cppreference.com/w/cpp/algorithm/max.html)——说明返回两个值中的较大者，二者相等时返回第一个参数。
+[^cpp-max]: [C++ 工作草案：Minimum and maximum](https://eel.is/c++draft/alg.min.max)——说明返回两个值中的较大者，二者相等时返回第一个参数。
 
 [^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明通过列表末尾的 `append()` 与 `pop()` 实现后进先出栈；这里引用的是 API 用法，不是完整算法的性能测量。

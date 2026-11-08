@@ -10,6 +10,8 @@ description: "LeetCode 15 的三数之和：用 Python 排序和双指针找出�
 
 先排序，固定首项 `values[i]`，在它后方的有序区间用 `left`、`right` 找和为 `-values[i]` 的数对。和偏小就右移 `left`，偏大就左移 `right`。命中后两端都前进，并跨过刚才的重复数值；同一层固定首项时也只试一个相同数值。
 
+双指针移动依据是有序性：若当前和小于 0，固定 `left` 后改用更小的右端只会让和更小，因此可以排除这个 `left`；和大于 0 时对称地排除 `right`。命中后，对固定的首项和左值，右值已唯一确定，跳过重复端点不会遗漏新的数值组合。每次至少移动一个端点，直到两端相遇，当前首项下的候选就全部处理完毕。
+
 ```python
 class Solution:
     def threeSum(self, nums: list[int]) -> list[list[int]]:
@@ -116,4 +118,4 @@ public:
 
 [^cpp-promotion]: [cppreference：算术运算符与常用算术转换](https://en.cppreference.com/w/cpp/language/operator_arithmetic.html)——说明有符号整数溢出属于未定义行为；先与 `1LL` 相乘可将后续加法的操作数提升为 `long long`。
 
-[^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对给定范围排序并要求最坏 $O(n \log n)$ 次比较；未规定排序栈空间。
+[^cpp-sort]: [C++ 标准草案：`sort`](https://eel.is/c++draft/sort)——说明对给定范围排序并要求最坏 $O(n \log n)$ 次比较；未规定排序栈空间。

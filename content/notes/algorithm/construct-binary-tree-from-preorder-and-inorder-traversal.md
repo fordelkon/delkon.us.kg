@@ -73,7 +73,7 @@ class Solution:
 
 ## C++：局部只读哈希表与节点所有权
 
-在 C++ 实现中，应将哈希表 `in_pos` 作为 `buildTree` 的局部变量构造，并通过 `const std::unordered_map<int, int>&` 只读引用传给私有辅助函数 `build`，而不要将其声明为 `Solution` 的类成员变量——类成员变量会在同一个 `Solution` 实例被多次调用时残留上一次调用的映射数据。
+在 C++ 实现中，应将哈希表 `in_pos` 作为 `buildTree` 的局部变量构造，并通过 `const std::unordered_map<int, int>&` 只读引用传给私有辅助函数 `build`，以便把映射的生命周期限制在一次调用内。若使用成员变量，必须在每次调用前重新初始化，才能避免历史数据与额外内存残留。
 
 建表前调用 `in_pos.reserve(n)` 预先分配哈希桶以避免多次重散列[^unordered-reserve]；在 `build` 内由于 `in_pos` 为 `const` 引用，使用 `in_pos.find(root_val)->second` 直接读取下标[^unordered-find]。递归中每次通过 `new TreeNode(root_val)` 动态分配节点[^cpp-new]，整棵二叉树节点的所有权归调用方或评测框架管理：
 
@@ -116,11 +116,11 @@ public:
 };
 ```
 
-设树中节点总数为 $n$，树高为 $h$。建表与递归定位切分点的平均总时间为 $O(n)$，极端哈希冲突下最坏为 $O(n^2)$。返回树占 $O(n)$ 节点空间，另计的哈希表占 $O(n)$，递归栈占 $O(h)$（平衡树为 $O(\log n)$，最坏单链为 $O(n)$），总辅助空间为 $O(n)$。两种实现均不修改输入数组，创建的是新节点；输入沿用题目“无重复且来自同一棵树”的保证，C++ 才能直接解引用 `find` 的结果。深树可能触及 Python 递归限制或 C++ 线程栈容量。
+设树中节点总数为 $n$，树高为 $h$（按节点层数计）。建表与递归定位切分点的平均总时间为 $O(n)$，极端哈希冲突下最坏为 $O(n^2)$。返回树占 $O(n)$ 节点空间，另计的哈希表占 $O(n)$，递归栈占 $O(h)$（平衡树为 $O(\log n)$，最坏单链为 $O(n)$），总辅助空间为 $O(n)$。两种实现均不修改输入数组，创建的是新节点；输入沿用题目“无重复且来自同一棵树”的保证，C++ 才能直接解引用 `find` 的结果。深树可能触及 Python 递归限制或 C++ 线程栈容量。这里的 C++ 裸指针写法沿用评测接口：正常返回后由调用方释放整棵树；若中途分配抛异常，已建节点不会自动清理，不具有异常安全的资源回收保证。
 
 [^sicp-trees]: [SICP §2.3.3: Example: Representing Sets](https://sicp.sourceacademy.org/chapters/2.3.3.html)——讨论二叉树的递归结构表示，以及树结构与线性列表之间的递归拆解与重构关系。
 
-[^unordered-reserve]: [cppreference：`std::unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按元素数量预分配哈希桶，消除插入过程中的动态扩容与重散列开销。
+[^unordered-reserve]: [cppreference：`std::unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明按元素数量预分配哈希桶，按当前最大负载因子为预期元素数量设置桶容量；预留本身有成本，也不消除单个节点的分配成本。
 
 [^unordered-find]: [cppreference：`std::unordered_map::find`](https://en.cppreference.com/w/cpp/container/unordered_map/find.html)——说明在 `const` 哈希表上以平均 $O(1)$ 时间查找键并返回指向键值对的只读迭代器。
 

@@ -49,7 +49,10 @@ class Solution:
             i += 1
         merged.append([left, right])
 
-        merged.extend(intervals[i:])
+        # Append references without allocating a temporary tail slice.
+        while i < n:
+            merged.append(intervals[i])
+            i += 1
 
         return merged
 ```
@@ -60,11 +63,11 @@ class Solution:
 2. 第二段依次检查左端点是否 $\le R$：`[3, 5]`（$3 \le 8$）将 `[left, right]` 扩为 `[3, 8]`，`[6, 7]`（$6 \le 8$）保持 `[3, 8]`，`[8, 10]`（$8 \le 8$）再将右界扩为 `[3, 10]`；到 `[12, 16]` 时 $12 > 10$，循环结束并追加新建的 `[3, 10]`；
 3. 第三段把剩余的 `[12, 16]` 原样追加。
 
-第二段中 `left` 只可能被第一个进入该循环的区间缩小（后续重叠区间的左端点递增，不会比第一个更小），而 `right` 会随每个重叠区间单调递增，直到最后一个重叠区间确定最终右界。将 `new_interval` 解包为局部标量 `left, right` 并以新列表 `[left, right]` 追加，配合 `extend` 批量浅拷贝尾部切片引用，既省去了循环内的列表下标读写，也保证执行期间不会原地改写调用方传入的 `new_interval` 或 `intervals` 中的内层列表[^python-mutable-seq]。
+第二段中 `left` 只可能被第一个进入该循环的区间缩小（后续重叠区间的左端点递增，不会比第一个更小），而 `right` 会随每个重叠区间单调递增，直到最后一个重叠区间确定最终右界。将 `new_interval` 解包为局部标量 `left, right` 并以新列表 `[left, right]` 追加，第三段逐项追加剩余区间的引用，避免创建尾部切片。`append` 不会复制内层列表，因此执行期间不改写输入，但返回值仍与未合并的输入区间共享列表对象[^python-mutable-seq][^python-copy]。
 
-两个 `while` 循环共享单向递增的游标 `i`，再由 `extend` 追加剩余区间，整体时间复杂度为 $O(n)$。`intervals[i:]` 会先创建一个临时列表；当新区间位于所有已有区间左侧时，切片包含全部 $n$ 个区间的引用，因此即使不计返回结果，最坏辅助空间仍为 $O(n)$；返回列表本身最多存放 $n + 1$ 个区间引用，输出空间为 $O(n)$。若改为逐项追加尾部区间，就可以将辅助空间降为 $O(1)$。
+三个 `while` 循环共享单向递增的游标 `i`，每个原区间恰好处理一次，整体时间复杂度为 $O(n)$。除返回结果外只维护常数个下标和端点，辅助空间为 $O(1)$；返回列表最多保存 $n + 1$ 个区间引用，输出空间为 $O(n)$。若改用 `merged.extend(intervals[i:])`，尾部切片会额外分配最多 $n$ 个引用，使最坏辅助空间升为 $O(n)$。
 
-与[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)中平衡树单次更新的 $O(\log(m + 1))$ 不同，本题一次插入可能吞并 $O(n)$ 个既有区间；在没有重叠等需要保留线性数量区间的情况下，构造返回数组本身也需要 $\Omega(n)$ 时间。
+与[《将数据流变为多个不相交区间：在线区间的增量熔接》](/notes/algorithm/data-stream-as-disjoint-intervals/)中平衡树单次更新的平摊 $O(\log(m + 1))$ 不同，本题一次插入可能吞并 $O(n)$ 个既有区间；在没有重叠等需要保留线性数量区间的情况下，构造返回数组本身也需要 $\Omega(n)$ 时间。
 
 ## C++：预留容量与尾部区间批量追加
 
@@ -111,7 +114,9 @@ public:
 
 三段式划分之所以能用单游标一次扫完，依赖输入列表“按左端点有序且互不重叠”的先验性质。一旦输入变成杂乱无章的区间集合，重叠对象不再聚集于单个局部切片，就必须先把无序集合转化为有序序列——这正是[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)的核心步骤。
 
-[^python-mutable-seq]: [Python 文档：可变序列操作](https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types)——说明 `append` 与 `extend(s[i:])` 将原序列元素的引用追加到新列表中，不会原地修改原内层列表的值。
+[^python-mutable-seq]: [Python 文档：可变序列操作](https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types)——说明 `append` 将对象追加到序列尾部；它不会递归复制被追加的对象。
+
+[^python-copy]: [Python 文档：浅复制与深复制](https://docs.python.org/3/library/copy.html)——说明绑定不复制对象，浅复制容器仍保留对内部对象的引用。
 
 [^vector-reserve]: [cppreference：`std::vector::reserve`](https://en.cppreference.com/w/cpp/container/vector/reserve.html)——说明预留至少指定数量的存储容量，避免后续插入触发重新分配。
 

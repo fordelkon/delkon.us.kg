@@ -67,7 +67,7 @@ class Solution:
 
 ## C++：直接反转到下一组入口
 
-C++ 可以直接处理从 `group_start` 到 `next_group` 之前的半开区间。把反转时的 `prev` 初始化为 `next_group`，第一次改写就让原组头连上下一组，省去临时置空和单独接回组尾的操作。
+另一种写法直接处理从 `group_start` 到 `next_group` 之前的半开区间。把反转时的 `prev` 初始化为 `next_group`，第一次改写就让原组头连上下一组，省去临时置空和单独接回组尾的操作。下面用 C++ 展示；这种半开区间反转也能用于 Python，辅助空间相同。
 
 ```cpp
 class Solution {
@@ -112,4 +112,4 @@ public:
 
 [^python-assign]: [Python 文档：赋值语句](https://docs.python.org/3/reference/simple_stmts.html#assignment-statements)——说明赋值语句会先对右侧表达式列表完整求值，再从左到右依次绑定给目标变量。
 
-[^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明自动存储期的局部对象随块作用域创建和销毁，无需动态分配。
+[^cpp-storage-duration]: [C++ 工作草案：自动存储期](https://eel.is/c++draft/basic.stc.auto)——说明普通块作用域局部变量具有自动存储期，存储持续到所在块退出；不规定必须使用物理调用栈，也不意味着指针成员所指对象会被自动释放。

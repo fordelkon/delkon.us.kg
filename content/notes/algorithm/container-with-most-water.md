@@ -89,4 +89,4 @@ public:
 
 改变题目条件时，要重新检查这份排除证明：若对本题排序，就会破坏横坐标距离，连目标函数也随之改变；若把“任选两条无厚度垂线的最大容量”改成“每根柱子都有实体宽度 1，求所有凹陷处的积水总和”，中间柱子就会占据空间并切分水池——这正是[《接雨水：按列结算与单调栈分层》](/notes/algorithm/trapping-rain-water/)。相向双指针同样适用于那道题，但指针的作用不再是排除候选数对，而是凭已知外侧极值确定单列水深。
 
-[^cpp-minmax]: [cppreference：`std::min` 与 `std::max`](https://en.cppreference.com/w/cpp/algorithm/min.html)——说明按默认小于比较在常数时间内返回两个值中的较小者或较大者。
+[^cpp-minmax]: [C++ 工作草案：Minimum and maximum](https://eel.is/c++draft/alg.min.max)——说明按默认小于比较在常数时间内返回两个值中的较小者或较大者。

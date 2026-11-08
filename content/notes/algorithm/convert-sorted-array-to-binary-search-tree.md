@@ -4,7 +4,7 @@ publishDate: "2026-11-15T12:00:00+08:00"
 description: "LeetCode 108：利用升序数组随机访问特性二分选取根节点，在闭区间内递归构建高度平衡二叉搜索树，对比链表二分开销与递归栈空间。"
 ---
 
-[LeetCode 108. 将有序数组转换为二叉搜索树](https://leetcode.cn/problems/convert-sorted-array-to-binary-search-tree/)（Hot 100）给定一个元素已按升序排列的整数数组 `nums`，要求将其转换为一棵**高度平衡**（height-balanced）二叉搜索树。高度平衡二叉树是指每个节点的左右两个子树的高度差的绝对值不超过 $1$。
+[LeetCode 108. 将有序数组转换为二叉搜索树](https://leetcode.cn/problems/convert-sorted-array-to-binary-search-tree/)（Hot 100）给定一个元素已按严格升序排列、没有重复值的整数数组 `nums`，要求将其转换为一棵**高度平衡**（height-balanced）二叉搜索树。高度平衡二叉树是指每个节点的左右两个子树的高度差的绝对值不超过 $1$。
 
 在[《验证二叉搜索树：开区间上下界收缩与中序严格单调》](/notes/algorithm/validate-binary-search-tree/)中，我们利用“BST 的中序遍历序列严格递增”这一性质将二维树结构还原为一维有序序列。本题恰好是这一映射的逆过程：给定严格递增的中序序列 `nums`，将其折叠还原为一棵二叉搜索树[^sicp-trees]。
 
@@ -51,7 +51,7 @@ class Solution:
 
 ## C++：闭区间分治与节点所有权
 
-C++ 实现同样以 `const std::vector<int>&` 只读引用传递原数组[^cpp-vector]，并用 `left + (right - left) / 2` 计算中点下标 `mid`。递归函数每次通过 `new TreeNode(nums[mid])` 在堆上动态分配树节点[^cpp-new]，构造完成的整棵二叉树节点所有权交由调用方或评测框架在生命周期结束时统一管理与销毁：
+C++ 实现同样以 `const std::vector<int>&` 只读引用传递原数组[^cpp-vector]，并用 `left + (right - left) / 2` 计算中点下标 `mid`。递归函数每次通过 `new TreeNode(nums[mid])` 在堆上动态分配树节点[^cpp-new]，构造完成的整棵二叉树节点所有权交由调用方或评测框架在生命周期结束时管理与销毁。下列评测用裸指针代码不处理分配异常；若构造中途抛异常，已建子树不会自动释放：
 
 ```cpp
 #include <vector>

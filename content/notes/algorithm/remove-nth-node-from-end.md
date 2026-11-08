@@ -83,6 +83,7 @@ public:
             slow = slow->next;
         }
 
+        // Unlink only; the caller remains responsible for the removed node.
         ListNode* removed = slow->next;
         slow->next = removed->next;
         return dummy.next;
@@ -94,6 +95,6 @@ public:
 
 两版中 `fast` 都只向前扫描一次，`slow` 不会回退。时间复杂度为 $O(L)$，辅助空间为 $O(1)$。与[《环形链表 II：快慢指针相遇后为什么能找到入口》](/notes/algorithm/linked-list-cycle-ii/)的双指针倍速推进相比，本题用固定间距把“距离尾部的位置”转化为“前驱的位置”，不需要先求出总长度。
 
-[^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明自动存储期的局部对象在进入块作用域时创建，并在离开作用域时自动销毁。
+[^cpp-storage-duration]: [C++ 工作草案：自动存储期](https://eel.is/c++draft/basic.stc.auto)——说明普通块作用域局部变量具有自动存储期，存储持续到所在块退出；不规定必须使用物理调用栈，也不意味着指针成员所指对象会被自动释放。
 
-[^delete]: [cppreference：delete 表达式](https://en.cppreference.com/w/cpp/language/delete.html)——说明可删除指针的来源限制，以及对象销毁和存储释放的行为。
+[^delete]: [C++ 工作草案：delete 表达式](https://eel.is/c++draft/expr.delete)——说明可删除指针的来源限制，以及对象销毁和存储释放的行为。

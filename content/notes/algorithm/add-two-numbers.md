@@ -1,7 +1,7 @@
 ---
 title: "两数相加：统一多指针循环与进位状态"
 publishDate: "2026-10-26T12:00:00+08:00"
-description: "LeetCode 2 的两数相加：用哨兵节点锚定动态构建的新链表，将多链表长短差异与最高位进位统一收敛进单个循环条件。"
+description: "LeetCode 2 的两数相加：用哨兵节点保留结果入口，用一个循环处理链表长度差和最高位进位。"
 ---
 
 [LeetCode 2. 两数相加](https://leetcode.cn/problems/add-two-numbers/)给定两个非空单链表，每个节点保存一位十进制数字，低位在前。例如 `2 -> 4 -> 3` 表示 342，与 `5 -> 6 -> 4` 相加后得到 `7 -> 0 -> 8`，表示 807。按链表顺序逐位相加即可，关键是处理长度不同和最后一位进位；不需要先转换成整数。
@@ -26,7 +26,7 @@ else:
 
 若按照直观思路，代码往往被拆分成三个顺序循环：先同时走 `l1` 和 `l2`，再单独排空较长的那条链表，最后在循环外判断最高位是否有进位 `carry > 0`。这种拆分使状态维护分散在三处，容易遗漏边界。
 
-更紧凑的做法是将两条链表的遍历与进位状态收纳进单一循环条件：`while l1 or l2 or carry`。只要任一链表仍有未处理的高位数字，或者上一轮计算留下了进位，循环就必须继续推进；单步求和的进位与当前位数字可通过内建函数 `divmod` 一步析出[^divmod]：
+更紧凑的做法是将两条链表的遍历与进位状态收纳进单一循环条件：`while l1 or l2 or carry`。只要任一链表仍有未处理的高位数字，或者上一轮计算留下了进位，循环就必须继续推进；每一步的进位与当前位数字可通过内建函数 `divmod` 一次计算得到[^divmod]：
 
 ```python
 from typing import Optional
@@ -78,6 +78,7 @@ public:
         while (l1 != nullptr || l2 != nullptr || carry != 0) {
             const int val1 = (l1 != nullptr) ? l1->val : 0;
             const int val2 = (l2 != nullptr) ? l2->val : 0;
+            // Digits are in [0, 9], so sum is in [0, 19] and carry stays 0 or 1.
             const int sum = val1 + val2 + carry;
             carry = sum / 10;
 
@@ -97,4 +98,4 @@ C++ 与 Python 使用相同的逐位算法，时间复杂度均为 $O(\max(m, n)
 
 [^divmod]: [Python 文档：内置函数 divmod](https://docs.python.org/3/library/functions.html#divmod)——说明对整数参数返回包含商与余数的元组 (a // b, a % b)。
 
-[^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明具有自动存储期的局部对象在离开声明块作用域时由系统保证自动析构并回收存储空间。
+[^cpp-storage-duration]: [C++ 工作草案：自动存储期](https://eel.is/c++draft/basic.stc.auto)——说明普通块作用域局部变量具有自动存储期，存储持续到所在块退出；不规定必须使用物理调用栈，也不意味着指针成员所指对象会被自动释放。

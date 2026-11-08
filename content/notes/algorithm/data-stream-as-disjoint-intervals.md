@@ -6,13 +6,13 @@ description: "LeetCode 352 将数据流变为多个不相交区间：数字逐�
 
 [LeetCode 352. 将数据流变为多个不相交区间](https://leetcode.cn/problems/data-stream-as-disjoint-intervals/)要求实现 `SummaryRanges` 类：`addNum(value)` 逐个接收数据流中的整数，`getIntervals()` 返回当前所有已接收整数构成的、按左端点升序排列的不相交闭区间列表 $[l_i, r_i]$。
 
-在[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)中，数组全部元素一次性给定，无论是集合定起点还是 `boundary_len` 边界哈希，都只面向“遍历结束后输出单个最大长度”：若在每次 `getIntervals()` 时重跑集合扫描，单次查询需 $O(n)$；若直接沿用无序的 `boundary_len`，内部端点残留着过期记录，且每次查询还需额外排序。进入在线场景后，既然 `getIntervals()` 要求按序输出全部不相交区间，直接把**按左端点升序排列的不相交区间集合**作为维护状态，能让更新与查询各司其职。
+在[《最长连续序列：哈希起点、并查集与边界缝合》](/notes/algorithm/longest-consecutive-sequence/)中，原题只要求输出最大长度。集合起点法适合一次性扫描；`boundary_len` 边界哈希则已能在每次插入后维护当前最大长度，但不能直接按序枚举全部区间。设已接收 $u$ 个不同整数，若每次查询都重跑集合扫描，平均需要 $O(u)$ 时间；为了按序输出区间，还需对得到的区间排序。若直接沿用无序的 `boundary_len`，内部节点还残留着过期长度，不能把每个表项都当成独立区间。进入在线场景后，既然 `getIntervals()` 要求按序输出全部不相交区间，直接把**按左端点升序排列的不相交区间集合**作为维护状态，能让更新与查询各司其职。
 
 ## 四种边界合并情形
 
 这里维护的是连续整数段，除了不重叠，还要合并相邻整数：`[1, 2]` 与 `[3, 4]` 应表示为 `[1, 4]`。因此相邻两段必须满足 $r_i + 1 < l_{i+1}$。这与[普通闭区间的重叠合并](/notes/algorithm/merge-intervals/#为什么先排序)不同，后者会保留这两个没有公共点的区间。
 
-设当前已维护的 $m$ 个不相交闭区间满足 $l_0 \le r_0 < l_1 \le r_1 < \dots < l_{m-1} \le r_{m-1}$。新到达的整数 $x$（对应参数 `value`）若已落在某个既有区间 $[l_k, r_k]$ 内部（$l_k \le x \le r_k$），区间集合保持不变；否则 $x$ 严格位于两个相邻区间之间，只可能通过 $x - 1$ 与 $x + 1$ 触碰左右邻居的端点，触发四种局部变化：
+设当前已维护的 $m$ 个不相交闭区间满足 $l_0 \le r_0 < l_1 \le r_1 < \dots < l_{m-1} \le r_{m-1}$。新到达的整数 $x$（对应参数 `value`）若已落在某个既有区间 $[l_k, r_k]$ 内部（$l_k \le x \le r_k$），区间集合保持不变；否则 $x$ 位于两个相邻区间之间或全部区间的外侧；不存在的邻居不参与判定。它只可能通过 $x - 1$ 与 $x + 1$ 触碰左右邻居的端点，触发四种局部变化：
 
 1. **孤立成段**：前驱右端点 $< x - 1$ 且后继左端点 $> x + 1$，新增独立区间 $[x, x]$；
 2. **左侧延伸**：前驱恰好为 $[L, x - 1]$，后继左端点 $> x + 1$，前驱右界扩充为 $[L, x]$；
@@ -70,7 +70,7 @@ class SummaryRanges:
 
 ## C++：std::map 的对数级端点维护
 
-在 C++ 中，用 `std::map<int, int>` 建立“区间左端点 $\to$ 右端点”的有序映射，即可把单次 `addNum` 的最坏时间复杂度压到 $O(\log(m + 1))$。`upper_bound(value)` 在对数时间内返回第一个左端点严格大于 `value` 的迭代器 `next`，其前驱 `prev = std::prev(next)` 即为最后一个左端点 $\le \text{value}$ 的区间[^map-upper-bound]。
+下面使用结构化绑定，需要 C++17 或更新版本。在 C++ 中，用 `std::map<int, int>` 建立“区间左端点 $\to$ 右端点”的有序映射，即可把`addNum` 的平摊时间复杂度压到 $O(\log(m + 1))$。`upper_bound(value)` 在对数时间内返回第一个左端点严格大于 `value` 的迭代器 `next`，其前驱 `prev = std::prev(next)` 即为最后一个左端点 $\le \text{value}$ 的区间[^map-requirements]。
 
 ```cpp
 #include <map>
@@ -92,7 +92,7 @@ public:
             }
         }
 
-        // At this point prev->second < value and next->first > value, so neither
+        // For each existing neighbor, prev->second < value and next->first > value; neither
         // prev->second + 1 nor next->first - 1 can overflow a signed int.
         const bool left_touch = prev != next && prev->second + 1 == value;
         const bool right_touch = next != intervals.end() && next->first - 1 == value;
@@ -103,10 +103,9 @@ public:
         } else if (left_touch) {
             prev->second = value;
         } else if (right_touch) {
-            // std::map keys are const; erase returns the successor iterator for O(1) hinted reinsertion.
-            const int right_end = next->second;
-            const auto hint = intervals.erase(next);
-            intervals.emplace_hint(hint, value, right_end);
+            // Insert before erasing so allocation failure preserves the existing interval.
+            intervals.emplace_hint(next, value, next->second);
+            intervals.erase(next);
         } else {
             intervals.emplace(value, value);
         }
@@ -126,9 +125,9 @@ public:
 这里有两处细节使实现既不依赖特定值域、又避免多余的树节点分配：
 
 - **全 `int` 值域无溢出判邻**：若直接计算 `value - 1` 或 `value + 1`，当 `value` 取 `INT_MIN` 或 `INT_MAX` 时会触发有符号整数溢出。而提前返回分支已排除 `prev->second >= value`，保证走到判邻处时必有 `prev->second < value <= INT_MAX`，故 `prev->second + 1 == value` 绝不溢出；同理 `upper_bound` 保证 `next->first > value >= INT_MIN`，故 `next->first - 1 == value` 也绝不下溢。
-- **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先 `erase(next)` 取得紧邻的后继迭代器，再传给 `emplace_hint` 在平摊常数时间内完成原位替换[^map-erase][^map-emplace-hint]。
+- **原地改值与带提示改键**：左侧延伸和左右桥接都不改变前驱的左端点键 `prev->first`，直接改写 `prev->second` 即可，无需先删节点再重插同键；右侧延伸因左端点从 `value + 1` 变为 `value`（`std::map` 的键不可原地修改），先以 `next` 为正确的后继提示插入新节点，再删除旧节点。这两步各有平摊常数复杂度；先插后删还能保证新节点分配失败时旧区间仍然存在，不会丢失已接收的整数[^map-requirements]。
 
-单次 `addNum` 仅做一次 `upper_bound` 查找与常数次节点更新，时间复杂度为 $O(\log(m + 1))$。内部映射占 $O(m)$ 空间；`getIntervals()` 与 Python 版一样返回独立快照，时间与输出空间均为 $O(m)$，除输出外辅助空间为 $O(1)$。这两个版本的更新成本不同，来自有序列表与平衡搜索树的选择。
+单次 `addNum` 仅做一次 `upper_bound` 查找与常数次节点更新。查找与无提示插入为对数时间，按迭代器删除与正确提示插入具有平摊常数界，因此按标准容器契约合并得到平摊 $O(\log(m + 1))$ 时间；不能把后两项的平摊保证直接当作单次最坏常数保证。内部映射占 $O(m)$ 空间；`getIntervals()` 与 Python 版一样返回独立快照，时间与输出空间均为 $O(m)$，除输出外辅助空间为 $O(1)$。这两个版本的更新成本不同，来自有序列表与平衡搜索树的选择。
 
 ## 并查集视角：写快读慢的权衡
 
@@ -138,21 +137,17 @@ public:
 
 ## 系统拓展：数据流熔接与并发任务流
 
-在线区间的增量熔接不仅是单机离散算法题的技巧，在流式计算与并发任务调度中同样扮演着核心角色：
+下面是将区间状态用于任务完成记录的一种设计推导，不代表具体流处理框架的实现：
 
-- **乱序任务流的连续水位推进**：在流水线或异步任务池架构中（正如[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#fan-out--fan-in分工与汇总)所分析的 fan-out / fan-in 模型），分发给多个工作线程或消费者的切片任务往往因执行耗时不同而乱序返回。收集器或协调者通过实时维护这样一组动态不相交区间，在每个分片编号或序列号 $x$ 到达时触发对数级端点熔接，就能在无需全局重排序的前提下实时确定“已连续完成的最右边界”（即 Watermark 或连续确认进度），进而驱动下游提交或安全释放已处理缓冲。
-- **区间问题族的模式谱系**：回看区间处理的整体脉络，[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)面向静态无序区间全集，通过预先排序将重叠合并收敛为单趟扫描；[《插入区间：三段式线性划分》](/notes/algorithm/insert-interval/)面向已有序不相交区间，以三段式游标在线性时间内完成任意跨度新区间的吸收；而本题则面向数字逐个到达的无限流式场景，借助平衡搜索树将单点注入时的局部桥接与延伸控制在 $O(\log(m + 1))$，三者分别代表了批处理全局合并、单次流式插入与在线增量熔接的演进阶段。
+- **乱序任务流的连续水位推进**：在流水线或异步任务池架构中（正如[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#fan-out--fan-in分工与汇总)所分析的 fan-out / fan-in 模型），分发给多个工作线程或消费者的切片任务往往因执行耗时不同而乱序返回。若任务编号连续且起点已知，收集器可以维护已完成编号的区间，并寻找从该起点连续覆盖的最右端点，作为连续确认进度。新完成编号仅需局部更新端点，无需每次对全部编号重新排序；已经确认的前缀还可以移除。这里记录的是离散任务完成情况，不能直接等同于事件时间 Watermark；是否可提交或释放缓冲，还取决于失败重试、结果持久化及下游消费约定。
+- **区间问题族的模式谱系**：回看区间处理的整体脉络，[《合并区间：排序后维护右边界》](/notes/algorithm/merge-intervals/)面向静态无序区间全集，通过预先排序将重叠合并收敛为单趟扫描；[《插入区间：三段式线性划分》](/notes/algorithm/insert-interval/)面向已有序不相交区间，以三段式游标在线性时间内完成任意跨度新区间的吸收；而本题则面向数字逐个到达的在线场景，借助有序映射将单点注入时的局部桥接与延伸控制在平摊 $O(\log(m + 1))$，三者分别代表了批处理全局合并、单次流式插入与在线增量熔接的演进阶段。
 
 [^bisect]: [Python 文档：`bisect` — 数组二分查找算法](https://docs.python.org/3/library/bisect.html)——说明在有序序列中以对数次比较定位插入点，`key` 参数自 Python 3.10 起支持。
 
 [^python-slice-assign]: [Python 文档：可变序列操作](https://docs.python.org/3/library/stdtypes.html#mutable-sequence-types)——说明切片赋值 `s[i:j] = t` 会将切片 `[i:j]` 替换为可迭代对象 `t` 的内容，切片与替换序列的长度不必相等。
 
-[^python-list-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 `list` 基于连续动态数组实现，在任意中间位置插入或删除切片平均与最坏均需移动 $O(m)$ 个后续元素。
+[^python-list-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 `list` 基于连续动态数组实现，中间插入与切片删除可能需要移动线性数量的元素；这里采用 CPython 动态数组模型，不能把某次尾部操作也说成必然搬移 $m$ 个元素。
 
-[^map-upper-bound]: [cppreference：`std::map::upper_bound`](https://en.cppreference.com/w/cpp/container/map/upper_bound.html)——说明返回首个键严格大于给定值的元素迭代器，时间复杂度与容器大小成对数关系。
-
-[^map-erase]: [cppreference：`std::map::erase`](https://en.cppreference.com/w/cpp/container/map/erase.html)——说明 `std::map` 的键不可原地修改，按迭代器擦除单个节点自 C++11 起返回紧随被删元素之后的迭代器。
-
-[^map-emplace-hint]: [cppreference：`std::map::emplace_hint`](https://en.cppreference.com/w/cpp/container/map/emplace_hint.html)——说明当提示迭代器恰好指向新元素紧邻的后继位置时，插入操作的平摊时间复杂度为常数。
+[^map-requirements]: [C++ 工作草案：关联容器要求](https://eel.is/c++draft/associative.reqmts)——说明 `upper_bound` 的对数复杂度、按迭代器删除和正确后继提示插入的平摊常数复杂度，以及单元素插入抛出异常时不改变容器的保证。
 
 [^tarjan-dsu]: [Robert E. Tarjan：_Efficiency of a Good But Not Linear Set Union Algorithm_ (JACM, 1975)](https://doi.org/10.1145/321879.321884)——证明带路径压缩与按秩合并的并查集单次操作平摊时间复杂度为 $O(\alpha(n))$。

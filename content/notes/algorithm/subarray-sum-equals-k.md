@@ -52,7 +52,7 @@ class Solution:
         return result
 ```
 
-`[0, 0]`、$k = 0$ 时，这段代码依次增加 1、2 个答案，返回 3；它计算的是起止位置不同的非空子数组，而不是去重后的数值组合。哈希查找和插入平均 $O(1)$，总时间平均 $O(n)$，最多存储 $n + 1$ 种前缀，额外空间 $O(n)$；最坏情况下哈希操作的性能仍取决于实现与输入[^python-dict-complexity]。
+`[0, 0]`、$k = 0$ 时，这段代码依次增加 1、2 个答案，返回 3；它计算的是起止位置不同的非空子数组，而不是去重后的数值组合。哈希查找和插入平均 $O(1)$，总时间平均 $O(n)$，最多存储 $n + 1$ 种前缀，额外空间 $O(n)$；极端冲突下总时间可能退化为 $O(n^2)$；这里采用题目范围内整数运算为常数代价的模型[^python-dict-complexity]。
 
 ## C++：预留容量并复用哈希查找结果
 
@@ -73,7 +73,7 @@ public:
         long long result = 0;
         for (int value : nums) {
             prefix += value;
-            // Query before inserting the current prefix; operator[] would also insert it.
+            // Query old prefixes first; find does not insert an absent complement.
             const auto it = prefix_count.find(prefix - k);
             if (it != prefix_count.end()) result += it->second;
             // A missing key is inserted with count 0 before the increment.
@@ -92,7 +92,7 @@ public:
 
 [^python-dict]: [Python 文档：字典映射类型](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)——说明 `get(key, default)` 在键缺失时返回指定的默认值。
 
-[^python-dict-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——说明 Python `dict` 查找与写入的平均时间复杂度为 $O(1)$，极端哈希冲突下最坏退化为 $O(n)$。
+[^python-dict-complexity]: [Python Wiki：TimeComplexity](https://wiki.python.org/moin/TimeComplexity)——汇总当前 CPython 的复杂度：字典查找平均常数时间，写入还需平摊扩容成本，极端冲突时单次操作可达线性时间；这不是 Python 语言规范的跨实现保证。
 
 [^reserve]: [cppreference：`unordered_map::reserve`](https://en.cppreference.com/w/cpp/container/unordered_map/reserve.html)——说明预留元素容量时如何调整桶数，以及重新散列的开销。
 

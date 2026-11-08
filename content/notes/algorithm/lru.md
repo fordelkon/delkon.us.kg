@@ -74,7 +74,7 @@ class LRUCache:
 
 Python 版的 `OrderedDict` 隐藏了节点操作；在 C++ 中，可以用 `unordered_map<int, Node*>` 按键定位节点，再用双向链表维护使用顺序。这样不依赖题目给出的键值范围，任意 `int` 键都能走同一套逻辑。
 
-把一个**循环哨兵节点**（sentinel node）放在链表首尾之间：`dummy.next` 指向最新使用的节点，`dummy.prev` 指向最久未使用的节点。空链表时两者都指向 `dummy`。命中时先摘下节点，再放回头部；未命中且已满时，淘汰 `dummy.prev`。哨兵让这两项指针操作不必分别处理空链表、头节点和尾节点。
+把一个**循环哨兵节点**（sentinel node）放在链表首尾之间：`dummy.next` 指向最新使用的节点，`dummy.prev` 指向最久未使用的节点。空链表时两者都指向 `dummy`。命中时先摘下节点，再放回头部；未命中且已满时，淘汰 `dummy.prev`。哨兵让这两项指针操作不必分别处理空链表、头节点和尾节点。代码要求 C++14（使用 `std::make_unique`），容量沿用题目的正整数约束。缓存拥有所有动态数据节点，淘汰和析构时负责释放；哈希表仅保存用于定位的裸指针，不单独拥有节点。
 
 ```cpp
 #include <cstddef>
@@ -174,6 +174,6 @@ public:
 
 [^make-unique]: [cppreference：`std::make_unique`](https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique.html)——说明用独占智能指针包装动态分配，在调用 `release()` 移交所有权前若发生异常会自动释放节点。
 
-[^unordered-emplace]: [cppreference：`unordered_map::emplace`](https://en.cppreference.com/w/cpp/container/unordered_map/emplace.html)——说明原位插入键值对，若插入期间抛出异常则容器保持原状。
+[^unordered-emplace]: [C++ 标准草案：无序关联容器的异常保证](https://eel.is/c++draft/unord.req.except)——说明原位插入键值对，除散列函数自身抛出异常的情况外，单元素插入抛出异常时不改变容器；本文使用整数的标准散列。
 
 [^cpp-rule-of-three]: [cppreference：三/五/零法则](https://en.cppreference.com/w/cpp/language/rule_of_three.html)——说明需要自定义析构函数管理裸指针资源的类，应同时处理或用 `= delete` 禁用拷贝操作，防止浅拷贝导致重复释放。

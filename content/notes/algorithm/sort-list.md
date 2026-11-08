@@ -33,6 +33,7 @@ class Solution:
             slow = slow.next
             fast = fast.next.next
 
+        # Both recursive inputs must be shorter and share no nodes.
         right_head = slow.next
         slow.next = None
 
@@ -59,7 +60,7 @@ class Solution:
         return dummy.next
 ```
 
-每层递归中，切分与合并的总耗时为 $O(n)$，递归深度为 $O(\log n)$，因此总时间为 $O(n \log n)$。合并函数是迭代实现，辅助空间为 $O(1)$；整个排序还要计入递归栈，辅助空间为 $O(\log n)$，没有满足进阶要求。
+每层递归中，切分与合并的总耗时为 $O(n)$，递归深度为 $O(\log n)$，因此总时间为 $O(n \log n)$。合并函数是迭代实现，辅助空间为 $O(1)$；整个排序还要计入递归栈，辅助空间为 $O(\log n)$，没有满足进阶要求。哨兵虽然在各次合并时累计创建 $O(n)$ 个，但不会同时被算法持有：一个合并结束后，其哨兵不属于返回链表，成为可回收对象，所以不能把累计分配量当作峰值辅助空间。Python 仍有解释器递归深度限制[^python-recursion-limit]；这里深度是对数级，不是链表长度级。
 
 合并时遇到相等值优先选左侧节点，能保持相同值节点的原始相对顺序，因此排序是稳定的[^stable-sort]。
 
@@ -142,10 +143,12 @@ private:
 
 一轮中，`split` 扫描各段，`mergeAfter` 合并并找到结果尾部。虽然部分节点会被再次访问，但每个节点每轮只被访问常数次，因此每轮仍为 $O(n)$，总时间为 $O(n \log n)$。最后不足 `width` 个节点的一段也能正常处理；如果没有右段，就直接接回左段。
 
-实现只维护固定数量的指针、计数器和一个栈上的哨兵，不使用递归，也不在每次合并时堆分配哨兵，辅助空间为 $O(1)$[^cpp-storage-duration]。它同样在值相等时优先选择左段，保持稳定性[^stable-sort]。
+实现只维护固定数量的指针、计数器和一个局部哨兵，不使用递归，也不在每次合并时堆分配哨兵，辅助空间为 $O(1)$[^cpp-storage-duration]。它同样在值相等时优先选择左段，保持稳定性[^stable-sort]。
 
 这两种写法的主要取舍是控制流程：递归便于理解拆分与合并，自底向上迭代则通过显式管理段长省去调用栈。[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)也会利用指针重连节省辅助空间，但复制完成后还需要恢复原链表。
 
-[^stable-sort]: [cppreference：`std::stable_sort`](https://en.cppreference.com/w/cpp/algorithm/stable_sort.html)——这里只引用稳定性的定义：等价元素保持原有相对次序。本文链表归并的稳定性来自切分保持顺序、相等时优先取左侧，不依赖该库函数的实现或复杂度。
+[^stable-sort]: [C++ 工作草案：稳定算法要求](https://eel.is/c++draft/algorithm.stable)——这里只引用稳定性的定义：等价元素保持原有相对次序。本文链表归并的稳定性来自切分保持顺序、相等时优先取左侧，不依赖该库函数的实现或复杂度。
 
-[^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明自动存储期的局部对象在函数作用域内分配并在返回时自动销毁，不产生动态堆分配。
+[^cpp-storage-duration]: [C++ 工作草案：自动存储期](https://eel.is/c++draft/basic.stc.auto)——说明普通块作用域局部变量具有自动存储期，存储持续到所在块退出；不规定必须使用物理调用栈，也不意味着指针成员所指对象会被自动释放。
+
+[^python-recursion-limit]: [Python 文档：`sys.getrecursionlimit`](https://docs.python.org/3/library/sys.html#sys.getrecursionlimit)——返回解释器栈的递归深度上限；该限制与算法的渐近栈空间分析是不同层面的约束。

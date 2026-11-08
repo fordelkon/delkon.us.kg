@@ -10,7 +10,7 @@ description: "LeetCode 114：对比先序破坏性修改与逆先序后序连接
 
 ## Python：逆先序递归与头插回溯
 
-正向先序遍历的访问顺序是“根 $\to$ 左 $\to$ 右”。如果反过来按照“右子树 $\to$ 左子树 $\to$ 根”的**逆先序**（reverse preorder）次序执行递归并在回溯时改写指针，那么当控制流退回当前节点 `node` 时，其右子树和左子树都已经各自展开成了有序链表，且外部维护的指针 `prev` 恰好指向“紧随 `node` 之后的先序后继链表头”[^py-nonlocal]。此时只需令 `node.right = prev`、`node.left = None`，再将 `prev` 更新为 `node`，即可安全完成头插而不会丢失任何未访问分支[^sicp-recursion]：
+正向先序遍历的访问顺序是“根 $\to$ 左 $\to$ 右”。如果反过来按照“右子树 $\to$ 左子树 $\to$ 根”的**逆先序**（reverse preorder）次序执行递归并在回溯时改写指针，那么当控制流退回当前节点 `node` 时，原右子树已经展开，原左子树也已展开并接到它前面；外部维护的指针 `prev` 恰好指向“紧随 `node` 之后的先序后继链表头”[^py-nonlocal]。此时只需令 `node.right = prev`、`node.left = None`，再将 `prev` 更新为 `node`，即可安全完成头插而不会丢失任何未访问分支[^sicp-recursion]：
 
 ```python
 from typing import Optional
@@ -34,11 +34,11 @@ class Solution:
         dfs(root)
 ```
 
-设二叉树共有 $n$ 个节点，树高为 $h$。每个节点恰好被访问一次并执行常数次指针赋值，时间复杂度为 $O(n)$；递归调用栈的深度取决于树高，辅助空间为 $O(h)$，平衡树为 $O(\log n)$，最坏单链为 $O(n)$，并可能触及 Python 递归限制。展开结果复用输入节点，不另占 $O(n)$ 输出空间。
+设二叉树共有 $n$ 个节点，树高为 $h$（按节点层数计）。每个节点恰好被访问一次并执行常数次指针赋值，时间复杂度为 $O(n)$；递归调用栈的深度取决于树高，辅助空间为 $O(h)$，平衡树为 $O(\log n)$，最坏单链为 $O(n)$，并可能触及 Python 递归限制。展开结果复用输入节点，不另占 $O(n)$ 输出空间。
 
 ## C++：左子树最右节点就地嫁接
 
-要将辅助空间进一步压缩至 $O(1)$，可以借鉴[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)中利用原结构指针暂存拓扑关系的思路，以及[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)中寻找左子树最右节点的技巧，在迭代推进中直接完成子树嫁接[^morris-1979]。
+要将辅助空间进一步压缩至 $O(1)$，可以借鉴[《随机链表的复制：哈希表与交织节点》](/notes/algorithm/copy-list-with-random-pointer/)中利用原结构指针暂存拓扑关系的思路，以及[《二叉树的中序遍历：递归栈帧、显式栈与 Morris 线索化》](/notes/algorithm/binary-tree-inorder-traversal/)中寻找左子树最右节点的技巧，在迭代推进中直接完成子树嫁接。Morris 的论文用于说明临时线索遍历的背景[^morris-1979]；下面的永久嫁接算法由本文的不变量单独论证。
 
 考察当前节点 `curr`。若 `curr->left` 为空，则 `curr` 已经满足单链表形态，直接令 `curr = curr->right` 推进即可。若 `curr->left` 非空，按照先序遍历“根 $\to$ 左子树 $\to$ 右子树”的规则，原右子树 `curr->right` 应当紧接在整棵左子树所有节点访问完毕之后被访问。
 
@@ -77,6 +77,6 @@ public:
 
 [^sicp-recursion]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——说明递归调用如何保存并恢复待完成的上下文；本题指针重连的正确性由正文的访问顺序与 `prev` 不变量说明。
 
-[^morris-1979]: [J. M. Morris: _Traversing binary trees simply and cheaply_ (Information Processing Letters, 1979)](<https://doi.org/10.1016/0020-0190(79)90068-1>)——提出利用左子树最右节点的空闲右指针编码后续访问路径的思想，本题在此基础上将临时回溯线索改为对原右子树的永久嫁接。
+[^morris-1979]: [J. M. Morris: _Traversing binary trees simply and cheaply_ (Information Processing Letters, 1979)](<https://doi.org/10.1016/0020-0190(79)90068-1>)——提出利用左子树最右节点的空闲右指针编码后续访问路径的思想，它讨论的是临时改树并恢复的遍历，不直接证明本文永久展开实现。
 
 [^sicp-iter]: [SICP §1.2.1: Linear Recursion and Iteration](https://sicp.sourceacademy.org/chapters/1.2.1.html)——对比需要维护延迟操作链的递归过程与仅靠固定数量状态变量推进的常数空间迭代过程。

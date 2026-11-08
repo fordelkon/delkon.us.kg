@@ -43,6 +43,7 @@ class Solution:
 
         while heap:
             _, index, node = heap[0]
+            # Save the source successor before result links can overwrite it.
             next_node = node.next
 
             # Replace this list's candidate, or remove an exhausted list.
@@ -58,9 +59,9 @@ class Solution:
         return dummy.next
 ```
 
-先收集头节点再调用 `heapify`，建堆本身为 $O(k)$[^heapq]。取出堆顶后，如果该节点有后继，`heapreplace` 将堆顶替换为同一条链表的后继，并调整堆；如果没有后继，就用 `heappop` 移除该条链表的候选[^heapq]。这里始终维持“每条链表至多一个候选”的条件。
+设初始非空链表数为 $m$。收集头节点要扫描 $k$ 个入口，耗时 $O(k)$；对这 $m$ 个候选调用 `heapify`，建堆本身为 $O(m)$[^heapq]。取出堆顶后，如果该节点有后继，`heapreplace` 将堆顶替换为同一条链表的后继，并调整堆；如果没有后继，就用 `heappop` 移除该条链表的候选[^heapq]。这里始终维持“每条链表至多一个候选”的条件。
 
-设初始非空链表数为 $m$。扫描输入列表需要 $O(k)$，每个节点对应一次堆操作，总时间可写为 $O(k + n \log(m + 1))$，辅助空间为 $O(m)$。通常将其概括为 $O(n \log k)$ 时间、$O(k)$ 辅助空间，但空链表和只有一条链表时仍有扫描成本。此实现不改写 `lists` 中保存的头指针，但会改变这些节点之间的连接。
+扫描输入列表需要 $O(k)$，每个节点对应一次堆操作，总时间可写为 $O(k + n \log(m + 1))$，辅助空间为 $O(m)$。通常将其概括为 $O(n \log k)$ 时间、$O(k)$ 辅助空间，但空链表和只有一条链表时仍有扫描成本。此实现不改写 `lists` 中保存的头指针，但会改变这些节点之间的连接。
 
 ## C++：自底向上的两两归并
 
@@ -111,7 +112,7 @@ private:
 
 这个版本直接把每组合并后的头指针写回 `lists[i]`，所以会修改输入 `vector` 的元素。它也会重连原链表节点；执行后，不能再把原来的各条链表当作独立链表使用。若需要保留 `vector` 中的头指针，可先复制这个容器，代价是 $O(k)$ 辅助空间；这并不能保留原节点的连接关系。
 
-总时间为 $O(k + n \log(k + 1))$：$O(k)$ 用于各轮的配对，节点扫描至多发生 $O(\log k)$ 轮。实现不使用递归，哨兵作为自动存储期的局部对象在栈上创建，不为结果分配新节点，辅助空间为 $O(1)$[^cpp-storage-duration]。
+总时间为 $O(k + n \log(k + 1))$：$O(k)$ 用于各轮的配对，节点扫描至多发生 $O(\log k)$ 轮。实现不使用递归，哨兵是自动存储期的局部对象，不为结果分配新节点，辅助空间为 $O(1)$[^cpp-storage-duration]。
 
 [《排序链表：递归归并与自底向上归并》](/notes/algorithm/sort-list/)会继续使用双路归并，区别在于需要先把一条无序链表切成若干段。
 
@@ -119,4 +120,4 @@ private:
 
 [^heapq]: [Python 文档：`heapq` — 堆队列算法](https://docs.python.org/3/library/heapq.html)——说明 `heapify` 在线性时间内原地建堆，以及 `heapreplace` 与 `heappop` 在弹出并维护固定大小堆时的行为差异。
 
-[^cpp-storage-duration]: [cppreference：存储期与生命周期](https://en.cppreference.com/w/cpp/language/storage_duration.html)——说明自动存储期的局部对象在进入块时分配、离开块作用域时自动销毁，无需堆分配。
+[^cpp-storage-duration]: [C++ 工作草案：自动存储期](https://eel.is/c++draft/basic.stc.auto)——说明普通块作用域局部变量具有自动存储期，存储持续到所在块退出；不规定必须使用物理调用栈，也不意味着指针成员所指对象会被自动释放。

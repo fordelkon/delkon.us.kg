@@ -23,8 +23,7 @@ class Solution:
             if i > 0 and values[i] == values[i - 1]:
                 continue
             for j in range(i + 1, n - 2):
-                # Only j > i + 1 skips a duplicate here, so the first 2 after i
-                # survives and [2, 2, 2, 2] still yields one result.
+                # Keep the first candidate at this level even if it equals values[i].
                 if j > i + 1 and values[j] == values[j - 1]:
                     continue
 
@@ -113,10 +112,10 @@ public:
 
 四项相加可能超出 32 位 `int` 的范围；`1LL * nums[i]` 在第一次加法之前就提升运算类型，不能等到四项都加完再转换[^cpp-promotion]。原地排序省去 Python 版的数组副本，但会改变输入；`std::sort` 的比较次数保证为最坏 $O(n \log n)$，但辅助栈空间取决于实现[^cpp-sort]。输出仍要占 $O(R)$ 空间。即使用了上下界剪枝，最坏仍是 $O(n^3)$ 时间；遇到很快就能排除的区间，才可能减少实际双指针扫描。是否比无剪枝版更快，要在相同数据和编译条件下测量，不能从代码长度直接推断。
 
-四数之和的关键不是记住四层循环，而是让**位置约束与去重层级**配套：固定项只在自己的层内去重，双指针只在命中后跳过已输出的数值对。这里利用排序后的最左、最右端点计算极值上下界，本质上是将多层循环展开为一棵深度为 4 的搜索树；其提前终止的逻辑与[《从调用栈理解递归》](/posts/understanding-recursion/#回溯选择探索与恢复)中的搜索树剪枝思想完全一致：一旦判定当前部分和即便加上剩余区间的最优候选也无法达到目标值，或者加上最小候选已然超标，就立刻切断整条探索路径，而不必进入更深层的循环。
+四数之和的关键不是记住四层循环，而是让**位置约束与去重层级**配套：固定项只在自己的层内去重，双指针只在命中后跳过已输出的数值对。这里利用排序后的最左、最右端点计算极值上下界，可以从[《从调用栈理解递归》](/posts/understanding-recursion/#回溯选择探索与恢复)中的搜索树剪枝角度理解：部分选择一旦无法补全到目标和，就不再进入内层扫描。这里还需区分 `continue` 与 `break`：最大和不足只排除当前首项；最小和超标则借助排序后的单调性，排除当前及更大的首项。
 
 [^python-sorted]: [Python 文档：`sorted`](https://docs.python.org/3/library/functions.html#sorted)——说明它返回新列表，不修改传入的数组。
 
 [^cpp-promotion]: [cppreference：算术运算符与常用算术转换](https://en.cppreference.com/w/cpp/language/operator_arithmetic.html)——说明有符号整数溢出属于未定义行为；先与 `1LL` 相乘可将后续加法提升为 `long long`。
 
-[^cpp-sort]: [cppreference：`std::sort`](https://en.cppreference.com/w/cpp/algorithm/sort.html)——说明对原范围排序，最坏 $O(n \log n)$ 次比较；未规定辅助栈空间。
+[^cpp-sort]: [C++ 标准草案：`sort`](https://eel.is/c++draft/sort)——说明对原范围排序，最坏 $O(n \log n)$ 次比较；未规定辅助栈空间。
