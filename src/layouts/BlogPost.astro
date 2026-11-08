@@ -38,11 +38,6 @@ const explainer = getPostExplainer(post.id);
 			<Masthead content={post} readingTime={readingTime} series={series} />
 			<SeriesNav entry={post} />
 		</div>
-		{/* The TOC only ever renders in Base.astro's page-margin gutter (xl+),
-		    outside the paper. An in-paper sticky column is not possible: the
-		    sheet's overflow-hidden (paper-feed animation clipping) breaks
-		    position: sticky, and a static column would squeeze the printed
-		    page. Below xl the prose simply takes the full paper width. */}
 		<div class="prose prose-sm min-w-0 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
 			{explainer && <AsciiExplainer scene={explainer} />}
 			<slot />

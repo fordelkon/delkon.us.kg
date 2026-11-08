@@ -1,0 +1,81 @@
+<script>
+	let cleanup: (() => void) | undefined;
+
+	function initTables(): void {
+		cleanup?.();
+		const observers: ResizeObserver[] = [];
+
+		for (const table of document.querySelectorAll<HTMLTableElement>(".prose table")) {
+			const existing = table.closest<HTMLElement>(".table-overflow");
+			const wrapper = existing ?? document.createElement("div");
+			wrapper.className = "table-overflow";
+			const hint = wrapper.querySelector<HTMLParagraphElement>(".table-scroll-hint") ?? document.createElement("p");
+			hint.className = "table-scroll-hint";
+			hint.textContent = "左右滑动查看完整表格 · 键盘聚焦后可用方向键";
+			hint.setAttribute("data-pagefind-ignore", "all");
+			const viewport = wrapper.querySelector<HTMLDivElement>(".table-scroll") ?? document.createElement("div");
+			viewport.className = "table-scroll";
+
+			if (!existing) {
+				table.before(wrapper);
+				wrapper.append(hint, viewport);
+				viewport.append(table);
+			}
+
+			const measure = (): void => {
+				const overflowing = viewport.scrollWidth > viewport.clientWidth + 1;
+				hint.hidden = !overflowing;
+
+				if (overflowing) {
+					viewport.tabIndex = 0;
+					viewport.setAttribute("role", "region");
+					viewport.setAttribute("aria-label", "可横向滚动的表格");
+				} else {
+					viewport.removeAttribute("tabindex");
+					viewport.removeAttribute("role");
+					viewport.removeAttribute("aria-label");
+				}
+			};
+
+			const observer = new ResizeObserver(measure);
+			observer.observe(viewport);
+			observer.observe(table);
+			observers.push(observer);
+			measure();
+		}
+
+		cleanup = () => {
+			for (const observer of observers) observer.disconnect();
+		};
+	}
+
+	document.addEventListener("astro:page-load", initTables);
+
+	document.addEventListener("astro:before-swap", () => cleanup?.());
+</script>
+
+<style is:global>
+	.prose .table-overflow {
+		margin-block: 2em;
+		min-width: 0;
+	}
+	.prose .table-scroll-hint {
+		margin: 0 0 0.5rem;
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		color: var(--color-printer-ink-light);
+	}
+	.table-scroll {
+		overflow-x: auto;
+	}
+	.table-scroll:focus-visible {
+		outline: 2px solid var(--color-printer-accent);
+		outline-offset: 2px;
+	}
+	.prose .table-scroll table {
+		display: table;
+		margin: 0;
+		max-width: none;
+		overflow: visible;
+	}
+</style>

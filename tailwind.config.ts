@@ -169,6 +169,21 @@ export default {
 							},
 						},
 						/* Table */
+						"table th, table td": {
+							/* Let the existing table scroller absorb overflow instead of
+							   squeezing CJK comparison columns into one-character lines. */
+							"@media (max-width: 639px)": {
+								minWidth: "9rem",
+							},
+						},
+						"table .katex": {
+							display: "inline-block",
+							whiteSpace: "nowrap",
+						},
+						"table:focus-visible": {
+							outline: "2px solid var(--color-printer-accent)",
+							outlineOffset: "2px",
+						},
 						"tbody tr": {
 							borderBottomWidth: "none",
 						},

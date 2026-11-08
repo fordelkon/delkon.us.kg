@@ -4,6 +4,7 @@ import BaseHead from "@/components/BaseHead.astro";
 import Header from "@/components/layout/Header.astro";
 import PaperViewport from "@/components/printed/PaperViewport.astro";
 import SkipLink from "@/components/SkipLink.astro";
+import TableOverflow from "@/components/TableOverflow.astro";
 import ThemeProvider from "@/components/ThemeProvider.astro";
 import { siteConfig } from "@/site.config";
 import type { SiteMeta } from "@/types";
@@ -38,7 +39,7 @@ const hasGutter = Astro.slots.has("gutter");
 		<div class="page-grid flex min-h-screen flex-col items-center px-3 py-6 sm:py-10">
 			<div class="relative w-full max-w-3xl">
 				<!-- Keep the housing above the sheet as it retracts into the slot. -->
-				<div class="sticky top-0 z-30">
+				<div class="printer-sticky sticky z-30">
 					<!-- Opaque desk behind the rounded housing masks paper during native
 					     scrolling. Sized to the housing: the desk behind it shows the same
 					     viewport-fixed texture, so a wider backdrop only adds horizontal
@@ -66,6 +67,7 @@ const hasGutter = Astro.slots.has("gutter");
 				}
 			</div>
 		</div>
+		<TableOverflow />
 		<slot name="floating-controls" />
 	</body>
 </html>

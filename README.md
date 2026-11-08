@@ -35,7 +35,8 @@ The paper feed and status light respect reduced-motion preferences. The printer
 housing is pinned to the viewport while scrolling, so the paper appears to
 retract into the feed slot as you scroll down and feed back out when you scroll
 up; sticky table-of-contents offsets and anchor scroll margins clear the pinned
-housing. A stationary workbench backdrop behind the rounded housing masks the
+housing. On phones, the brand plate scrolls out of view while the controls remain
+visible; keyboard focus and an open menu reveal the full housing. A stationary workbench backdrop behind the rounded housing masks the
 scrolling sheet, including when resizing the window or expanding the mobile menu.
 The workbench texture shares a fixed viewport origin with that backdrop. The
 housing has an open feed slot that exposes the same scrolling sheet, so no fixed
@@ -51,6 +52,12 @@ Example English and Chinese writing lives in `content/posts/` and `content/notes
 - Posts: `content/posts/**/*.{md,mdx}`; required `title`, `description`, and `publishDate`. Optional tags, pinned status, draft status, cover image, update date, and custom social image.
 - Notes: `content/notes/`; required `title` and an ISO 8601 `publishDate` with timezone offset, for example `2026-10-02T14:05:00Z`.
 - Tags: `content/tags/`; optional title and description. Match the filename to a tag used by a post.
+
+Posts display a section index in the desktop gutter. Algorithm articles live in
+`content/posts/algorithm/`, with topic and language tags; their series remains at
+`/series/algorithm/`. Legacy note URLs redirect through `public/_redirects`.
+Overflowing prose tables expose a scroll hint and a keyboard-focusable scroll region. Search indexes each formula once from its semantic MathML, excluding
+the duplicate visual HTML and TeX annotation.
 
 Pagefind indexes articles and notes through `data-pagefind-body`; tag filters use the article masthead. Feeds are available at `/rss.xml` and `/notes/rss.xml`.
 
