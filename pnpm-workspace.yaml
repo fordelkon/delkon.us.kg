@@ -1,5 +1,13 @@
 overrides:
   sharp: ^0.35.4
+  # @rolldown/binding-wasm32-wasi (via astro's rolldown) pulls
+  # @napi-rs/wasm-runtime 1.2.6+ whose peer range allows @emnapi 2.0.0-beta;
+  # pnpm then resolves astro's compiler wasm chain onto the beta and astro
+  # check crashes ("deleteEnv is not a function", misreported as a missing
+  # @astrojs/check). Both packages declare ^1.7.1 as compatible, so pin the
+  # known-good stable line until upstream stops publishing betas into ranges.
+  "@emnapi/core": 1.11.3
+  "@emnapi/runtime": 1.11.3
 allowBuilds:
   "@biomejs/biome": true
   "@tailwindcss/oxide": true
