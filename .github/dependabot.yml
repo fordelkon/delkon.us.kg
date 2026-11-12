@@ -31,3 +31,9 @@ updates:
           - "katex"
           - "@astrojs/markdown-satteri"
           - "astro-expressive-code"
+    # Dependabot targets the latest release regardless of the exact satteri
+    # pin in package.json, and @astrojs/markdown-satteri releases track
+    # satteri, so ignore both until they are upgraded manually.
+    ignore:
+      - dependency-name: "satteri"
+      - dependency-name: "@astrojs/markdown-satteri"
