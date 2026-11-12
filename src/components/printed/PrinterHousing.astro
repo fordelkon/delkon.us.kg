@@ -14,11 +14,11 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
      sits at a lower z-index (see Base.astro) to slide under this housing. -->
 <header
 	class:list={[
-		"group printer-header-border relative rounded-t-[2.5rem] rounded-b-sm",
+		"group printer-header-border relative rounded-t-[2.5rem] rounded-b-sm bg-printer-body",
 	]}
 	id="main-header"
 >
-	<div class="relative rounded-t-[2.5rem] bg-printer-body px-(--receipt-content-inset) pt-6 pb-5 sm:pt-10">
+	<div class="relative px-(--receipt-content-inset) pt-6 pb-5 sm:pt-10">
 		<!-- Brand plate -->
 		<div class="relative mb-8 flex items-start justify-between">
 			<brand-signature class="flex items-center gap-4">
@@ -65,7 +65,7 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 
 	<!-- The housing's bottom cutout exposes the scrolling sheet directly,
 	     so no stationary strip can separate from the paper at the feed slot. -->
-	<div class="feed-slit-shell bg-printer-shell relative flex h-5 items-center justify-center rounded-b-sm">
+	<div class="bg-printer-shell relative flex h-5 items-center justify-center rounded-b-sm">
 		<div
 			aria-hidden="true"
 			class="pointer-events-none absolute inset-0 shadow-[inset_0_2px_4px_rgba(0,0,0,0.08)]"
@@ -132,19 +132,20 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 		outline-offset: 3px;
 	}
 
-	/* Cut the paper opening out of only the bottom feed-slit strip so the outer
-	   rounded header with box-shadow never combines border-radius and clip-path
-	   on the same composited element. */
-	.feed-slit-shell {
+	/* Cut the paper opening out of the housing while retaining its outer
+	   shadow. The opening shares the paper's responsive horizontal inset
+	   (--paper-inset, defined in printer-housing.css) so it aligns with
+	   PaperViewport's margin. */
+	header {
 		clip-path: polygon(
-			0 0,
-			100% 0,
-			100% 100%,
+			-60px -60px,
+			calc(100% + 60px) -60px,
+			calc(100% + 60px) 100%,
 			calc(100% - var(--paper-inset)) 100%,
 			calc(100% - var(--paper-inset)) calc(100% - 12px),
 			var(--paper-inset) calc(100% - 12px),
 			var(--paper-inset) 100%,
-			0 100%
+			-60px 100%
 		);
 	}
 </style>
