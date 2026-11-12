@@ -40,19 +40,9 @@
    the full-page desk (Base.astro) and as the opaque backdrop behind the
    rounded housing that masks the scrolling paper. */
 .page-grid {
-	isolation: isolate;
-}
-
-/* Fixed elements give both desk copies the same viewport-sized paint area.
-   Avoid background-attachment: fixed on the small sticky mask: mobile browsers
-   can paint that copy at a different scale/origin and expose its square edge. */
-.page-grid::before {
-	content: "";
-	position: fixed;
-	inset: 0;
-	z-index: -1;
-	pointer-events: none;
+	/* A shared viewport origin makes the housing backdrop match the desk. */
 	background-color: var(--printer-desk);
+	background-attachment: fixed;
 	background-image:
 		radial-gradient(at 50% 0%, rgba(255, 255, 255, 0.4) 0%, transparent 80%),
 		linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
@@ -67,17 +57,11 @@
 		13px 13px,
 		13px 13px;
 }
-html[data-theme="dark"] .page-grid::before {
+html[data-theme="dark"] .page-grid {
 	background-image:
 		radial-gradient(at 50% 0%, rgba(255, 140, 90, 0.04) 0%, transparent 60%),
 		linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
 		linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-}
-
-/* Clip the viewport-sized background without making this sticky-sized mask
-   the containing block for its fixed child. Paper stays hidden at the corners. */
-.printer-backdrop {
-	clip-path: inset(0);
 }
 
 /* Dot matrix / thermal print texture on the paper */

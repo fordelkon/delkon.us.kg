@@ -40,11 +40,13 @@ const hasGutter = Astro.slots.has("gutter");
 			<div class="relative w-full max-w-3xl">
 				<!-- Keep the housing above the sheet as it retracts into the slot. -->
 				<div class="printer-sticky sticky z-30">
-					<!-- Clip a viewport-sized copy of the desk to the housing area.
-					     Both desk layers share an origin even on mobile browsers. -->
+					<!-- Opaque desk behind the rounded housing masks paper during native
+					     scrolling. Sized to the housing: the desk behind it shows the same
+					     viewport-fixed texture, so a wider backdrop only adds horizontal
+					     overflow on narrow viewports. -->
 					<div
 						aria-hidden="true"
-						class="page-grid printer-backdrop pointer-events-none absolute inset-x-0 top-0 bottom-3"
+						class="page-grid pointer-events-none absolute inset-x-0 top-0 bottom-3"
 					></div>
 					<Header />
 				</div>

@@ -38,8 +38,7 @@ up; sticky table-of-contents offsets and anchor scroll margins clear the pinned
 housing. On phones, the full housing stays visible with compact spacing and a
 collapsible menu; focus and menu changes keep the same sticky offset. A stationary workbench backdrop behind the rounded housing masks the
 scrolling sheet, including when resizing the window or expanding the mobile menu.
-The workbench and mask paint their texture on fixed viewport-sized layers;
-the mask clips its layer to the housing area without using fixed background attachment. The
+The workbench texture shares a fixed viewport origin with that backdrop. The
 housing has an open feed slot that exposes the same scrolling sheet, so no fixed
 paper strip or shading separates from the moving text. The implementation keeps the existing theme switch; the reference
 site's lamp, snail, and draggable stickers are outside this version.

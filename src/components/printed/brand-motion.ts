@@ -33,14 +33,25 @@ function orbitRenderer(root: HTMLElement) {
 	return {
 		render(elapsed: number) {
 			const amplitude = 7 * (0.76 + 0.24 * Math.sin((elapsed / 4200) * Math.PI * 2 + 0.55));
+			const angle = -(elapsed / 28000) * Math.PI * 2;
+			const cosine = Math.cos(angle);
+			const sine = Math.sin(angle);
 
-			const contour = samples.map(
-				([baseX, baseY, detailX, detailY], index) =>
-					`${index ? "L" : "M"}${(50 + baseX - amplitude * detailX).toFixed(3)},${(50 + baseY - amplitude * detailY).toFixed(3)}`,
-			);
+			// Rotate coordinates instead of an SVG group so the animation does not
+			// retain a transformed surface inside the clipped, sticky housing.
+			const rotate = (x: number, y: number): [number, number] => [
+				50 + x * cosine - y * sine,
+				50 + x * sine + y * cosine,
+			];
+
+			const contour = samples.map(([baseX, baseY, detailX, detailY], index) => {
+				const [x, y] = rotate(baseX - amplitude * detailX, baseY - amplitude * detailY);
+
+				return `${index ? "L" : "M"}${x.toFixed(3)},${y.toFixed(3)}`;
+			});
 
 			path.setAttribute("d", `${contour.join(" ")} Z`);
-			group.setAttribute("transform", `rotate(${-(elapsed / 28000) * 360} 50 50)`);
+			trail.removeAttribute("display");
 			trail.setAttribute(
 				"opacity",
 				String(Math.min(1, (PLAYBACK_DURATION - elapsed) / SETTLE_DURATION)),
@@ -48,23 +59,25 @@ function orbitRenderer(root: HTMLElement) {
 
 			particles.forEach((particle, index) => {
 				const t = (elapsed / 4600 - (index / (particles.length - 1)) * 0.38) * Math.PI * 2;
-				particle.setAttribute(
-					"cx",
-					(50 + 34 * Math.cos(t) - amplitude * Math.cos(5 * t)).toFixed(3),
+
+				const [x, y] = rotate(
+					34 * Math.cos(t) - amplitude * Math.cos(5 * t),
+					34 * Math.sin(t) - amplitude * Math.sin(5 * t),
 				);
-				particle.setAttribute(
-					"cy",
-					(50 + 34 * Math.sin(t) - amplitude * Math.sin(5 * t)).toFixed(3),
-				);
+
+				particle.setAttribute("cx", x.toFixed(3));
+				particle.setAttribute("cy", y.toFixed(3));
 			});
 		},
 		finish() {
 			trail.setAttribute("opacity", "0");
+			trail.setAttribute("display", "none");
 		},
 		reset() {
 			group.removeAttribute("transform");
 			path.setAttribute("d", initialPath);
 			trail.setAttribute("opacity", "0");
+			trail.setAttribute("display", "none");
 		},
 	};
 }
@@ -235,6 +248,7 @@ export function animateBrand(root: HTMLElement) {
 		cancelAnimationFrame(frame);
 		reducedMotion.removeEventListener("change", sync);
 		document.removeEventListener("visibilitychange", sync);
+		orbit?.finish();
 		title?.finish();
 	};
 }
