@@ -66,6 +66,10 @@
 	},
 	"overrides": [
 		{
+			"includes": ["content/**/*.md", "content/**/*.mdx"],
+			"formatter": { "enabled": false }
+		},
+		{
 			"includes": ["**/*.astro"],
 			"linter": {
 				"rules": {
