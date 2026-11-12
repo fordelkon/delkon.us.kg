@@ -228,18 +228,8 @@ html[data-theme="dark"] .printer-btn[aria-current="page"] {
 	}
 }
 
+/* Keep the whole housing visible at every width. A negative mobile offset
+   clips the brand plate and shifts the housing when a control gains focus. */
 .printer-sticky {
 	top: 0;
-}
-
-/* Let the brand plate scroll away on phones without changing document geometry.
-   Keyboard focus and an expanded menu restore the full housing. */
-@media (max-width: 639px) {
-	.printer-sticky {
-		top: -5.5rem;
-	}
-	.printer-sticky:focus-within,
-	.printer-sticky:has(.menu-open) {
-		top: 0;
-	}
 }
