@@ -14,7 +14,7 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
      sits at a lower z-index (see Base.astro) to slide under this housing. -->
 <header
 	class:list={[
-		"group printer-header-border relative overflow-hidden rounded-t-[2.5rem] rounded-b-sm bg-printer-body",
+		"group printer-header-border relative rounded-t-[2.5rem] rounded-b-sm bg-printer-body",
 	]}
 	id="main-header"
 >
@@ -65,7 +65,7 @@ const indicatorDelay = `-${Date.now() % 2000}ms`;
 
 	<!-- The housing's bottom cutout exposes the scrolling sheet directly,
 	     so no stationary strip can separate from the paper at the feed slot. -->
-	<div class="bg-printer-shell relative flex h-5 items-center justify-center">
+	<div class="bg-printer-shell relative flex h-5 items-center justify-center rounded-b-sm">
 		<div
 			aria-hidden="true"
 			class="pointer-events-none absolute inset-0 shadow-[inset_0_2px_4px_rgba(0,0,0,0.08)]"
