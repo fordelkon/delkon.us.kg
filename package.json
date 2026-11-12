@@ -15,7 +15,7 @@
 		"lint:anti-slop": "oxlint --deny-warnings"
 	},
 	"dependencies": {
-		"@astrojs/markdown-satteri": "^0.4.6",
+		"@astrojs/markdown-satteri": "^0.4.7",
 		"@astrojs/mdx": "8.1.2",
 		"@astrojs/rss": "4.0.19",
 		"@astrojs/sitemap": "3.7.4",
