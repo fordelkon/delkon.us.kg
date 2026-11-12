@@ -20,3 +20,14 @@ updates:
     groups:
       patch-minor:
         update-types: ["patch", "minor"]
+        # 0.x "minor" releases do not follow semver guarantees. satteri
+        # 0.10 -> 0.11 produced a dual install that failed astro check, and
+        # satori once jumped 30 minors in one grouped PR. Keep these
+        # rendering-critical packages as individual, reviewable PRs.
+        exclude-patterns:
+          - "satteri"
+          - "satori"
+          - "satori-html"
+          - "katex"
+          - "@astrojs/markdown-satteri"
+          - "astro-expressive-code"

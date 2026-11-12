@@ -32,12 +32,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-        # use astro check for issues
-      - name: Run Astro check
-        run: pnpm astro check
-
-      - name: Run anti-slop rules
-        run: pnpm lint:anti-slop
+        # pnpm check = astro check + biome check + anti-slop, matching the
+        # repository completion checks so dependency PRs get full coverage.
+      - name: Run checks
+        run: pnpm check
 
         # ensure build works
       - name: Run Astro build
