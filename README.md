@@ -35,8 +35,8 @@ The paper feed and status light respect reduced-motion preferences. The printer
 housing is pinned to the viewport while scrolling, so the paper appears to
 retract into the feed slot as you scroll down and feed back out when you scroll
 up; sticky table-of-contents offsets and anchor scroll margins clear the pinned
-housing. On phones, the full housing stays visible with compact spacing and a
-collapsible menu; focus and menu changes keep the same sticky offset. A stationary workbench backdrop behind the rounded housing masks the
+housing. On phones, the brand plate scrolls out of view while the controls remain
+visible; keyboard focus and an open menu reveal the full housing. A stationary workbench backdrop behind the rounded housing masks the
 scrolling sheet, including when resizing the window or expanding the mobile menu.
 The workbench texture shares a fixed viewport origin with that backdrop. The
 housing has an open feed slot that exposes the same scrolling sheet, so no fixed

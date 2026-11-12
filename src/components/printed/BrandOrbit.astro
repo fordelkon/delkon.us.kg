@@ -25,15 +25,11 @@ const staticPath = `${Array.from({ length: 121 }, (_, index) => {
 <style>
 	brand-orbit {
 		position: absolute;
-		left: calc(50% - 36px);
-		top: calc(50% - 36px);
+		left: 50%;
+		top: 50%;
 		width: 72px;
 		height: 72px;
-		/* Bound SVG repaints to the decoration instead of the rounded housing.
-		   The contour and particle radii stay inside this circular viewport. */
-		contain: paint;
-		border-radius: 50%;
-		overflow: hidden;
+		transform: translate(-50%, -50%);
 		pointer-events: none;
 		color: color-mix(in oklab, var(--color-printer-ink) 72%, var(--color-printer-body));
 	}
