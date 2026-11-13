@@ -109,14 +109,15 @@ public:
 
             // Multiplying by a negative number inverts the order of extremes:
             // the old minimum becomes the candidate for maximum, and vice versa.
+            // On entry, the extrema describe subarrays ending at i - 1.
             if (val < 0) {
                 std::swap(max_prod, min_prod);
             }
 
-            // Loop invariant: max_prod and min_prod represent extremes for subarrays ending at i.
             // Problem guarantees all subarray products fit within a 32-bit signed int.
             max_prod = std::max(val, max_prod * val);
             min_prod = std::min(val, min_prod * val);
+            // Both extrema now describe subarrays ending at i.
             result = std::max(result, max_prod);
         }
 

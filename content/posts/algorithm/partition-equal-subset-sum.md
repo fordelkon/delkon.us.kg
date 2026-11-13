@@ -171,7 +171,7 @@ public:
 
         for (int num : nums) {
             // Left shift simulates adding num to all currently reachable sums.
-            // Bitwise OR merges new sums with existing reachable sums in one word-level operation.
+            // Bitwise OR merges new sums with existing reachable sums in bulk.
             dp |= (dp << num);
             if (dp[target]) {
                 return true;

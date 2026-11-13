@@ -218,7 +218,7 @@ public:
 
 ### 复杂度推导
 
-- **时间复杂度**：预处理变换字符串耗时 $O(n)$。在主循环中，每一次进入 `while` 循环且匹配成功，都会使当前探测半径越过旧的 $R$ 并推进最右边界；因为 $R$ 从 0 单调递增至 $2n + 2$，成功匹配的累积执行次数不超过 $O(n)$。若匹配失败，则直接跳出 `while`，每个中心至多遭遇一次失配退出（共 $2n + 1$ 次）。因此总比较次数被严格限制在 $O(n)$ 内，算法具有线性时间复杂度 $O(n)$。
+- **时间复杂度**：预处理变换字符串耗时 $O(n)$。在主循环中，每一次进入 `while` 循环且匹配成功，都会使当前探测半径越过旧的 $R$ 并推进最右边界；因为 $R$ 单调不减且始终小于右哨兵下标 $2n + 2$，成功匹配的累积执行次数不超过 $O(n)$。若匹配失败，则直接跳出 `while`，每个中心至多遭遇一次失配退出（共 $2n + 1$ 次）。因此总比较次数被严格限制在 $O(n)$ 内，算法具有线性时间复杂度 $O(n)$。
 - **空间复杂度**：变换后的字符串长度为 $2n + 3$，辅助半径数组 `p` 大小为 $2n + 3$，辅助空间复杂度为 $O(n)$。最终切片返回的最长回文字符串占用 $O(L)$ 的输出空间。
 
 ## 复杂度与方案对照
@@ -233,4 +233,4 @@ public:
 
 [^clrs-matrix-chain]: [Introduction to Algorithms (4th ed.)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——第 14.2 节矩阵链乘法给出按区间长度递增填表的动态规划方法。
 
-[^manacher-1975]: [Glenn Manacher：_A New Linear-Time "On-Line" Algorithm for Finding the Smallest Initial Palindrome of a String_ (1975)](https://doi.org/10.1145/321892.321895)——利用回文对称关系避免重复比较的经典线性时间算法论文。
+[^manacher-1975]: [Glenn Manacher：_A New Linear-Time "On-Line" Algorithm for Finding the Smallest Initial Palindrome of a String_ (Journal of the ACM, 22(3):346–351, 1975)](https://doi.org/10.1145/321892.321896)——利用回文对称关系避免重复比较的经典线性时间算法论文。

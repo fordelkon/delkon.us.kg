@@ -87,7 +87,7 @@ class Solution:
         # Time complexity: O(n * sqrt(n))
         # Space complexity: O(n) auxiliary space
         # dp[j] stores the minimum number of square terms summing to j.
-        # Initializing dp[j] = j reflects using all 1s (worst-case tight bound).
+        # Using j copies of 1 gives a feasible upper bound dp[j] = j.
         dp = list(range(n + 1))
 
         for j in range(1, n + 1):
@@ -118,7 +118,8 @@ class Solution:
 
         while queue:
             step += 1
-            # Layer invariant: 'step' records the exact graph distance from n.
+            # Nodes popped in this layer have distance step - 1 from n.
+            # Neighbors generated in this layer have distance step.
             for _ in range(len(queue)):
                 curr = queue.popleft()
                 i = 1

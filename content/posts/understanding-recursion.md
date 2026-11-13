@@ -143,7 +143,7 @@ void traverse(const Node* node) {
 
 在位置 2，当前帧必须等整棵左子树返回后才输出当前节点；在位置 3，则要等左右两棵子树都返回后才输出。无论选哪个位置，处理 `A` 的栈帧都会一直保留 `node` 指针和当前执行位置，直到两个子调用先后完成。
 
-对有 $N$ 个节点、高度为 $h$（按根到最深叶子的节点数计）的二叉树，每个节点访问一次，时间复杂度为 $O(N)$；调用栈的最大深度等于树高，辅助空间为 $O(h)$。平衡树的 $h$ 为 $O(\log N)$，退化为单链时则达到 $O(N)$。操作位置同样决定了树上原地改写是否安全：例如[《翻转二叉树：自顶向下镜像传递与自底向上重挂》](/posts/algorithm/invert-binary-tree/)在前序或后序位置交换左右指针都能正确完成镜像，唯独不能在中序位置原地交换后再按原方向递归；而[《二叉树展开为链表：逆先序递归与前驱节点就地嫁接》](/posts/algorithm/flatten-binary-tree-to-linked-list/)则利用逆先序（右、左、根）在回退时重连指针，避免提前覆盖尚未访问的右子树。
+对有 $N$ 个节点、高度为 $h$（按根到最深叶子的节点数计）的二叉树，每个节点访问一次，时间复杂度为 $O(N)$；非空节点对应的调用最多有 $h$ 层，计入 `preorder(nullptr)` 的终止调用后最大深度为 $h + 1$，辅助空间为 $O(h)$（空树仅需常量空间）。平衡树的 $h$ 为 $O(\log N)$，退化为单链时则达到 $O(N)$。操作位置同样决定了树上原地改写是否安全：例如[《翻转二叉树：自顶向下镜像传递与自底向上重挂》](/posts/algorithm/invert-binary-tree/)在前序或后序位置交换左右指针都能正确完成镜像，唯独不能在中序位置原地交换后再按原方向递归；而[《二叉树展开为链表：逆先序递归与前驱节点就地嫁接》](/posts/algorithm/flatten-binary-tree-to-linked-list/)则利用逆先序（右、左、根）在回退时重连指针，避免提前覆盖尚未访问的右子树。
 
 ### 从树扩展到图时，标记代表什么
 
@@ -320,7 +320,11 @@ long long fibonacci(int n) {
 | 显式栈后序遍历     | $O(N)$         | $O(h)$                 |
 | 循环版 `sumTo`     | $O(n)$         | $O(1)$                 |
 
-核对任一递归算法的复杂度，可以拆成四个互相独立的问题：递归调用**总共发生多少次**、每次调用做**多少工作**、任意时刻**同时存活多少状态**（决定逻辑栈或显式栈的深度开销）、**结果集本身**占多少空间。例如全排列的递归深度只有 $O(n)$，但沿路径各层保留的 `next` 副本让同时存活的状态达到 $O(n^2)$，而 $n!$ 个排列、每个复制一份长度为 `n` 的路径又决定了时间；记忆化 Fibonacci 的递归调用树虽有指数个节点，但缓存把真正展开的调用压到 $O(n)$ 次。`sumTo` 的 $O(n)$ 辅助空间则完全来自“返回后还有加法”所保留的调用帧——正是线性递归一节“调用图形状”与“返回后待完成工作”的区分。
+核对任一递归算法的复杂度，可以拆成四个互相独立的问题：递归调用**总共发生多少次**、每次调用做**多少工作**、任意时刻**同时存活多少状态**（决定逻辑栈或显式栈的深度开销）、**结果集本身**占多少空间。例如全排列的递归深度只有 $O(n)$，但沿路径各层保留的 `next` 副本让同时存活的状态达到 $O(n^2)$，而 $n!$ 个排列、每个复制一份长度为 `n` 的路径又决定了时间。
+
+未记忆化的 Fibonacci 递归调用树有指数数量的节点。加入缓存后，每个非基本状态只展开一次，缓存命中调用也只有线性数量，因此实际调用总数和总时间均为 $O(n)$。对本文初始缓存全为 `-1` 的实现，当 $n \ge 2$ 时，状态 `2` 到 `n` 各展开一次、各发起两次子调用，加上最初的调用，总调用数恰为 $1 + 2(n - 1) = 2n - 1$。
+
+`sumTo` 的 $O(n)$ 辅助空间则完全来自“返回后还有加法”所保留的调用帧——正是线性递归一节“调用图形状”与“返回后待完成工作”的区分。
 
 ## 从递归改写为迭代
 
@@ -436,7 +440,7 @@ void postorderIterative(const Node* root) {
 
 在 AArch64 中，`BL`（Branch with Link）指令跳转到目标函数的同时，会把下一条指令的地址写入链接寄存器 `LR`。如果当前函数内部还要再调用别的函数（比如递归调用自身），下一次 `BL` 就会覆盖 `LR`。因此，非叶子函数通常会在函数的**序言**（prologue）下调 `SP` 分配栈空间，把当前的 `FP` 和 `LR` 保存到栈上；等函数结束前，再在**尾声**（epilogue）从栈上恢复 `FP` 和 `LR`，回收栈空间，最后执行 `RET` 按 `LR` 跳回调用者[^abi][^isa]。
 
-这也说明，“函数调用就是把所有变量通通压栈”只是一种粗糙比喻：小整数参数和返回值直接走 `w0` 等寄存器，生命周期不跨调用的中间值也可以一直留在寄存器里；只有跨调用仍需保留的值（如返回地址 `LR`、子调用后还要用的原参数 `n`）才需要在栈帧或被调用者保存寄存器中安放。
+这也说明，“函数调用就是把所有变量通通压栈”只是一种粗糙比喻：小整数参数和返回值直接走 `w0` 等寄存器，生命周期不跨调用的中间值也可以一直留在寄存器里；在当前 `sumTo` 示例中，返回地址 `LR` 和子调用后还要用的原参数 `n` 都需要跨调用保留，可以安放在栈帧或被调用者保存寄存器中。更一般地，局部对象的地址需求、局部数组以及寄存器分配产生的溢出保存也可能需要栈存储，具体布局由编译器、优化选项与 ABI 决定[^abi]。
 
 将开头的 `sumTo` 保存为 `sum.cpp`，在 macOS arm64 上用 Clang（关闭优化以保留直观的逐层栈帧）生成汇编：
 
@@ -483,7 +487,7 @@ ret
 
 ### return、清理与机器返回
 
-最后区分一下源码中的 `return` 与机器指令 `ret`。写出 `return sumTo(n - 1) + n;` 时，程序必须先发起子调用、拿到返回值并做完加法，才能确定当前函数的返回值；如果当前作用域内还有带析构函数的局部对象（如回溯例子中的局部 `std::vector`），C++ 还规定必须在初始化返回值之后、真正离开函数之前执行这些局部对象的析构清理[^return]。
+最后区分一下源码中的 `return` 与机器指令 `ret`。写出 `return sumTo(n - 1) + n;` 时，程序必须先发起子调用、拿到返回值并做完加法，才能确定当前函数的返回值；返回结果初始化后，还需销毁本次退出作用域时应当销毁的局部对象[^return]。若命名返回对象发生 NRVO（named return value optimization，具名返回值优化），它会直接成为调用者的返回结果，生命周期随返回结果延续；例如 `permutations` 中的 `result` 可以发生 NRVO，而 `path` 仍需在退出函数时销毁。NRVO 是允许而非强制的优化[^copy-elision]。
 
 因此，源码里的 `return` 表示“开始构造返回值并准备离开当前调用”，而汇编末尾的 `ret` 只是所有计算、清理和栈帧恢复都完成之后，把控制权交回调用者的最后一步跳转。看清“返回前还有哪些工作没做完”，也就抓住了理解递归执行顺序、栈空间开销以及尾递归转换的关键。
 
@@ -493,12 +497,14 @@ ret
 
 [^return]: [C++20 工作草案 N4861：The return statement](https://timsong-cpp.github.io/cppwp/n4861/stmt.return)——规定返回结果初始化与局部自动存储期对象销毁的先后顺序，说明离开当前调用前仍需完成局部对象析构等清理工作。
 
+[^copy-elision]: [C++20 工作草案 N4861 §11.10.5：Copy/move elision](https://timsong-cpp.github.io/cppwp/n4861/class.copy.elision)——第 1、1.1 段规定具名局部返回对象可直接构造为返回结果、源与目标视为同一对象及其析构时机；第 2 段给出示例。
+
 [^dfs]: [MIT 6.006，Lecture 14: Depth-First Search (DFS), Topological Sort](https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/resources/lecture-14-depth-first-search-dfs-topological-sort/)——图的深度优先遍历、访问状态标记与邻接表下的 $O(V + E)$ 复杂度分析。
 
 [^memo]: [MIT 6.006，Lecture 19: Dynamic Programming I: Fibonacci, Shortest Paths](https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/resources/lecture-19-dynamic-programming-i-fibonacci-shortest-paths/)——以斐波那契数列介绍记忆化（memoization）与重叠子问题复用，将指数级递归调用降为按状态数线性求解。
 
-[^sicp]: [SICP §1.2.1: Linear Recursion and Iteration](https://sicp.sourceacademy.org/chapters/1.2.1.html)——用“待完成操作的链”区分递归计算过程与固定状态变量的迭代计算过程，并讨论尾递归实现。
+[^sicp]: [SICP Comparison Edition §1.2.1: Linear Recursion and Iteration](https://sicp.sourceacademy.org/chapters/1.2.1.html)——用“待完成操作的链”区分递归计算过程与固定状态变量的迭代计算过程，并讨论尾递归实现。
 
-[^sicp-stack]: [SICP §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——在寄存器机器模型中用 `save`/`restore` 把“子调用返回后仍需要的值”压入栈并按后进先出恢复，直接演示了如何用栈实现递归计算过程。
+[^sicp-stack]: [SICP Comparison Edition §5.1.4: Using a Stack to Implement Recursion](https://sicp.sourceacademy.org/chapters/5.1.4.html)——在寄存器机器模型中用 `save`/`restore` 把“子调用返回后仍需要的值”压入栈并按后进先出恢复，直接演示了如何用栈实现递归计算过程。
 
 [^apple-abi]: [Apple: Writing ARM64 code for Apple platforms](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)——规定 `x29` 必须始终指向有效帧记录（叶函数等可复用调用者的帧记录）、`x18` 为平台保留寄存器，并说明用户态 128 字节 red zone 及函数自调用时的栈帧要求。

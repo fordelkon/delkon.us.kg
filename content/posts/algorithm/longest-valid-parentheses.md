@@ -226,6 +226,6 @@ public:
 
 [^python-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明如何通过列表末尾的 `append()` 和 `pop()` 实现后进先出栈。
 
-[^python-list-complexity]: [Python 文档：Time complexity of operations on built-in types](https://docs.python.org/3/library/time-complexity.html#time-complexity)——记录 CPython 内置类型的操作成本，列表 `append()` 和末尾 `pop()` 均摊为 $O(1)$；这一性能说明不是所有 Python 实现的语言规范保证。
+[^python-list-complexity]: [Python 文档：Time complexity of operations on built-in types](https://docs.python.org/3/builtins/time-complexity.html#time-complexity)——记录 CPython 内置类型的操作成本，列表 `append()` 和末尾 `pop()` 均摊为 $O(1)$；这一性能说明不是所有 Python 实现的语言规范保证。
 
 [^cpp-string-view]: [C++ 标准草案：string view](https://eel.is/c++draft/string.view)——只读视图引用原字符序列而不拥有它，本文视图只在输入存活的函数调用期间使用。

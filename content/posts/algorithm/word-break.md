@@ -224,6 +224,6 @@ public:
 
 [^python-set]: [Python 文档：Set Types](https://docs.python.org/3/library/stdtypes.html#set-types-set-frozenset)——定义集合的去重与成员检查语义。
 
-[^python-set-complexity]: [Python 文档：内置类型操作复杂度](https://docs.python.org/3/library/time-complexity.html#time-complexity)——列出 CPython 集合成员检查的平均与最坏成本；不把字符切片或新字符串的哈希视为免费操作。
+[^python-set-complexity]: [Python 文档：内置类型操作复杂度](https://docs.python.org/3/builtins/time-complexity.html#time-complexity)——列出 CPython 集合成员检查的平均与最坏成本；不把字符切片或新字符串的哈希视为免费操作。
 
 [^cpp-string-view]: [C++ 工作草案：字符串视图](https://eel.is/c++draft/string.view)——规定非拥有式字符串视图及 `substr` 的常数时间语义。
