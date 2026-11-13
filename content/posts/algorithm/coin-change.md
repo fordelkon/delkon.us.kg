@@ -19,9 +19,9 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 ## 状态定义与不可达哨兵的选取
 
-我们将问题形式化为**完全背包问题**的求极值变种：总金额 $amount$ 为背包总容量，每种硬币面额 $c \in coins$ 为物品体积，且每种硬币均可无限制重复选用，物品代价统一记为 1（代表 1 枚硬币），目标是使得恰好装满背包时的总代价最小[^clrs-dp]。
+我们将问题形式化为**完全背包问题**（unbounded knapsack problem）的求极值变种：总金额 $amount$ 为背包总容量，每种硬币面额 $c \in coins$ 为物品体积，且每种硬币均可无限制重复选用，物品代价统一记为 1（代表 1 枚硬币），目标是使得恰好装满背包时的总代价最小[^clrs-dp]。
 
-定义状态 $dp[j]$ 表示凑齐金额 $j$ 所需的最少硬币数。根据最优子结构，状态转移方程为：
+定义状态 $dp[j]$ 表示凑齐金额 $j$ 所需的最少硬币数。根据**最优子结构**（optimal substructure），状态转移方程为：
 
 $$
 dp[j] = \min_{\substack{c \in \textit{coins} \\ c \le j}} \big( dp[j - c] + 1 \big)
@@ -30,7 +30,7 @@ $$
 ### 边界条件与防溢出哨兵
 
 - **基本情况**（base case）：凑齐金额 0 所需的硬币数确定为 0，即 $dp[0] = 0$。
-- **不可达哨兵值**：对于 $j > 0$，在尚未计算或无法凑齐时，逻辑上应初始化为无穷大 $\infty$。在 C++ 等静态类型语言中，若直接使用 `std::numeric_limits<int>::max()`（即 `INT_MAX`）代表 $\infty$，在计算 `dp[j - c] + 1` 时会导致 32 位有符号整数上溢，从而触发未定义行为（Undefined Behavior）[^cpp-overflow]。
+- **不可达哨兵值**：对于 $j > 0$，在尚未计算或无法凑齐时，逻辑上应初始化为无穷大 $\infty$。在 C++ 等静态类型语言中，若直接使用 `std::numeric_limits<int>::max()`（即 `INT_MAX`）代表 $\infty$，在计算 `dp[j - c] + 1` 时会导致 32 位有符号整数上溢，从而触发**未定义行为**（undefined behavior）[^cpp-overflow]。
 - **安全上界**：由于输入硬币的最小面值为正整数（$c \ge 1$），在最极端情况下（全部使用面额为 1 的硬币），凑出金额 $amount$ 最多只需要 $amount$ 枚硬币。因此，对每个可达金额 $j$，其最优解满足：
 
 $$
@@ -65,11 +65,14 @@ Python 实现采用外层枚举金额、内层枚举硬币的自底向上转移�
 ```python
 class Solution:
     def coinChange(self, coins: list[int], amount: int) -> int:
-        # Every reachable amount uses at most amount coins; amount + 1 serves as an unreachable sentinel.
+        # Base case: 0 coins needed for amount 0.
+        # Every reachable amount uses at most amount coins (when using denomination 1).
+        # Thus, amount + 1 serves as an unreachable sentinel without risk of overflow.
         unreachable = amount + 1
         dp = [0] + [unreachable] * amount
 
         for j in range(1, amount + 1):
+            # Loop invariant: dp[k] holds the optimal coin count for each amount k < j.
             for c in coins:
                 if c <= j:
                     dp[j] = min(dp[j], dp[j - c] + 1)

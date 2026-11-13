@@ -5,7 +5,7 @@ description: "LeetCode 1143 的最长公共子序列：从两个前缀的末尾�
 tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 ---
 
-[LeetCode 1143. 最长公共子序列](https://leetcode.cn/problems/longest-common-subsequence/)（Hot 100）给定两个非空字符串 `text1` 和 `text2`，只含小写英文字母，要求返回最长公共子序列（Longest Common Subsequence, LCS）的长度。设两串长度分别为 $m$ 与 $n$。例如 `text1 = "abcde"`、`text2 = "ace"` 的最长公共子序列是 `"ace"`，长度为 3；`"abc"` 与 `"def"` 没有公共字符，返回 0。
+[LeetCode 1143. 最长公共子序列](https://leetcode.cn/problems/longest-common-subsequence/)（Hot 100）给定两个非空字符串 `text1` 和 `text2`，只含小写英文字母，要求返回**最长公共子序列**（Longest Common Subsequence, LCS）的长度。设两串长度分别为 $m$ 与 $n$。例如 `text1 = "abcde"`、`text2 = "ace"` 的最长公共子序列是 `"ace"`，长度为 3；`"abc"` 与 `"def"` 没有公共字符，返回 0。
 
 子序列可以跳过字符，但不能改变相对顺序；[《最长回文子串：区间长度扩展与中心扩散比对》](/posts/algorithm/longest-palindromic-substring/)中的子串则必须连续。空序列始终是公共子序列，因此答案不会小于 0。
 
@@ -36,9 +36,11 @@ $$
 ```python
 class Solution:
     def longestCommonSubsequence(self, text1: str, text2: str) -> int:
+        # Time complexity: O(m * n)
+        # Space complexity: O(m * n) auxiliary space
         m, n = len(text1), len(text2)
 
-        # dp[i][j] is the LCS length of prefixes of lengths i and j.
+        # Invariant: dp[i][j] is the LCS length of prefixes of lengths i and j.
         dp = [[0] * (n + 1) for _ in range(m + 1)]
         for i in range(1, m + 1):
             char1 = text1[i - 1]
@@ -85,25 +87,29 @@ class Solution:
 
 class Solution {
 public:
-    int longestCommonSubsequence(const std::string& input1, const std::string& input2) {
-        std::string_view text1 = input1;
-        std::string_view text2 = input2;
+    int longestCommonSubsequence(const std::string& text1, const std::string& text2) {
+        // Time complexity: O(m * n)
+        // Space complexity: O(min(m, n)) auxiliary space
+        std::string_view sv1 = text1;
+        std::string_view sv2 = text2;
         // Use the shorter string for the stored row without copying characters.
-        if (text1.size() < text2.size()) {
-            std::swap(text1, text2);
+        if (sv1.size() < sv2.size()) {
+            std::swap(sv1, sv2);
         }
 
-        const int m = static_cast<int>(text1.size());
-        const int n = static_cast<int>(text2.size());
+        const int m = static_cast<int>(sv1.size());
+        const int n = static_cast<int>(sv2.size());
         std::vector<int> dp(n + 1, 0);
 
         for (int i = 1; i <= m; ++i) {
             int prev_diag = 0;
-            const char c1 = text1[i - 1];
+            const char c1 = sv1[i - 1];
             for (int j = 1; j <= n; ++j) {
-                // dp[j] is the old top, dp[j-1] the new left, prev_diag the old diagonal.
+                // Invariant: dp[j] holds previous row value (from above);
+                // dp[j-1] holds current row updated value (from left);
+                // prev_diag holds old diagonal value (from top-left).
                 const int temp = dp[j];
-                if (c1 == text2[j - 1]) {
+                if (c1 == sv2[j - 1]) {
                     dp[j] = prev_diag + 1;
                 } else {
                     dp[j] = std::max(dp[j], dp[j - 1]);

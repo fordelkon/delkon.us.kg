@@ -5,7 +5,7 @@ description: "LeetCode 70 爬楼梯：按最后一步推导线性递推，比较
 tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 ---
 
-[LeetCode 70. 爬楼梯](https://leetcode.cn/problems/climbing-stairs/)要求计算登上具有 $n$ 阶台阶（$1 \le n \le 45$）的楼梯有多少种互不相同的走法；每次只允许向上跨越 1 阶或 2 阶。例如 $n = 3$ 时，有 $1+1+1$、$1+2$、$2+1$ 共 3 种方案。本题在组合数学上对应正整数的有序拆分（compositions，先跨 1 阶再跨 2 阶与先 2 后 1 属于不同方案）。下面先按最后一步推导递推式，再比较记忆化、滚动变量和矩阵快速幂的计算方式。
+[LeetCode 70. 爬楼梯](https://leetcode.cn/problems/climbing-stairs/)要求计算登上具有 $n$ 阶台阶（$1 \le n \le 45$）的楼梯有多少种互不相同的走法；每次只允许向上跨越 1 阶或 2 阶。例如 $n = 3$ 时，有 $1+1+1$、$1+2$、$2+1$ 共 3 种方案。本题在组合数学上对应正整数的**有序拆分**（compositions），先跨 1 阶再跨 2 阶与先 2 后 1 属于不同方案。下面先按最后一步推导递推式，再比较记忆化、滚动变量和矩阵快速幂的计算方式。
 
 ## 状态空间拓扑与无后效性
 
@@ -28,7 +28,7 @@ $$
 
 求解该递推式有两种常见的求值顺序：
 
-1. **自顶向下带记忆递归**：从目标 $n$ 出发反向递归展开子问题 $n - 1$ 与 $n - 2$。正如[《从调用栈理解递归》中的记忆化复用重复子问题分析](/posts/understanding-recursion/#记忆化复用重复子问题的结果)所述，纯递归会导致相同子问题被反复计算指数次（复杂度高达 $O(2^n)$）；引入备忘录（memoization）缓存已求得的中间状态后，每个状态仅计算一次，时间复杂度降至 $O(n)$，辅助空间为递归深度与缓存数组占用的 $O(n)$。
+1. **自顶向下带记忆递归**：从目标 $n$ 出发反向递归展开子问题 $n - 1$ 与 $n - 2$。正如[《从调用栈理解递归》中的记忆化复用重复子问题分析](/posts/understanding-recursion/#记忆化复用重复子问题的结果)所述，纯递归会导致相同子问题被反复计算指数次（复杂度高达 $O(2^n)$）；引入**备忘录**（memoization）缓存已求得的中间状态后，每个状态仅计算一次，时间复杂度降至 $O(n)$，辅助空间为递归深度与缓存数组占用的 $O(n)$。
 2. **自底向上递推**：沿[《从调用栈理解递归》中的递推思路](/posts/understanding-recursion/#从记忆化到自底向上递推)，按 $i = 3, 4, \dots, n$ 升序计算，省去递归调用栈。计算 $dp[i]$ 只需 $dp[i - 1]$ 与 $dp[i - 2]$，更早的历史值不再参与后续转移。
 
 因此无需保留完整数组，两个滚动变量即可保存下一步需要的状态，辅助空间为 $O(1)$。
@@ -68,11 +68,13 @@ public:
             return n;
         }
 
-        int prev = 1; // Base case: dp[1]
-        int curr = 2; // Base case: dp[2]
+        // Base cases: dp[1] = 1, dp[2] = 2.
+        int prev = 1;
+        int curr = 2;
 
         for (int i = 3; i <= n; ++i) {
             // Loop invariant: prev == dp[i - 2] and curr == dp[i - 1].
+            // For n <= 45, dp[45] = 1,836,311,903, which safely fits in a 32-bit signed int.
             int next = prev + curr;
             prev = curr;
             curr = next;

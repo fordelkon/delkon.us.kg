@@ -7,7 +7,7 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 [LeetCode 416. 分割等和子集](https://leetcode.cn/problems/partition-equal-subset-sum/)给定非空正整数数组 `nums`，要求判断能否把所有元素分到两个和相等的子集中。例如 `[1, 5, 11, 5]` 可以分为 `[11]` 与 `[1, 5, 5]`，而 `[1, 2, 3, 5]` 不行。每个位置上的元素只能使用一次，数值相同的元素仍是不同的可选项。题目保证数组长度 $1\le n\le200$，每个元素至多为 100。
 
-[《两数之和：先查补数，再记下标》](/posts/algorithm/two-sum/)只选两个位置，本题则允许任意数量的元素。设总和为 $S$，若能均分，每个子集的和都必须是 $\text{target}=S/2$。因此问题变成：能否挑出一个和为目标值的子集；剩余元素自动构成另一半[^clrs-knapsack]。
+[《两数之和：先查补数，再记下标》](/posts/algorithm/two-sum/)只选两个位置，本题则允许任意数量的元素。设总和为 $S$，若能均分，每个子集的和都必须是 $\text{target}=S/2$。因此问题转化为经典的**子集和问题**（subset sum problem）：能否挑出一个和为目标值的子集；剩余元素自动构成另一半[^clrs-knapsack]。
 
 ## 先检查总和与最大值
 
@@ -70,7 +70,8 @@ class Solution:
         dp[0] = True
 
         for num in nums:
-            # Descending order keeps dp[j - num] in the previous item layer.
+            # Descending order keeps dp[j - num] in the previous item layer,
+            # preventing the current element from being reused in the same subset.
             for j in range(target, num - 1, -1):
                 dp[j] = dp[j] or dp[j - num]
             if dp[target]:
@@ -81,7 +82,7 @@ class Solution:
 
 每轮结束时，`dp[j]` 表示已处理元素能否凑出和 `j`。一旦目标可达，未处理元素全部归入另一组即可，因为总和始终是目标的两倍，无须继续枚举。
 
-时间上界为 $O(n\cdot\text{target})$。这属于伪多项式时间：成本依赖目标和的数值，而不只是表示该数值需要的二进制位数。题目范围内 $\text{target}\le10000$，更新次数至多 $2\times10^6$，这不是固定运行耗时。辅助空间为 $O(\text{target})$，布尔返回值占 $O(1)$ 空间。
+时间上界为 $O(n\cdot\text{target})$。这属于**伪多项式时间**（pseudo-polynomial time）：成本依赖目标和的数值，而不只是表示该数值需要的二进制位数。题目范围内 $\text{target}\le10000$，更新次数至多 $2\times10^6$，这不是固定运行耗时。辅助空间为 $O(\text{target})$，布尔返回值占 $O(1)$ 空间。
 
 ## C++：同样保留上一轮状态
 
@@ -96,24 +97,35 @@ class Solution {
 public:
     bool canPartition(const std::vector<int>& nums) {
         const int total_sum = std::accumulate(nums.begin(), nums.end(), 0);
-        if (total_sum % 2 != 0) return false;
+        // An odd sum cannot be divided into two equal integer subsets.
+        if (total_sum % 2 != 0) {
+            return false;
+        }
 
         const int target = total_sum / 2;
         const int max_val = *std::max_element(nums.begin(), nums.end());
-        if (max_val > target) return false;
-        if (max_val == target) return true;
+        // If the maximum element exceeds half the sum, no valid partition exists.
+        if (max_val > target) {
+            return false;
+        }
+        if (max_val == target) {
+            return true;
+        }
 
         std::vector<bool> dp(target + 1, false);
         dp[0] = true;
 
         for (int num : nums) {
-            // Descending order prevents reusing the current element.
+            // Descending order prevents reusing the current element within the same iteration.
             for (int j = target; j >= num; --j) {
                 if (dp[j - num]) {
                     dp[j] = true;
                 }
             }
-            if (dp[target]) return true;
+            // Early return once the target sum becomes reachable.
+            if (dp[target]) {
+                return true;
+            }
         }
 
         return dp[target];
@@ -128,16 +140,50 @@ public:
 最大目标为 10000，因此还可以用 `std::bitset<10001>` 表示可达和[^cpp-bitset]。第 $j$ 位为 1 表示和 $j$ 可达。引入值 `num` 后，左移 `num` 位得到选取它后的所有新状态，再与旧状态合并：
 
 ```cpp
-std::bitset<10001> dp;
-dp[0] = 1;
-for (int num : nums) {
-    dp |= (dp << num);
-    if (dp[target]) return true;
-}
-return dp[target];
+#include <algorithm>
+#include <bitset>
+#include <numeric>
+#include <vector>
+
+class Solution {
+public:
+    bool canPartition(const std::vector<int>& nums) {
+        const int total_sum = std::accumulate(nums.begin(), nums.end(), 0);
+        // An odd sum cannot be divided into two equal integer subsets.
+        if (total_sum % 2 != 0) {
+            return false;
+        }
+
+        const int target = total_sum / 2;
+        const int max_val = *std::max_element(nums.begin(), nums.end());
+        // If the maximum element exceeds half the sum, no valid partition exists.
+        if (max_val > target) {
+            return false;
+        }
+        if (max_val == target) {
+            return true;
+        }
+
+        // Under problem constraints (n <= 200, nums[i] <= 100), max target is 10000.
+        // Bit j is set to 1 if and only if a subset sum of j is reachable.
+        std::bitset<10001> dp;
+        dp[0] = 1; // Base case: subset sum 0 is always achievable with empty set.
+
+        for (int num : nums) {
+            // Left shift simulates adding num to all currently reachable sums.
+            // Bitwise OR merges new sums with existing reachable sums in one word-level operation.
+            dp |= (dp << num);
+            if (dp[target]) {
+                return true;
+            }
+        }
+
+        return dp[target];
+    }
+};
 ```
 
-这是替换前述 DP 循环的片段，需额外包含 `<bitset>`，并保留总和及最大值检查。`dp << num` 先从旧位集生成结果，再执行合并，因此每个元素只被使用一次。所有数都为正，超过位集上限的和不可能再减回目标，丢弃高位不影响答案。
+在完整实现中，保留前置的总和奇偶性与最大值剪枝，核心转移由 `dp |= (dp << num)` 替代内层循环。`dp << num` 先从旧位集生成结果，再执行按位或合并，因此每个元素仅被选用一次。所有数均为正数，超过位集上限的高位溢出舍弃不会影响目标值判定。
 
 这是一条 C++ 表达式，不是一条固定耗时的 CPU 指令。若实现以宽度为 $w$ 的机器字处理 $B=10001$ 个位，一轮移位与或运算通常需要 $O(\lceil B/w\rceil)$ 次字操作，总时间为 $O(n\lceil B/w\rceil)$，存储为 $O(\lceil B/w\rceil)$ 个机器字。标准不保证 SIMD 或固定倍数的加速。
 

@@ -44,11 +44,15 @@ $$
 ```python
 class Solution:
     def generate(self, numRows: int) -> list[list[int]]:
+        # Time complexity: O(numRows^2)
+        # Space complexity: O(numRows^2) for the returned triangle, O(1) auxiliary space
         triangle: list[list[int]] = []
 
         for r in range(numRows):
+            # Invariant: row has length r + 1 with boundary elements initialized to 1.
             row = [1] * (r + 1)
             for c in range(1, r):
+                # Pascal's recurrence: T(r, c) = T(r - 1, c - 1) + T(r - 1, c).
                 row[c] = triangle[r - 1][c - 1] + triangle[r - 1][c]
             triangle.append(row)
 
@@ -76,12 +80,16 @@ $$
 class Solution {
 public:
     std::vector<std::vector<int>> generate(int numRows) {
+        // Time complexity: O(numRows^2)
+        // Space complexity: O(numRows^2) for output, O(1) auxiliary space
         std::vector<std::vector<int>> triangle;
         triangle.reserve(numRows);
 
         for (int r = 0; r < numRows; ++r) {
+            // Invariant: row has length r + 1 with boundaries set to 1.
             std::vector<int> row(r + 1, 1);
             for (int c = 1; c < r; ++c) {
+                // Pascal's identity: C(r, c) = C(r - 1, c - 1) + C(r - 1, c).
                 row[c] = triangle[r - 1][c - 1] + triangle[r - 1][c];
             }
             // Moving the vector transfers its buffer instead of copying the integers.

@@ -13,7 +13,7 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 ## 为什么按行递推
 
-把格子看作节点，向右、向下的移动看作有向边。每步都使坐标和 $i+j$ 增加 1，因此图中没有环；逐行从左到右扫描时，一个格子的所有前驱都已处理。这也是 DAG 最短路径按拓扑序松弛的特例[^clrs-dag-sp]。若把进入格子的边权设为该格子的数值，并将起点距离设为 `grid[0][0]`，路径长度就等于题目要求的总和。这里无需优先队列；无环结构也意味着递推本身不依赖权值非负。
+把格子看作节点，向右、向下的移动看作有向边。每步都使坐标和 $i+j$ 增加 1，因此图中没有环；逐行从左到右扫描时，一个格子的所有前驱都已处理。这也是**有向无环图**（DAG）最短路径按拓扑序松弛的特例[^clrs-dag-sp]。若把进入格子的边权设为该格子的数值，并将起点距离设为 `grid[0][0]`，路径长度就等于题目要求的总和。这里无需优先队列；无环结构也意味着递推本身不依赖权值非负。
 
 定义 $dp[i][j]$ 为从 $(0,0)$ 到格子 $(i,j)$ 的最小路径和。对于内部格子，最后一步只能来自上方或左方。若到达前驱的那一段不是最优路径，换成更小的前驱路径就能改善总和，因此：
 
@@ -36,6 +36,8 @@ $$
 ```python
 class Solution:
     def minPathSum(self, grid: list[list[int]]) -> int:
+        # Time complexity: O(m * n)
+        # Space complexity: O(m * n) auxiliary space
         if not grid or not grid[0]:
             return 0
 
@@ -43,12 +45,13 @@ class Solution:
         dp = [[0] * n for _ in range(m)]
         dp[0][0] = grid[0][0]
 
-        # Boundary cells have only one predecessor.
+        # Boundary initialization: single predecessor for first row and first column.
         for j in range(1, n):
             dp[0][j] = dp[0][j - 1] + grid[0][j]
         for i in range(1, m):
             dp[i][0] = dp[i - 1][0] + grid[i][0]
 
+        # Invariant: dp[i][j] stores the minimum path sum from (0, 0) to (i, j).
         for i in range(1, m):
             for j in range(1, n):
                 dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
@@ -80,6 +83,8 @@ class Solution:
 class Solution {
 public:
     int minPathSum(std::vector<std::vector<int>>& grid) {
+        // Time complexity: O(m * n)
+        // Space complexity: O(1) auxiliary space (in-place modification)
         if (grid.empty() || grid[0].empty()) {
             return 0;
         }
@@ -87,6 +92,7 @@ public:
         const int m = static_cast<int>(grid.size());
         const int n = static_cast<int>(grid[0].size());
 
+        // Boundary paths have only one incoming direction.
         for (int j = 1; j < n; ++j) {
             grid[0][j] += grid[0][j - 1];
         }
@@ -94,7 +100,8 @@ public:
             grid[i][0] += grid[i - 1][0];
         }
 
-        // North and west hold path sums; the current cell still holds its weight.
+        // Invariant: grid[i-1][j] and grid[i][j-1] store optimal path sums;
+        // grid[i][j] still holds original cell weight before this step.
         for (int i = 1; i < m; ++i) {
             for (int j = 1; j < n; ++j) {
                 grid[i][j] += std::min(grid[i - 1][j], grid[i][j - 1]);
@@ -110,15 +117,17 @@ public:
 
 ## C++：一维滚动数组
 
-若要保留输入，只需另分配一行状态。这里以 `const` 引用接收网格：
+若要保留输入，只需另分配一行状态。在 LeetCode 接口下即使接收非常量引用，本解法也仅读取而不修改网格（若在独立工程中可声明为 `const std::vector<std::vector<int>>&`）：
 
 ```cpp
 #include <algorithm>
 #include <vector>
 
-class SolutionImmutable {
+class Solution {
 public:
-    int minPathSum(const std::vector<std::vector<int>>& grid) {
+    int minPathSum(std::vector<std::vector<int>>& grid) {
+        // Time complexity: O(m * n)
+        // Space complexity: O(n) auxiliary space (input preserved)
         if (grid.empty() || grid[0].empty()) {
             return 0;
         }
@@ -135,7 +144,8 @@ public:
         for (int i = 1; i < m; ++i) {
             dp[0] += grid[i][0];
             for (int j = 1; j < n; ++j) {
-                // dp[j] is from the previous row; dp[j - 1] is from this row.
+                // Invariant: dp[j] holds previous row value (from above);
+                // dp[j - 1] holds current row updated value (from left).
                 dp[j] = std::min(dp[j], dp[j - 1]) + grid[i][j];
             }
         }

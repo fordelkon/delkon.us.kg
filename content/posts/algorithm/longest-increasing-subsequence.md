@@ -5,7 +5,7 @@ description: "LeetCode 300 的最长递增子序列：从以元素结尾的动�
 tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 ---
 
-[LeetCode 300. 最长递增子序列](https://leetcode.cn/problems/longest-increasing-subsequence/)（Hot 100）给定非空整数数组 `nums`，要求返回最长严格递增子序列（Longest Increasing Subsequence, LIS）的长度。子序列可以删除元素，但保留相对顺序；选择的下标 $i_1<i_2<\dots<i_k$ 必须满足 $nums[i_1]<nums[i_2]<\dots<nums[i_k]$，相等元素不能接入同一递增链。设输入长度为 $n$。
+[LeetCode 300. 最长递增子序列](https://leetcode.cn/problems/longest-increasing-subsequence/)（Hot 100）给定非空整数数组 `nums`，要求返回**最长严格递增子序列**（Longest Increasing Subsequence, LIS）的长度。子序列可以删除元素，但保留相对顺序；选择的下标 $i_1<i_2<\dots<i_k$ 必须满足 $nums[i_1]<nums[i_2]<\dots<nums[i_k]$，相等元素不能接入同一递增链。设输入长度为 $n$。
 
 [《最长公共子序列：双串前缀对齐与单行滚动优化》](/posts/algorithm/longest-common-subsequence/)用两个前缀定义状态，本题则需要保留结尾元素的信息，才能判断后来的值是否接得上。先按结尾位置做动态规划，再把同一长度的候选压缩成一个最小结尾值。
 
@@ -31,10 +31,13 @@ $$
 ```python
 class Solution:
     def lengthOfLIS(self, nums: list[int]) -> int:
+        # Time complexity: O(n^2)
+        # Space complexity: O(n) auxiliary space
         if not nums:
             return 0
 
         n = len(nums)
+        # Invariant: dp[i] stores the length of LIS ending strictly at nums[i].
         # Every element starts a length-1 subsequence ending at its own position.
         dp = [1] * n
         for i in range(1, n):
@@ -55,7 +58,7 @@ class Solution:
 
 ### 纸牌分堆（Patience Sorting）机制
 
-用纸牌分堆的方式维护这些候选[^aldous-diaconis]：数组 `tails[k]` 表示**已扫描前缀中，长度为 $k+1$ 的严格递增子序列的最小结尾值**。每个槽位对应一个牌堆，堆顶就是当前结尾候选。
+用**纸牌分堆**（Patience Sorting）的方式维护这些候选[^aldous-diaconis]：数组 `tails[k]` 表示**已扫描前缀中，长度为 $k+1$ 的严格递增子序列的最小结尾值**。每个槽位对应一个牌堆，堆顶就是当前结尾候选。
 
 #### 单调性不变式证明
 
@@ -123,6 +126,36 @@ $$
 
 这个倒序选择也保留严格递增性：某个处于第 $k$ 层的元素 $x$ 出现时，它之前已有更小的第 $k-1$ 层结尾。若之后、$x$ 之前还有元素写入第 $k-1$ 层，它只会继续降低该层结尾。因此倒序找到的最近第 $k-1$ 层元素仍小于 $x$，且下标更早。
 
+## Python：基于 bisect 的贪心二分优化
+
+利用标准库 `bisect.bisect_left` 在 `tails` 中执行二分查找[^python-bisect]。它返回首个满足 `tails[idx] >= x` 的插入位置：
+
+```python
+import bisect
+
+class Solution:
+    def lengthOfLIS(self, nums: list[int]) -> int:
+        # Time complexity: O(n log n)
+        # Space complexity: O(n) auxiliary space
+        if not nums:
+            return 0
+
+        # Loop invariant: tails[k] stores the minimum tail of all valid strictly increasing
+        # subsequences of length k + 1 observed so far; tails remains strictly ascending.
+        tails: list[int] = []
+        for x in nums:
+            # bisect_left locates the leftmost position where tails[idx] >= x.
+            idx = bisect.bisect_left(tails, x)
+            if idx == len(tails):
+                tails.append(x)
+            else:
+                tails[idx] = x
+
+        return len(tails)
+```
+
+遍历 $n$ 个元素，每次调用 `bisect_left` 在长度至多为 $n$ 的有序列表上耗费 $O(\log n)$ 次比较与定位；动态数组均摊追加成本为 $O(1)$，总时间复杂度为 $O(n\log n)$。辅助列表 `tails` 最坏情况下占用 $O(n)$ 空间。
+
 ## C++：基于 std::lower_bound 的二分优化
 
 两种实现都只读取输入并返回长度。下面提前 `reserve` 了 $n$ 个槽位，因此即使 LIS 很短，容量也应按 $O(n)$ 辅助空间计。
@@ -134,6 +167,8 @@ $$
 class Solution {
 public:
     int lengthOfLIS(const std::vector<int>& nums) {
+        // Time complexity: O(n log n)
+        // Space complexity: O(n) auxiliary space
         if (nums.empty()) {
             return 0;
         }
@@ -168,5 +203,7 @@ public:
 [^schensted-1961]: [C. Schensted：_Longest Increasing and Decreasing Subsequences_ (1961)](https://doi.org/10.4153/CJM-1961-015-3)——讨论最长递增、递减子序列与插入表之间的关系，本文另外给出基于结尾状态和牌堆的长度证明。
 
 [^aldous-diaconis]: [David Aldous, Persi Diaconis：_Longest Increasing Subsequences: From Patience Sorting to the Baik–Deift–Johansson Theorem_](https://doi.org/10.1090/S0273-0979-99-00796-X)——讨论 Patience Sorting 纸牌分堆与最长递增子序列的对应关系。
+
+[^python-bisect]: [Python 文档：bisect — 数组二分查找算法](https://docs.python.org/3/library/bisect.html)——`bisect_left` 在有序序列中以对数时间查找保持有序性的最左插入点。
 
 [^cpp-lower-bound]: [cppreference：`std::lower_bound`](https://en.cppreference.com/w/cpp/algorithm/lower_bound)——在已划分区间查找首个不小于目标值的位置，比较次数为对数级；非随机访问迭代器的移动次数可能为线性，本文 `vector` 的随机访问迭代器避免了这项开销。

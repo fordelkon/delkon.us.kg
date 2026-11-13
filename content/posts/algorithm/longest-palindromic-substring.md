@@ -20,7 +20,7 @@ tags: ["algorithm", "dynamic-programming", "two-pointer", "python", "cpp"]
 
 ## 区间动态规划：状态定义与子区间依赖
 
-定义 $dp[i][j]$ 表示闭区间子串 $s[i\dots j]$ 是否回文，其中 $0\le i\le j<n$。
+定义 $dp[i][j]$ 表示闭区间子串 $s[i\dots j]$ 是否回文，其中 $0\le i\le j<n$。这是典型的**区间动态规划**（Interval Dynamic Programming）状态设计。
 
 长度大于 2 的区间是回文，当且仅当两端字符相同，且去掉两端后的内部区间也是回文。长度较短时可以直接判断：
 
@@ -52,6 +52,8 @@ $$
 ```python
 class Solution:
     def longestPalindrome(self, s: str) -> str:
+        # Time complexity: O(n^2)
+        # Space complexity: O(n^2) auxiliary space
         n = len(s)
         if n <= 1:
             return s
@@ -95,6 +97,8 @@ class Solution:
 class Solution {
 public:
     std::string longestPalindrome(const std::string& s) {
+        // Time complexity: O(n^2)
+        // Space complexity: O(1) auxiliary space
         const int n = static_cast<int>(s.size());
         if (n <= 1) {
             return s;
@@ -138,13 +142,84 @@ $$
 
 ## 线性时间跃迁：Manacher 算法的核心思想
 
-中心扩散会在不同中心重复比较同一段字符。Manacher 算法利用已知回文的对称性，跳过这些比较，达到线性时间[^manacher-1975]。
+中心扩散会在不同中心重复比较同一段字符。**马拉车算法**（Manacher's Algorithm）利用已知回文的对称性，跳过这些比较，达到线性时间[^manacher-1975]。
 
 1. **统一奇偶中心**：在首尾和相邻字符之间插入未在原串出现的分隔符，例如本题可以用 `#`，得到长度为 $2n+1$ 的字符串。原来的偶回文也变成以分隔符为中心的奇回文。
 2. **记录最右边界**：设 $P[i]$ 为新串中以 $i$ 为中心、向一侧延伸的回文半径。维护已知回文的最右端点 $R$，以及对应中心 $C$，于是覆盖区间为 $[2C-R,R]$。
 3. **复用镜像半径**：计算 $i<R$ 时，镜像点是 $i'=2C-i$。已知覆盖区间内部关于 $C$ 对称，因此可将 $P[i]$ 初始化为 $\min(R-i,P[i'])$。若镜像回文在区间内部结束，其失配也会镜像过来，不必再扩展；若半径到达 $R$，再显式比较边界外的字符。$i\ge R$ 时从半径 0 开始比较。
 
 当扩展得到更靠右的回文时，更新 $R$ 和 $C$。新增的成功比较会推进最右边界，而 $R$ 只能向右移动 $O(n)$ 次；每个中心至多再产生一次终止扩展的失败比较，因此总时间为 $O(n)$。半径数组和变换后的字符串占 $O(n)$ 辅助空间。
+
+```cpp
+#include <algorithm>
+#include <string>
+#include <vector>
+
+class Solution {
+public:
+    std::string longestPalindrome(const std::string& s) {
+        // Time complexity: O(n)
+        // Space complexity: O(n) auxiliary space
+        const int n = static_cast<int>(s.size());
+        if (n <= 1) {
+            return s;
+        }
+
+        // Insert delimiters and distinct sentinels '^' and '$' to eliminate explicit bounds checking.
+        // E.g., "aba" transforms into "^#a#b#a#$".
+        std::string transformed = "^";
+        transformed.reserve(2 * n + 3);
+        for (char c : s) {
+            transformed.push_back('#');
+            transformed.push_back(c);
+        }
+        transformed.push_back('#');
+        transformed.push_back('$');
+
+        const int m = static_cast<int>(transformed.size());
+        // p[i] represents the palindrome radius centered at i in the transformed string.
+        std::vector<int> p(m, 0);
+        int center = 0;
+        int right = 0;
+        int max_len = 0;
+        int center_index = 0;
+
+        for (int i = 1; i < m - 1; ++i) {
+            const int i_mirror = 2 * center - i;
+
+            if (right > i) {
+                p[i] = std::min(right - i, p[i_mirror]);
+            }
+
+            // Attempt to expand palindrome centered at i; sentinels guarantee mismatch before bounds violation.
+            while (transformed[i + 1 + p[i]] == transformed[i - 1 - p[i]]) {
+                ++p[i];
+            }
+
+            // Advance center and right boundary when palindrome extends beyond current reach.
+            if (i + p[i] > right) {
+                center = i;
+                right = i + p[i];
+            }
+
+            // Track maximum palindrome radius discovered so far.
+            if (p[i] > max_len) {
+                max_len = p[i];
+                center_index = i;
+            }
+        }
+
+        // Palindrome radius in transformed string equals original palindrome length in s.
+        const int start = (center_index - max_len) / 2;
+        return s.substr(start, max_len);
+    }
+};
+```
+
+### 复杂度推导
+
+- **时间复杂度**：预处理变换字符串耗时 $O(n)$。在主循环中，每一次进入 `while` 循环且匹配成功，都会使当前探测半径越过旧的 $R$ 并推进最右边界；因为 $R$ 从 0 单调递增至 $2n + 2$，成功匹配的累积执行次数不超过 $O(n)$。若匹配失败，则直接跳出 `while`，每个中心至多遭遇一次失配退出（共 $2n + 1$ 次）。因此总比较次数被严格限制在 $O(n)$ 内，算法具有线性时间复杂度 $O(n)$。
+- **空间复杂度**：变换后的字符串长度为 $2n + 3$，辅助半径数组 `p` 大小为 $2n + 3$，辅助空间复杂度为 $O(n)$。最终切片返回的最长回文字符串占用 $O(L)$ 的输出空间。
 
 ## 复杂度与方案对照
 

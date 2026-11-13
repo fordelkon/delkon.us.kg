@@ -42,21 +42,25 @@ $$
 ```python
 class Solution:
     def longestValidParentheses(self, s: str) -> int:
+        # Time complexity: O(n)
+        # Space complexity: O(n) auxiliary space
         n = len(s)
         if n < 2:
             return 0
 
-        # dp[i] is the longest valid substring length ending at s[i].
+        # State invariant: dp[i] is the longest valid substring length ending at s[i].
         dp = [0] * n
         max_len = 0
         for i in range(1, n):
             if s[i] == ')':
                 if s[i - 1] == '(':
+                    # Matched immediately with preceding '(': stitch previous valid substring.
                     dp[i] = (dp[i - 2] if i >= 2 else 0) + 2
                 else:
-                    # Skip the matched suffix before checking its preceding character.
+                    # Preceded by ')': jump over the matched block ending at i - 1.
                     prev_match = i - dp[i - 1] - 1
                     if prev_match >= 0 and s[prev_match] == '(':
+                        # Stitch valid segment immediately before the matching '('.
                         preceding = dp[prev_match - 1] if prev_match >= 1 else 0
                         dp[i] = dp[i - 1] + 2 + preceding
 
@@ -96,18 +100,24 @@ class Solution:
 ```python
 class Solution:
     def longestValidParentheses(self, s: str) -> int:
-        # Bottom: unmatched right boundary (initially -1); above it: unmatched '(' indices.
+        # Time complexity: O(n)
+        # Space complexity: O(n) auxiliary space
+        # Stack invariant:
+        # - Bottom element holds the index of the last unmatched right boundary (initially -1).
+        # - Elements above hold indices of unmatched '(' in strictly increasing order.
         stack: list[int] = [-1]
         max_len = 0
         for i, char in enumerate(s):
             if char == '(':
                 stack.append(i)
             else:
-                # Pop a matching '(' or the previous boundary.
+                # Pop either a matching '(' index or the previous boundary sentinel.
                 stack.pop()
                 if not stack:
+                    # Current ')' has no matching '('; establish a new boundary.
                     stack.append(i)
                 else:
+                    # Valid substring spans from stack[-1] + 1 to i.
                     max_len = max(max_len, i - stack[-1])
 
         return max_len
@@ -156,13 +166,15 @@ class Solution:
 class Solution {
 public:
     int longestValidParentheses(const std::string& s) {
+        // Time complexity: O(n) via two linear passes
+        // Space complexity: O(1) auxiliary space
         std::string_view sv = s;
         const int n = static_cast<int>(sv.size());
         int left = 0;
         int right = 0;
         int max_len = 0;
 
-        // Forward: an excess ')' starts a new segment after the current position.
+        // Forward pass: an excess ')' breaks validity; reset when right > left.
         for (int i = 0; i < n; ++i) {
             if (sv[i] == '(') {
                 ++left;
@@ -181,7 +193,7 @@ public:
         left = 0;
         right = 0;
 
-        // Backward: reset on an excess '(' to catch segments missed by the forward scan.
+        // Backward pass: an excess '(' breaks validity; reset when left > right.
         for (int i = n - 1; i >= 0; --i) {
             if (sv[i] == '(') {
                 ++left;

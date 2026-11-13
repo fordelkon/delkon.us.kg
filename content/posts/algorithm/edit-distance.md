@@ -7,7 +7,7 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 [LeetCode 72. 编辑距离](https://leetcode.cn/problems/edit-distance/)（Hot 100）给定两个单词 `word1` 和 `word2`，要求计算将 `word1` 转换成 `word2` 的最少操作数。每次可以插入、删除或替换一个字符，代价均为 1。两串只含小写英文字母，长度分别记为 $m$ 与 $n$，允许为空串。例如 `word1 = "horse"`、`word2 = "ros"` 需要 3 步：`horse` → `rorse`（替换 `h`）→ `rose`（删除第二个 `r`）→ `ros`（删除 `e`）；若其中一串为空，答案就是另一串的长度。
 
-这一指标称为 Levenshtein 距离[^levenshtein-1966]。虽然题目写的是单向转换，但单位代价下距离对称：插入与删除互为逆操作，替换也可逆，因此任意编辑序列都能反向执行。它还是一个度量：非负性与同一性直接成立，三角不等式来自串接两段编辑序列。这一对称性允许后面交换两串的角色，以较短串作为数组维度。
+这一指标称为**莱文斯坦距离**（Levenshtein Distance）[^levenshtein-1966]。虽然题目写的是单向转换，但单位代价下距离对称：插入与删除互为逆操作，替换也可逆，因此任意编辑序列都能反向执行。它还是一个度量：非负性与同一性直接成立，三角不等式来自串接两段编辑序列。这一对称性允许后面交换两串的角色，以较短串作为数组维度。
 
 ## 三种编辑操作的网格几何映射
 
@@ -45,9 +45,11 @@ $$
 ```python
 class Solution:
     def minDistance(self, word1: str, word2: str) -> int:
+        # Time complexity: O((m + 1) * (n + 1))
+        # Space complexity: O((m + 1) * (n + 1)) auxiliary space
         m, n = len(word1), len(word2)
 
-        # dp[i][j] is the edit distance between prefixes of lengths i and j.
+        # Invariant: dp[i][j] is the edit distance between prefixes of lengths i and j.
         dp = [[0] * (n + 1) for _ in range(m + 1)]
         for i in range(m + 1):
             dp[i][0] = i
@@ -96,31 +98,35 @@ class Solution:
 
 class Solution {
 public:
-    int minDistance(const std::string& input1, const std::string& input2) {
-        std::string_view word1 = input1;
-        std::string_view word2 = input2;
+    int minDistance(const std::string& word1, const std::string& word2) {
+        // Time complexity: O(m * n + m + n + 1)
+        // Space complexity: O(min(m, n) + 1) auxiliary space
+        std::string_view sv1 = word1;
+        std::string_view sv2 = word2;
         // Distance is symmetric; use the shorter string for the stored row.
-        if (word1.size() < word2.size()) {
-            std::swap(word1, word2);
+        if (sv1.size() < sv2.size()) {
+            std::swap(sv1, sv2);
         }
 
-        const int m = static_cast<int>(word1.size());
-        const int n = static_cast<int>(word2.size());
+        const int m = static_cast<int>(sv1.size());
+        const int n = static_cast<int>(sv2.size());
         std::vector<int> dp(n + 1);
         for (int j = 0; j <= n; ++j) {
             dp[j] = j;
         }
 
         for (int i = 1; i <= m; ++i) {
-            // Save the old boundary before writing dp[i][0].
+            // Save the old boundary before writing dp[0].
             int prev_diag = dp[0];
             dp[0] = i;
 
-            const char c1 = word1[i - 1];
+            const char c1 = sv1[i - 1];
             for (int j = 1; j <= n; ++j) {
-                // dp[j] is the old top, dp[j-1] the new left, prev_diag the old diagonal.
+                // Invariant: dp[j] holds previous row value (from above);
+                // dp[j-1] holds current row updated value (from left);
+                // prev_diag holds old diagonal value (from top-left).
                 const int temp = dp[j];
-                if (c1 == word2[j - 1]) {
+                if (c1 == sv2[j - 1]) {
                     dp[j] = prev_diag;
                 } else {
                     dp[j] = 1 + std::min({

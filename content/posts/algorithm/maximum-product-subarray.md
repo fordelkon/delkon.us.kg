@@ -9,7 +9,7 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 ## 单调性破坏与极值双状态模型
 
-最大子数组和（Kadane 算法）只需保留结尾最大和，因为加上同一个数不会改变大小关系：若 $A\ge B$，则 $A+x\ge B+x$。乘法遇到负数时，大小关系却会反过来。
+**最大子数组和**（Kadane's algorithm）只需保留结尾最大和，因为加上同一个数不会改变大小关系：若 $A\ge B$，则 $A+x\ge B+x$。乘法遇到负数时，大小关系却会反过来。
 
 乘法需要分别考虑符号与零：
 
@@ -64,6 +64,7 @@ Python 实现先保存基于旧状态计算的三个候选值，再更新最大�
 ```python
 class Solution:
     def maxProduct(self, nums: list[int]) -> int:
+        # Base case: first element initializes the running extrema and global result.
         max_prod = nums[0]
         min_prod = nums[0]
         result = nums[0]
@@ -91,12 +92,14 @@ class Solution:
 
 ```cpp
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
 class Solution {
 public:
     int maxProduct(const std::vector<int>& nums) {
+        // Guaranteed non-empty by problem constraints (1 <= nums.size() <= 20000).
         int max_prod = nums[0];
         int min_prod = nums[0];
         int result = nums[0];
@@ -110,7 +113,8 @@ public:
                 std::swap(max_prod, min_prod);
             }
 
-            // After both updates, the extrema refer to subarrays ending at i.
+            // Loop invariant: max_prod and min_prod represent extremes for subarrays ending at i.
+            // Problem guarantees all subarray products fit within a 32-bit signed int.
             max_prod = std::max(val, max_prod * val);
             min_prod = std::min(val, min_prod * val);
             result = std::max(result, max_prod);

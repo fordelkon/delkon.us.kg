@@ -45,6 +45,8 @@ $$
 ```python
 class Solution:
     def wordBreak(self, s: str, wordDict: list[str]) -> bool:
+        # Time complexity: O(W + n * L_max^2)
+        # Space complexity: O(n + d + L_max) auxiliary space
         words = set(wordDict)
         max_len = max(len(w) for w in words)
         min_len = min(len(w) for w in words)
@@ -57,6 +59,7 @@ class Solution:
             start = max(0, i - max_len)
             end = i - min_len
             for j in range(start, end + 1):
+                # Invariant: dp[j] is True iff prefix s[:j] can be segmented into words.
                 # Short-circuit before slicing when the preceding prefix is unreachable.
                 if dp[j] and s[j:i] in words:
                     dp[i] = True
@@ -86,6 +89,8 @@ class Solution:
 class Solution {
 public:
     bool wordBreak(const std::string& s, const std::vector<std::string>& wordDict) {
+        // Time complexity: O(W + n * L_max^2)
+        // Space complexity: O(n + d) auxiliary space
         int max_len = 0;
         int min_len = std::numeric_limits<int>::max();
         std::unordered_set<std::string_view> words;
@@ -98,6 +103,7 @@ public:
         }
 
         const int n = static_cast<int>(s.size());
+        // dp[i] indicates whether prefix of length i can be broken into dictionary words.
         std::vector<bool> dp(n + 1, false);
         dp[0] = true;
 
@@ -107,6 +113,7 @@ public:
             const int start = std::max(0, i - max_len);
             const int end = i - min_len;
             for (int j = start; j <= end; ++j) {
+                // Short-circuit: only inspect candidate substring if the preceding prefix is valid.
                 if (dp[j]) {
                     const std::string_view sub = sv.substr(j, i - j);
                     if (words.find(sub) != words.end()) {
@@ -126,12 +133,90 @@ public:
 
 ## 用前缀树共享字符匹配
 
-除了为每个候选重新计算哈希，也可以把字典单词反序插入 Trie。从前缀末尾 `s[i - 1]` 开始向左扫描，按字符沿树向下走：
+除了为每个候选重新计算哈希，也可以把字典单词反序插入**前缀树**（Trie）。从前缀末尾 `s[i - 1]` 开始向左扫描，按字符沿树向下走：
 
 - 缺少当前字符对应的分支时，立即停止，继续向左也不可能得到匹配单词。
 - 走到词尾标记且 `dp[k]` 为真时，说明 `s[k:i]` 是一个单词，前面的前缀也可拆分，置 `dp[i] = true`。
 
 其中 $k$ 是本次扫描到的字符下标，最多向左走 $L_{\max}$ 步。这里共享的是反向单词的前缀，也就是原单词的后缀。若每个节点用固定 26 个子链接表示分支，建树耗时与空间均为 $O(W)$，总时间为 $O(W+nL_{\max})$，辅助空间为 $O(W+n)$。这是按词长分析得到的复杂度变化，实际耗时还取决于节点布局和字典分布。
+
+```cpp
+#include <array>
+#include <string>
+#include <vector>
+
+class Solution {
+private:
+    struct TrieNode {
+        // Indices of child nodes within the flat pool; -1 indicates an empty branch.
+        std::array<int, 26> next;
+        bool is_end = false;
+
+        TrieNode() {
+            next.fill(-1);
+        }
+    };
+
+public:
+    bool wordBreak(const std::string& s, const std::vector<std::string>& wordDict) {
+        // Time complexity: O(W + n * L_max)
+        // Space complexity: O(W + n) auxiliary space
+        // Contiguous node arena eliminates fine-grained heap allocations and automatically reclaims memory.
+        std::vector<TrieNode> trie;
+        trie.emplace_back(); // Root node at index 0.
+
+        // Insert reversed words so that backward scans from s[i - 1] trace forward Trie branches.
+        for (const auto& word : wordDict) {
+            int curr = 0;
+            for (auto it = word.rbegin(); it != word.rend(); ++it) {
+                const int char_idx = *it - 'a';
+                if (trie[curr].next[char_idx] == -1) {
+                    const int next_idx = static_cast<int>(trie.size());
+                    trie.emplace_back();
+                    // Re-index trie[curr] after emplace_back to guard against reallocation.
+                    trie[curr].next[char_idx] = next_idx;
+                }
+                curr = trie[curr].next[char_idx];
+            }
+            trie[curr].is_end = true;
+        }
+
+        const int n = static_cast<int>(s.size());
+        // dp[i] records whether prefix s[0..i-1] of length i is segmentable.
+        std::vector<bool> dp(n + 1, false);
+        dp[0] = true;
+
+        for (int i = 1; i <= n; ++i) {
+            int curr = 0;
+            // Scan backwards from s[i - 1] down to s[0].
+            for (int j = i - 1; j >= 0; --j) {
+                const int char_idx = s[j] - 'a';
+                const int next_node = trie[curr].next[char_idx];
+                if (next_node == -1) {
+                    // Current prefix path does not exist in the reversed Trie; prune backward scan early.
+                    break;
+                }
+                curr = next_node;
+                // Valid word s[j..i-1] matches and previous prefix s[0..j-1] is breakable.
+                if (trie[curr].is_end && dp[j]) {
+                    dp[i] = true;
+                    break;
+                }
+            }
+        }
+
+        return dp[n];
+    }
+};
+```
+
+## 方案对比
+
+| 方案 | 时间复杂度 | 辅助空间复杂度 | 核心机制 |
+| :--- | :--------- | :------------- | :------- |
+| 哈希集合 + 词长截断 (Python) | $O(W + nL_{\max}^2)$ | $O(n + d + L_{\max})$ | `set` 查重，按词长范围枚举切片 |
+| 字符串视图 + 哈希集合 (C++) | $O(W + nL_{\max}^2)$ | $O(n + d)$ | `std::string_view` 免除候选字符复制 |
+| 反向字典树 + 动态规划 (C++) | $O(W + nL_{\max})$ | $O(W + n)$ | 反向字典树共享后缀匹配与提前剪枝 |
 
 [《编辑距离：三种字符操作的网格对齐与空间压缩》](/posts/algorithm/edit-distance/)也按前缀推进，但状态需要同时指定两个字符串的前缀长度；本题只沿一个字符串前进，转移条件是“已有可行前缀加上一个匹配单词”，因此一维状态就足够。
 

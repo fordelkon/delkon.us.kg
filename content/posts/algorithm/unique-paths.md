@@ -23,7 +23,7 @@ $$
 - 首行只能一直向右，$dp[0][j]=1$。
 - 首列只能一直向下，$dp[i][0]=1$。
 
-每步都使坐标和 $i+j$ 增加 1，因此状态依赖构成有向无环图。按行从左到右计算时，上方和左方都已求出，是合法的拓扑顺序[^clrs-dag]。这与[《从调用栈理解递归》中的自底向上递推](/posts/understanding-recursion/#从记忆化到自底向上递推)相同：按依赖顺序计算每个状态一次，避免朴素递归重复求解同一格子。朴素分支递归的调用次数可用 $O(2^{m+n})$ 作上界，但单条调用链只有 $O(m+n)$ 层，不能把两种开销混为一谈。
+每步都使坐标和 $i+j$ 增加 1，因此状态依赖构成**有向无环图**（Directed Acyclic Graph, DAG）。按行从左到右计算时，上方和左方都已求出，是合法的拓扑顺序[^clrs-dag]。这与[《从调用栈理解递归》中的自底向上递推](/posts/understanding-recursion/#从记忆化到自底向上递推)相同：按依赖顺序计算每个状态一次，避免朴素递归重复求解同一格子。朴素分支递归的调用次数可用 $O(2^{m+n})$ 作上界，但单条调用链只有 $O(m+n)$ 层，不能把两种开销混为一谈。
 
 ## Python：一行数组保存两行所需的状态
 
@@ -32,12 +32,16 @@ $$
 ```python
 class Solution:
     def uniquePaths(self, m: int, n: int) -> int:
+        # Time complexity: O(m * n)
+        # Space complexity: O(min(m, n)) auxiliary space
+        # Symmetry optimization: swapping m and n does not change the total path count.
         m, n = max(m, n), min(m, n)
         dp = [1] * n
 
         for _ in range(1, m):
             for j in range(1, n):
-                # The old dp[j] is above; the updated dp[j - 1] is to the left.
+                # Invariant: dp[j] holds ways from above (row - 1);
+                # dp[j - 1] holds ways from the left (current row).
                 dp[j] += dp[j - 1]
 
         return dp[-1]
@@ -99,10 +103,13 @@ $$
 class Solution {
 public:
     int uniquePaths(int m, int n) {
+        // Time complexity: O(min(m, n))
+        // Space complexity: O(1) auxiliary space
         const int total_steps = m + n - 2;
         const int k = std::min(m - 1, n - 1);
 
-        // After iteration i, ans equals C(total_steps - k + i, i).
+        // Loop invariant: after step i, ans == C(total_steps - k + i, i).
+        // 64-bit integer prevents intermediate multiplication overflow before division.
         long long ans = 1;
         for (int i = 1; i <= k; ++i) {
             ans = ans * (total_steps - k + i) / i;

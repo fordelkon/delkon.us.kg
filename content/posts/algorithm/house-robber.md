@@ -25,13 +25,13 @@ dp[i][1] &= dp[i - 1][0] + \text{nums}[i].
 \end{aligned}
 $$
 
-令一维状态 $dp[i]$ 表示区间 $[0,i]$ 的最大收益。因为不选当前房屋可取得 $dp[i-1]$，选当前房屋则可取得 $dp[i-2]+\text{nums}[i]$，由这两类互斥决策得到以下方程。它应用了最优子结构这一一般思想[^clrs-dp]：
+令一维状态 $dp[i]$ 表示区间 $[0,i]$ 的最大收益。因为不选当前房屋可取得 $dp[i-1]$，选当前房屋则可取得 $dp[i-2]+\text{nums}[i]$，由这两类互斥决策得到以下方程。它应用了**最优子结构**（optimal substructure）这一一般思想[^clrs-dp]：
 
 $$
 dp[i] = \max(dp[i - 1],\; dp[i - 2] + \text{nums}[i]), \qquad i \ge 2.
 $$
 
-该问题具有清晰的无后效性：在评估第 $i$ 间房屋的取舍时，我们仅需知晓下标区间 $[0,i-1]$ 与 $[0,i-2]$ 的最大收益，而无须回溯具体抢劫了哪些房屋。
+该问题具有清晰的**无后效性**（no aftereffect）：在评估第 $i$ 间房屋的取舍时，我们仅需知晓下标区间 $[0,i-1]$ 与 $[0,i-2]$ 的最大收益，而无须回溯具体抢劫了哪些房屋。
 
 与[《爬楼梯：状态转移矩阵与一维滚动变量》](/posts/algorithm/climbing-stairs/)相比，两者都只依赖前两个位置 $i-1$ 与 $i-2$ 的状态；但爬楼梯属于方案计数（加法原理：$dp[i] = dp[i-1] + dp[i-2]$），而打家劫舍属于带权最优化选择（极值原理：$dp[i] = \max(\dots)$）。
 
@@ -53,8 +53,8 @@ Python 版本先计算右侧表达式，再更新两个变量，确保转移使�
 ```python
 class Solution:
     def rob(self, nums: list[int]) -> int:
-        prev2 = 0  # Max loot for prefix ending at i - 2 (initially empty)
-        prev1 = 0  # Max loot for prefix ending at i - 1 (initially empty)
+        prev2 = 0  # Max loot for prefix ending at i - 2 (dp[i-2], initially empty)
+        prev1 = 0  # Max loot for prefix ending at i - 1 (dp[i-1], initially empty)
 
         for val in nums:
             # Loop invariant: before processing house with value val,
@@ -80,11 +80,13 @@ class Solution:
 class Solution {
 public:
     int rob(const std::vector<int>& nums) {
-        int prev2 = 0; // Max loot for prefix ending at i - 2
-        int prev1 = 0; // Max loot for prefix ending at i - 1
+        // Max loot for prefixes ending at i - 2 and i - 1 (virtualized base cases = 0).
+        int prev2 = 0;
+        int prev1 = 0;
 
         for (int val : nums) {
             // Loop invariant: prev2 == dp[i - 2] and prev1 == dp[i - 1].
+            // Under constraints (n <= 100, nums[i] <= 400), max loot <= 40,000 (fits in int).
             int curr = std::max(prev1, prev2 + val);
             prev2 = prev1;
             prev1 = curr;

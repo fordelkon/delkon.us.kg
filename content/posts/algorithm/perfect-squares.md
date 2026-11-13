@@ -77,18 +77,17 @@ $$
 3. **答案为 2**：枚举正整数 $a \in [1, \lfloor\sqrt{n}\rfloor]$（满足 $a^2 < n$），检查差值 $b^2 = n - a^2$ 是否为非零完全平方数。若存在，则 $n = a^2 + b^2$，返回 2；
 4. **答案为 3**：四平方和定理把答案限制在 $\{1,2,3,4\}$ 内。第 1、3 步排除了 1 和 2，第 2 步已用勒让德定理排除 4，因此答案为 3。
 
-## Python：完全背包与逐层 BFS 队列
+## Python：完全背包动态规划
 
-下面两种方法均接受题目范围内的正整数并返回计数。BFS 在入队时标记，避免同层或后续层重复入队：
+下面实现完全背包自底向上递推。状态数组以 $0 \dots n$ 初始化为全 1 上界，循环升序填表：
 
 ```python
-from collections import deque
-
-
 class Solution:
     def numSquares(self, n: int) -> int:
-        # dp[j] stores the minimum number of squares summing to j.
-        # Initializing dp[j] = j reflects using all 1s (worst-case bound).
+        # Time complexity: O(n * sqrt(n))
+        # Space complexity: O(n) auxiliary space
+        # dp[j] stores the minimum number of square terms summing to j.
+        # Initializing dp[j] = j reflects using all 1s (worst-case tight bound).
         dp = list(range(n + 1))
 
         for j in range(1, n + 1):
@@ -98,8 +97,20 @@ class Solution:
                 i += 1
 
         return dp[n]
+```
 
-    def numSquaresBFS(self, n: int) -> int:
+## Python：逐层 BFS 最短路径
+
+将从 $n$ 逐步减去完全平方数至 0 视作无权图单源最短路径。队列保存剩余值，按层扩展保证首次触及 0 时即为最少步数；入队时标记 `visited` 防止重复搜索：
+
+```python
+from collections import deque
+
+
+class Solution:
+    def numSquares(self, n: int) -> int:
+        # Time complexity: O(n * sqrt(n)) worst case
+        # Space complexity: O(n) auxiliary space for queue and visited array
         queue: deque[int] = deque([n])
         visited = [False] * (n + 1)
         visited[n] = True
@@ -107,7 +118,7 @@ class Solution:
 
         while queue:
             step += 1
-            # Layer invariant: 'step' records the exact distance from root n.
+            # Layer invariant: 'step' records the exact graph distance from n.
             for _ in range(len(queue)):
                 curr = queue.popleft()
                 i = 1
@@ -120,30 +131,25 @@ class Solution:
                         queue.append(remainder)
                     i += 1
 
-        raise AssertionError("Positive n is reachable by subtracting 1 repeatedly")
+        raise AssertionError("Positive n is always reachable by subtracting 1")
 ```
 
-## C++：一维压缩与数论常数空间判定
+## C++：完全背包一维压缩
 
-在 C++ 实现中，我们一方面提供紧凑的完全背包一维压缩，另一方面提供利用数论定理的常数空间判定实现：
+动态规划版本空间开销为平铺的连续内存 `std::vector<int>`[^cpp-vector]，内层仅枚举不超过当前金额的完全平方数：
 
 ```cpp
 #include <algorithm>
-#include <cmath>
 #include <numeric>
 #include <vector>
 
 class Solution {
-    static bool isSquare(int x) {
-        int r = static_cast<int>(std::round(std::sqrt(x)));
-        return r * r == x;
-    }
-
 public:
-    // Dynamic programming approach: O(n * sqrt(n)) time, O(n) auxiliary space.
+    // Time complexity: O(n * sqrt(n))
+    // Space complexity: O(n) auxiliary space
     int numSquares(int n) {
         // State invariant: dp[j] stores the minimum square count to form sum j.
-        // The upper bound achieved by all 1s is initialized via std::iota.
+        // Initializing with j via std::iota provides the safe upper bound (all 1s).
         std::vector<int> dp(n + 1);
         std::iota(dp.begin(), dp.end(), 0);
 
@@ -154,34 +160,59 @@ public:
         }
         return dp[n];
     }
+};
+```
 
-    // Number-theoretic approach via Legendre's theorem: O(sqrt(n)) time, O(1) auxiliary space.
-    int numSquaresMath(int n) {
+## C++：数论常数空间判定
+
+利用勒让德三平方和定理与拉格朗日四平方和定理，先判定答案是否为 1、4、2，否则必为 3。只使用常数个局部变量，达到 $O(1)$ 辅助空间：
+
+```cpp
+#include <cmath>
+
+class Solution {
+    static bool isSquare(int x) {
+        const int r = static_cast<int>(std::round(std::sqrt(x)));
+        return r * r == x;
+    }
+
+public:
+    // Time complexity: O(sqrt(n))
+    // Space complexity: O(1) auxiliary space
+    int numSquares(int n) {
         // Condition 1: n is a perfect square.
-        if (isSquare(n)) return 1;
+        if (isSquare(n)) {
+            return 1;
+        }
 
         // Condition 4: n = 4^k * (8m + 7) iff n cannot be represented as sum of <= 3 squares.
         int temp = n;
-        while (temp % 4 == 0) temp /= 4;
-        if (temp % 8 == 7) return 4;
+        while (temp % 4 == 0) {
+            temp /= 4;
+        }
+        if (temp % 8 == 7) {
+            return 4;
+        }
 
         // Condition 2: sum of two non-zero perfect squares (a^2 + b^2 = n, with a^2 < n).
         for (int a = 1; a * a < n; ++a) {
-            if (isSquare(n - a * a)) return 2;
+            if (isSquare(n - a * a)) {
+                return 2;
+            }
         }
 
-        // Earlier checks exclude 1, 2 and 4; the four-square bound leaves 3.
+        // Earlier checks exclude 1, 2, and 4; the four-square bound leaves 3.
         return 3;
     }
 };
 ```
 
-动态规划版本空间开销为平铺的连续内存 `std::vector<int>`[^cpp-vector]；而 `numSquaresMath` 方法将计算时间压缩至仅需枚举 $a \le \sqrt{n}$，在 $n = 10^4$ 时最多仅循环 100 次，且只使用常数个局部变量，达到 $O(1)$ 辅助空间。整数乘法和平方根判断在这里按题目固定数值范围计为常数成本。
+动态规划版本空间开销为平铺的连续内存 `std::vector<int>`[^cpp-vector]；而数论判定解法将计算时间压缩至仅需枚举 $a \le \sqrt{n}$，在 $n = 10^4$ 时最多仅循环 100 次，且只使用常数个局部变量，达到 $O(1)$ 辅助空间。整数乘法和平方根判断在这里按题目固定数值范围计为常数成本。
 
 例如 12 的最优分解为 $4+4+4$，答案为 3；13 为 $4+9$，答案为 2；28 除去因子 4 后得到 7，答案为 4。定理允许平方项为 0；去掉这些零项后，才得到题目所求的正平方数数量。三种解法展现了不同建模视角下的权衡：
 
-- **完全背包 DP**：自底向上递推结构最通用，不仅求得 $n$ 的解，还顺带计算了 $1 \dots n$ 全部的最优解，时间复杂度为 $O(n\sqrt{n})$，辅助空间为 $O(n)$；
-- **逐层 BFS 最短路**：答案为 1 或 2 时，分别在第 1、2 层找到 0 后退出；给出的 DP 实现则会填完全部状态。这说明退出时机，不代表给定输入分布下的平均耗时；队列和标记数组共占 $O(n)$ 辅助空间；
+- **完全背包动态规划**（DP）：自底向上递推结构最通用，不仅求得 $n$ 的解，还顺带计算了 $1 \dots n$ 全部的最优解，时间复杂度为 $O(n\sqrt{n})$，辅助空间为 $O(n)$；
+- **逐层广度优先搜索**（BFS 最短路径）：答案为 1 或 2 时，分别在第 1、2 层找到 0 后退出；给出的 DP 实现则会填完全部状态。这说明退出时机，不代表给定输入分布下的平均耗时；队列和标记数组共占 $O(n)$ 辅助空间；
 - **数论判定**：逐项检查答案是否为 1、4、2，否则返回 3。时间为 $O(\sqrt{n})$，辅助空间为 $O(1)$，依据是平方和定理，不能直接推广到任意候选数集合。
 
 [^clrs-dp]: [_Introduction to Algorithms_ (4th ed., Chapter 14)](https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/)——动态规划的最优子结构与无后效性；最少基元找零模型另见 [MIT 6.046J Recitation 5](https://ocw.mit.edu/courses/6-046j-design-and-analysis-of-algorithms-spring-2015/d187472426117c2ebec700a22c209b3f_MIT6_046JS15_Recitation5.pdf) 第 3 页分析。
