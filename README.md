@@ -68,7 +68,9 @@ Pagefind indexes articles and notes through `data-pagefind-body`; tag filters us
 
 ## Verification and deployment
 
-Run `pnpm check` and `pnpm build` before shipping source or configuration changes. Inspect the production preview for layout and interaction changes. See [docs/testing.md](docs/testing.md) for test guidance and [AGENTS.md](AGENTS.md) for repository conventions and vendored lint boundaries.
+Run `pnpm check` and `pnpm build` before shipping source or configuration changes. Inspect the production preview for layout and interaction changes. See [docs/testing.md](docs/testing.md) for test guidance and [AGENTS.md](AGENTS.md) for repository conventions and [the agent guide](docs/agent-guide.md#vendored-sources) for vendored lint boundaries.
+
+For AI-assisted contributions, start with [AGENTS.md](AGENTS.md). [Context loading](docs/agent-context-loading.md) explains the optional project hook and manual fallback; [context review](docs/agent-context-audit.md) describes how to maintain this guidance. Personal skills and plugins are not required.
 
 The deployment target is configured in [wrangler.jsonc](wrangler.jsonc). Build output is generated in `dist/`; do not edit generated pages or the Pagefind index manually. CI checks are defined in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 

@@ -56,15 +56,7 @@ A tag is a reusable category that aggregates posts and notes for retrieval, not 
 
 ## Mathematics
 
-Choose notation by what the passage explains: a mathematical relationship, a piece of code, or an ordinary quantity. A number or variable name alone does not require a formula.
-
-- Use math for complexity bounds in prose and tables, equations, recurrences, sums, products, factorials, powers, mathematical intervals, and constraints used in an argument. Keep the notation consistent throughout that argument, including its variable definitions.
-- Keep ordinary counts, dates, durations, measurements, percentages, problem numbers, versions, and numeric examples in prose. A quantity belongs in math when it participates in a formula or bound; “26 letters” can stay prose while a character-set cardinality belongs in math.
-- Use inline code for identifiers, types, API calls, literal input/output, language operators, and expressions quoted from an implementation. Preserve code blocks. A mathematical nonnegative-input constraint uses an inequality; an explanation of `if (n >= 0)` keeps the exact code. Likewise, a recurrence uses math while a call such as `fibonacci(n - 1)` remains code.
-- Use inline math for short expressions within a sentence or table cell. Use display math for a central equation, a derivation, or an expression that needs its own line. Keep a formula inside a sentence when a separate block would interrupt the explanation. Keep titles and frontmatter readable as plain text; do not add formula markup merely to style a number.
-- Define each mathematical symbol when first introduced, state its domain or bounds when relevant, and explain its connection to code when names differ. Formatting must preserve the original meaning: distinguish equality from an upper bound and retain conditions such as average-case versus worst-case complexity.
-
-Verify formulas in the production build before publishing, including table structure and long expressions at narrow widths. Follow the [post math examples](../content/TEMPLATE-post.md#mathematics) or [note math examples](../content/TEMPLATE-note.md#mathematics) for delimiter syntax, escaping, and table handling.
+For mathematical notation and formulas, read [mathematics](../.agents/skills/site-writing/references/math.md).
 
 ## Code Examples
 
@@ -74,15 +66,7 @@ Verify formulas in the production build before publishing, including table struc
 
 ## Algorithm Articles
 
-Apply these conventions when writing or reviewing [`content/posts/algorithm/`](../content/posts/algorithm/). Keep each article focused on its problem; use the following as review criteria, not mandatory headings.
-
-- **Problem contract:** State the input assumptions and answer semantics that the method needs: ordering, duplicates, node existence, nonempty paths, or whether positions or values distinguish answers. Identify the invariant and explain initialization, progress, and termination; use a small counterexample where a tempting alternative breaks it.
-- **Method and implementation:** Separate algorithm choices from language differences. Explain what each recursive return value or maintained state means, and why updates occur in that order. Comments should protect these invariants. State version requirements beside affected examples and use the existing problem interface unless an alternative contract is explicit.
-- **Side effects and ownership:** Before code that changes or exposes input state, say whether it reuses, allocates, consumes, temporarily rewires, or restores objects. Distinguish an independent result from an alias. For C++ node operations, identify who owns new or detached nodes; qualify restoration and cleanup claims when early exits or allocation failures matter. State depth-dependent recursion limits where applicable.
-- **Complexity:** Define the parameters and analyze the actual implementation. Separate auxiliary space from output storage, peak live space from cumulative allocation, and average, amortized, and worst-case bounds. Count copies, slices, reserved capacity, retained hash keys, and recursion frames; distinguish Python references from copied character data. Use one tree-height convention within an argument and distinguish node counts from edge counts. Parameterize the alphabet before treating it as fixed.
-- **Evidence:** Follow the [reference rules](#references-and-footnotes). Verify textbook editions and sections; cite API guarantees separately from implementation details. Present original correctness arguments as derivations, and use background readings only for the concepts they explain. Historical attribution needs a direct source; performance comparisons beyond complexity need a reproducible benchmark and its conditions.
-- **Connections:** At the point of reuse, link the earlier invariant and explain the changed constraint or state lifetime. Keep the local argument self-contained. Place substantial allocator, concurrency, or benchmark experiments outside the core solution, and distinguish their costs from the algorithm's.
-- **Verification:** Exercise changed examples against the problem contract, including a case that exposes the previous defect. For mutation, also check topology, node identity, restoration, or result independence as appropriate. Build the site and inspect affected formulas and links; report separately which code was executed, which output was inspected, and which checks remain incomplete.
+Before writing or reviewing [`content/posts/algorithm/`](../content/posts/algorithm/), read [algorithm conventions](../.agents/skills/site-writing/references/algorithms.md).
 
 ## Sources
 

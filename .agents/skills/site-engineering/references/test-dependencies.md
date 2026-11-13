@@ -1,0 +1,5 @@
+- Keep internal dependencies real when proving their behavior: use the actual schema, Markdown processor, filesystem fixture, or build pipeline. Use isolated temporary directories for tests that write files, and clean them up after each scenario.
+- Replace unreachable external services with controlled responses or fakes typed against their production contracts. Fakes provide inputs and failures; the production owner produces the result under assertion. Verify the relevant dependency contract when a test relies on its behavior.
+- Stub browser APIs at the environment boundary when required, and explain the limitation. Use typed function stubs where the chosen test framework supports them.
+- Test time-dependent logic with fake clocks. Coordinate asynchronous work through awaited results, events, or explicit signals. Browser tests wait for observable states, such as a visible search result, rather than fixed delays.
+- Keep scenarios independent: isolate content fixtures, environment settings, browser storage, and generated output. Restore changed environment state and dispose resources even when assertions fail.
