@@ -1,6 +1,6 @@
 ---
 title: "并发编程（四）：死锁、活锁与并发程序的正确性"
-description: "区分数据竞争与其他竞态条件，用原子性违规、顺序违规和死锁示例说明同步协议的边界，再讨论活锁、饥饿、优先级反转与排查工具。"
+description: "从不变量与线性化点分析完整操作的正确性，讨论顺序违规、死锁、活锁与饥饿，并用模型断言和故障场景检查并发协议。"
 publishDate: "30 Sep 2026"
 tags: ["concurrency", "synchronization", "rust"]
 ---
@@ -40,6 +40,23 @@ Lu 等人分析了 MySQL、Apache、Mozilla 与 OpenOffice 的 105 个并发缺�
 | 4    |                                   | 加锁扣除 80，余额变为 -60；解锁   |
 
 这张表描述的是逻辑交错：所有余额访问都受同一把锁保护，没有数据竞争，但“不允许透支”的要求仍被破坏。修复需要让检查与扣款处于同一个临界区，而不是分别保证它们安全。第二篇强调的[“锁覆盖完整操作”](/posts/concurrency/locks-condvars-shared-memory-sync/#临界区范围与锁的粒度)，正是为了维护这类不变量。
+
+### 线性化点：完整操作何时生效
+
+判断操作能否作为一个整体观察，可以引入**线性化**（linearizability）：并发对象的执行应当能解释为一串符合其顺序规格的操作；每个已完成操作看起来都在调用与返回之间的某个瞬间生效。如果 A 已返回，B 才开始调用，这个顺序也必须保留；调用区间重叠的操作则可以按任一符合规格的顺序解释。选来解释操作生效的瞬间称为**线性化点**（linearization point）[^12]。
+
+仍看余额 100、两次各扣 80 的例子。若 `withdraw(80)` 的规格是“余额足够就扣款并返回成功，否则不修改并返回失败”，合法的顺序执行只能让其中一次成功，最终余额为 20。分别加锁的检查与扣款若让两次调用都返回成功，就找不到符合这个规格的顺序解释。每一次内存访问安全，并没有让 `withdraw` 成为正确的并发操作。
+
+不同实现可以在不同位置建立这种解释：
+
+| 实现 | 操作生效的依据 |
+| ---- | -------------- |
+| 原子计数器加一 | 单次 `fetch_add` 的读改写 |
+| 锁保护的余额扣减 | 检查与修改处于同一临界区；成功调用可选取余额写入作为生效点，余额不足的调用可选取检查位置 |
+| CAS 循环扣减 | 成功 CAS 才提交新余额；CAS 失败后必须用重新观察到的状态再判断和计算 |
+| 两账户转账 | 所有读写方遵守两账户的锁协议，操作完成更新前不能暴露中间余额；不能把单独一次原子减法当成整笔转账的提交 |
+
+这里的线性化点用于说明外部可观察的业务语义，不要求整个函数由一条机器指令完成。`SeqCst` 约束原子访问的共同顺序，也不会自动为多个字段的组合操作建立这个语义边界。线性化同样不保证进展：一把锁保护的对象可以有清楚的操作语义，却仍因调用方的加锁顺序发生死锁。分析时应分别检查“完成的操作是否符合规格”和“操作能否完成”[^12]。
 
 ### 顺序违规：依赖尚未建立
 
@@ -181,7 +198,9 @@ fn main() {
 
 竞态条件同样可以通过模型断言暴露，前提是把业务要求写进检查。下面是一份使用 loom 替代类型的完整测试：两个线程各加一次，要求最终计数为 2；错误版本把读取与写回拆成两次原子操作[^9]。
 
-```rust
+这段代码是测试而非 `main` 程序。本地运行时，在 Cargo 项目的 `[dev-dependencies]` 中加入 `loom = "0.7.2"`，保存为 `tests/counter.rs`，执行 `cargo test --test counter` 即可；直接使用 loom 类型不需要额外的 cfg 开关。错误版本预期在断言处失败，显示实际值 1、期望值 2，表示模型探索发现了丢失更新的执行。
+
+```rust title="tests/counter.rs"
 use loom::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use loom::sync::Arc;
 use loom::thread;
@@ -217,11 +236,30 @@ loom 可以探索到这样的交错：A 读到 0，B 也读到 0，A 写入 1，
 +                    count.fetch_add(1, SeqCst);
 ```
 
+将原测试中的两行替换为 `count.fetch_add(1, SeqCst);`，再运行同一条测试命令，预期通过。差异块展示替换关系，复制时只保留上下文与新增代码。
+
 修复后，同一测试检查两个更新都被保留；`SeqCst` 无需改变，错误来自操作拆分。余额不能为负、任务不能重复领取、退出后不能继续提交，也都需要写成相应检查。工具无法替开发者决定哪些交错结果才算正确。
+
+### 从模型断言到完整协议
+
+上面的模型只验证两个更新不丢失。换成第五篇的[有界任务池](/posts/concurrency/message-passing-workers-backpressure/#任务池复用执行单元)和第六篇的[任务收束](/posts/concurrency/async-concurrency-task-lifecycle/#综合示例失败或超时后收束任务)，需要把结果要求与终止条件一起写进场景：
+
+| 场景 | 要观察的性质 |
+| ---- | ------------ |
+| 正常处理 | 已接受任务各产生约定结果；不因完成顺序不同而误判失败 |
+| 输入超过队列容量 | 等待或拒绝发生在约定入口；队列之外没有无限增长的提交任务 |
+| 下游停止接收 | 发送方能观察断连或取消，负责等待它的任务也能结束 |
+| worker 失败 | 错误传给所有者，剩余工作按约定继续、取消或退回，不依赖那个 worker 才能退出 |
+| 请求超时 | 区分停止等待、请求取消与任务结束；外部副作用仍按业务协议确认 |
+| 关停与提交交错 | 接纳边界清楚，已接受工作有归属，最终等待执行单元结束 |
+
+构造这些场景时，应控制关键事件，而不只重复运行正常程序。例如用屏障让两个线程都取得第一把锁，用通道确认 worker 已开始处理，再制造失败或下游断连；检查的是指定交错下的结果和退出路径。仅让测试进程等到超时，可以发现“未及时返回”，但不能单凭超时定位死锁，也不能把测试超时当作被测任务已经回收。
+
+还要区分终态断言与过程不变量：最终结果数量正确，不足以证明没有重复执行、暂时超额接纳或遗留后台任务。对有容量与生命周期要求的组件，还需在入队、领取、完成、取消和退出等状态转换处检查相应约束。loom 适合探索经过建模的小协议；包含真实 I/O 的组件仍需针对真实接口做故障和退出验证，不能从一个模型测试推广为全部运行路径的证明[^9]。
 
 ## 总结
 
-- 排除数据竞争只是基础，还需证明组合操作维护不变量、必要顺序已经建立。
+- 排除数据竞争只是基础，还需证明组合操作维护不变量、必要顺序已经建立；线性化点连接单次原子操作与完整操作的语义。
 - 固定加锁顺序可以排除循环等待；try-lock 必须配合释放与重试，且仍需考虑活锁和饥饿。
 - 死锁影响等待环中的参与者，不要求整个进程停止；活锁与饥饿也不能只根据 CPU 是否忙碌判断。
 - 公平性与优先级继承取决于具体实现；检测工具与模型测试也都有各自的覆盖边界。
@@ -231,7 +269,7 @@ loom 可以探索到这样的交错：A 读到 0，B 也读到 0，A 写入 1，
 ## 延伸阅读
 
 - [OSTEP: Concurrency Bugs](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-bugs.pdf)——结合原始案例继续理解并发缺陷的分类与预防
-- 标准库 Rust 示例可以放到 [Rust Playground](https://play.rust-lang.org) 运行；死锁示例会等待不返回，需要手动终止。loom 示例是依赖该库的测试，需在支持 loom 的测试环境中执行
+- 标准库 Rust 示例可以放到 [Rust Playground](https://play.rust-lang.org) 运行；死锁示例会等待不返回，需要手动终止。loom 的本地测试入口见[并发缺陷的排查](#并发缺陷的排查)
 
 [^1]: [C++ 标准草案：Data races](https://eel.is/c++draft/intro.races)与[Rust Reference：未定义行为](https://doc.rust-lang.org/reference/behavior-considered-undefined.html)——数据竞争的判定与未定义行为边界
 
@@ -249,8 +287,10 @@ loom 可以探索到这样的交错：A 读到 0，B 也读到 0，A 写入 1，
 
 [^8]: [Clang: ThreadSanitizer](https://clang.llvm.org/docs/ThreadSanitizer.html)——插桩方式、数据竞争检测与工具限制
 
-[^9]: [loom 文档](https://docs.rs/loom/latest/loom/)——并发模型探索、同步类型替换，以及规模与 Relaxed 内存序的覆盖限制
+[^9]: [loom 0.7.2 文档](https://docs.rs/loom/0.7.2/loom/)——并发模型探索、同步类型替换，以及规模与 Relaxed 内存序的覆盖限制
 
 [^10]: [Rust `Mutex::lock`](https://doc.rust-lang.org/std/sync/struct.Mutex.html#method.lock)与[C++ 标准草案：`mutex`](https://eel.is/c++draft/thread.mutex.class)——同线程重复加锁在 Rust 中不会正常返回，以及 C++ 非递归 mutex 的调用前提
+
+[^12]: Maurice P. Herlihy & Jeannette M. Wing, [Linearizability: A Correctness Condition for Concurrent Objects](https://cs.brown.edu/~mph/HerlihyW90/p463-herlihy.pdf), ACM TOPLAS 12(3), 1990——操作在调用与返回之间生效的顺序解释、非重叠调用的先后约束，以及依据对象规格判断并发执行的方法
 
 [^11]: E. G. Coffman Jr., M. J. Elphick, A. Shoshani, [System Deadlocks](https://uobdv.github.io/Design-Verification/Supplementary/System_Deadlocks-Four_necessary_and_sufficient_conditions_for_deadlock.pdf), ACM Computing Surveys 3(2), 1971——死锁必要条件，以及单实例与多实例资源模型中环判据的不同边界

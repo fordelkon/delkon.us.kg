@@ -1,11 +1,13 @@
 ---
 title: "并发编程（六）：异步并发与任务的生命周期"
-description: "解释 Future、Waker 与执行器如何配合，区分 I/O 就绪与完成通知，讨论 Future 丢弃、任务取消、超时和结构化并发，并说明阻塞工作的处理边界。"
+description: "解释 Future、Waker、执行器与 I/O 通知，结合消息归属讨论取消安全，区分请求期限、任务收束与外部副作用，并说明阻塞工作的边界。"
 publishDate: "17 Oct 2026"
 tags: ["concurrency", "async", "rust", "go"]
 ---
 
 上一篇[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/)讨论了消息流动与提前退出。本篇回到第一篇的[协作式并发](/posts/concurrency/parallelism-execution-units/#协作式并发)：等待中的异步任务由谁继续驱动，调用方放弃结果以后，任务又该怎样结束？示例以 Rust 和 Tokio 为主，取消部分用 Go context 作对照。
+
+阅读时可以沿两条线索展开：理解异步计算怎样运行，先读 [Future、Waker 与执行器](#futurewaker-与执行器)和 [I/O 通知模型](#io-就绪与完成通知)；处理任务怎样退出，重点读[取消与超时](#取消与超时)和[结构化并发与任务收束](#结构化并发与任务收束)。最后的[公平性与阻塞工作](#公平性与阻塞工作)补充运行时的限制：长时间不交还执行权的任务既会影响调度，也会拖延取消与收尾。
 
 ## Future、Waker 与执行器
 
@@ -167,8 +169,60 @@ async fn main() {
 | Tokio 操作                                             | 取消后重新等待的影响                             |
 | ------------------------------------------------------ | ------------------------------------------------ |
 | `mpsc::Receiver::recv`、`TcpListener::accept`          | 文档保证取消安全，不会因中止等待而丢掉消息或连接 |
+| `mpsc::Sender::send(value)`                          | 未完成的发送被取消时，消息未发送，但 value 会被丢弃 |
+| `mpsc::Sender::reserve`                              | 取消后失去排队位置；待发送的 value 可保留在外层 |
 | `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` | 可能已部分读写，重新开始不能假定从未发生过       |
 | `Mutex::lock`、`Semaphore::acquire`                    | 会失去在公平等待队列中的位置                     |
+
+`send(value)` 已把 value 移入发送 Future：在 `select!` 中另一个分支胜出时，没有发送消息，并不表示调用方还能取回这个 value。若取消后需要保留它以便重试，可以把 value 留在 `select!` 外层，让分支只等待 `tx.reserve()`，取得许可后再调用 `permit.send(value)`。这样被取消的是容量预约，value 仍由外层持有；但 `reserve` 被取消也会失去公平队列中的位置，重试需要重新排队[^25]。
+
+下面用完整程序区分“取消等待”与“丢掉待发送值”。先填满容量为 1 的通道，使 `reserve()` 无法立即完成，再用已经就绪的取消信号结束等待；之后分别检查成功发送与接收端关闭的路径。示例不需要用睡眠猜测任务何时到达等待点：
+
+```rust
+use std::future::{pending, ready, Future};
+use tokio::sync::mpsc;
+
+async fn send_or_return(
+    tx: &mpsc::Sender<String>,
+    value: String,
+    cancel: impl Future<Output = ()>,
+) -> Result<(), String> {
+    tokio::select! {
+        _ = cancel => Err(value),
+        result = tx.reserve() => match result {
+            Ok(permit) => {
+                permit.send(value);
+                Ok(())
+            }
+            Err(_) => Err(value),
+        },
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let (tx, mut rx) = mpsc::channel(1);
+    tx.send(String::from("occupied")).await.unwrap();
+
+    let value = String::from("next");
+    let value = send_or_return(&tx, value, ready(())).await.unwrap_err();
+    assert_eq!(value, "next");
+    assert_eq!(rx.recv().await.as_deref(), Some("occupied"));
+
+    send_or_return(&tx, value, pending()).await.unwrap();
+    assert_eq!(rx.recv().await.as_deref(), Some("next"));
+
+    rx.close();
+    let value = String::from("unsent");
+    let value = send_or_return(&tx, value, pending()).await.unwrap_err();
+    assert_eq!(value, "unsent");
+    println!("cancelled and closed sends returned their values");
+}
+```
+
+这里的 `Err(value)` 仅表示未通过此函数发送，示例将取消与通道关闭合并为同一种返回；业务接口可再区分原因。`Ok(())` 仍只表示已发送，不表示对端处理完成。如果容量与取消信号同时就绪，`select!` 可能选择发送；先预约容量保护的是 value 的归属，并未让取消成为禁止发送的原子屏障。取得许可后到 `permit.send(value)` 之间没有 `.await`，也没有把消息再移入一个可能被丢弃的发送 Future[^25]。
+
+这个保证还依赖调用方继续等待 `send_or_return` 返回。若其父任务直接丢弃整个函数 Future，函数持有的 value 仍会随之析构；需要跨父任务取消保留消息时，应把消息或恢复责任放在生命周期更长的所有者中。
 
 失去排队位置与丢掉消息不同：锁或许可本来就没有拿到，反复取消再重试可能让任务在公平队列中迟迟轮不到——这正是[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/concurrency/deadlock-livelock-correctness/#活锁与饥饿)讨论的饥饿在取消协议下的形态。这里的取消语义也不同于第五篇的[通道结束](/posts/concurrency/message-passing-workers-backpressure/#提前退出与取消)：全部发送端丢弃且缓冲已取空后，Tokio 的 `mpsc::Receiver::recv()` 返回 `None` 表示通道结束，而 select 丢弃未完成分支只是让这个等待中的 Future 消亡。
 
@@ -252,11 +306,15 @@ async fn main() {
 
 启动多个任务时，同样需要决定成功、失败与关停三条路径如何等待所有任务。只在正常路径逐个 `await`，还不足以保证父任务被取消时自动完成结构化清理。
 
-Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃。直接组合并拥有这些 Future 时，丢弃可以停止它们继续推进；若分支持有的是 JoinHandle，丢弃句柄不会中止后台任务，若借用外部 Future，也不会销毁被借用的计算[^10]。`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束；`tokio_util` 的 `TaskTracker` 不中止任务，配合 `close` 与 `wait` 等待全部登记任务退出，适合优雅关停[^18]。
+Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `Err` 时立即返回，未完成的分支随宏返回被丢弃。直接组合并拥有这些 Future 时，丢弃可以停止它们继续推进；若分支持有的是 JoinHandle，丢弃句柄不会中止后台任务，若借用外部 Future，也不会销毁被借用的计算[^10][^18]。
+
+`JoinSet` 把 `spawn` 出的任务登记成组，丢弃时请求中止尚未结束的任务，但不等待清理完成；需要确认退出时，可用 `shutdown().await` 请求中止并等待收束。它相当于先 `abort_all()`，再循环 `join_next()` 直到集合为空，并会忽略收束期间子任务的 panic[^18]。
+
+`tokio_util` 的 `TaskTracker` 则负责登记和等待，不主动中止任务。`close()` 只是允许 `wait()` 在 tracker 同时关闭且为空时完成；它不阻止之后继续登记任务，也不通知已有任务退出。一套完整的关停协议仍需由所有者关闭新工作入口、协调其他可能派生任务的入口，通过 `CancellationToken` 等机制通知已有任务停止并完成善后，再配合 `close()` 与 `wait().await` 等待登记任务退出。否则，某次等待完成并不表示之后不会再出现新任务[^26]。
 
 ### 综合示例：失败或超时后收束任务
 
-下面用 JoinSet 管理两项工作，用信号量许可代表需要释放的资源。工作函数包含模拟 I/O，也允许返回业务错误；`run` 接收同一个总体期限，成功时收集全部结果，失败或超时时停止剩余任务并等待析构完成[^18]：
+下面用 JoinSet 管理两项工作，用信号量许可代表需要释放的资源。工作函数包含模拟 I/O，也允许返回业务错误；`run` 用同一个 budget 等待这一组任务的结果，成功时收集全部结果，失败或超时时停止剩余任务并等待析构完成。budget 只约束结果等待阶段，之后的 `shutdown().await` 收尾耗时另计，因此它不是整个 `run` 的总耗时上限[^11][^18]：
 
 ```rust
 use std::sync::Arc;
@@ -309,9 +367,17 @@ async fn main() {
 }
 ```
 
-把 `should_fail` 改为 true 可观察业务失败路径，缩短 budget 可观察超时路径；时间预算不是确定复现某种调度的工具，运行环境也可能让正常工作超时。任务完成顺序不固定，示例只在输出前排序。每条返回路径都会经过 `shutdown().await`，之后许可数量恢复；`shutdown` 会忽略收束期间子任务的 panic，若需要逐一记录这些错误，应显式 abort 后循环接收结果。
+把 `should_fail` 改为 true 可观察业务失败路径，缩短 budget 可观察超时路径；时间预算不是确定复现某种调度的工具，运行环境也可能让正常工作超时。任务完成顺序不固定，示例只在输出前排序。每条返回路径都会经过 `shutdown().await`，之后许可数量恢复；收尾本身没有这里的 budget 限制，仍依赖任务及时交还执行权。`shutdown` 会忽略收束期间子任务的 panic，若需要逐一记录这些错误，应显式 abort 后循环接收结果[^18]。
 
 这里等待的是任务持有值的同步析构，不包含异步资源善后，也不会撤销已经发生的外部副作用。若 `run` 本身被父任务丢弃，JoinSet 的析构只请求中止，不能执行后面的异步等待；需要更外层的所有者负责关停与收束。这个例子因此明确了成功、业务失败和超时三条路径，并没有声称任意父级取消都能自动清理完毕。
+
+### 多阶段期限与关停责任
+
+结果等待预算、请求期限和关停预算是不同的边界。一个请求若依次经历排队、获取连接和远程调用，每一阶段都重新等待完整的 1 秒，整个请求就可能远超 1 秒。需要统一请求期限时，可以在入口确定绝对 deadline，并将同一个时刻传给后续阶段，例如用 `timeout_at` 等待；后续阶段只消费剩余时间，而不重新获得一份完整预算。绝对期限也不能强制抢占长时间不返回的 `poll`[^11]。
+
+期限到了以后，已有工作怎样结束仍需单独规定。第五篇的[关停协议](/posts/concurrency/message-passing-workers-backpressure/#关停时怎样处置已接受的工作)先明确接纳边界和排空或取消策略；异步所有者还需保持存活，接收错误、发出停止请求并等待任务退出。若应用另设收尾期限，超期后必须明确未结束工作的归属和处置。再给 `shutdown()` 套一层 timeout，只能限制这一轮等待，不会证明任务已经结束。
+
+因此，客户端停止等结果、工作被请求取消、任务实际结束和外部副作用得到确认，应分别记录。客户端超时后，可以由服务级所有者继续等待任务并报告最终状态；对于已经交付外部系统的操作，还需按业务协议确认结果或做补偿，不能把本地 JoinHandle 的取消状态当成远端没有执行的证据。
 
 ## 公平性与阻塞工作
 
@@ -379,7 +445,7 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 
 [^10]: [Tokio task：Cancellation](https://docs.rs/tokio/latest/tokio/task/#cancellation)与[`JoinHandle`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html)——任务取消时机、句柄丢弃、abort 与等待结束
 
-[^11]: [Tokio `timeout`](https://docs.rs/tokio/latest/tokio/time/fn.timeout.html)——超时返回、内部 Future 的取消与非让出操作的限制
+[^11]: [Tokio 1.53.3 `timeout`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout.html)与[`timeout_at`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout_at.html)——相对时长与绝对期限、超时返回、内部 Future 的取消与非让出操作的限制
 
 [^12]: [Tokio `select!`](https://docs.rs/tokio/latest/tokio/macro.select.html)——分支生命周期、取消安全、默认与 biased 轮询顺序
 
@@ -393,7 +459,7 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 
 [^17]: [Tokio `spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)与[`Builder::max_blocking_threads`](https://docs.rs/tokio/latest/tokio/runtime/struct.Builder.html#method.max_blocking_threads)——阻塞线程池默认上限 512、CPU 工作限制与无法中断已开始闭包的边界
 
-[^18]: [Tokio `try_join!`](https://docs.rs/tokio/latest/tokio/macro.try_join.html)、[`JoinSet`](https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html)与[tokio-util 的 `TaskTracker`](https://docs.rs/tokio-util/latest/tokio_util/task/struct.TaskTracker.html)——一败俱停的分支组合、丢弃即中止的分组任务与优雅关停的等待接口
+[^18]: [Tokio `try_join!`](https://docs.rs/tokio/latest/tokio/macro.try_join.html)与[Tokio 1.53.3 `JoinSet::shutdown`](https://docs.rs/tokio/1.53.3/tokio/task/struct.JoinSet.html#method.shutdown)——一败俱停的分支组合；JoinSet 丢弃时请求中止任务，shutdown 则请求中止并等待集合清空，忽略收束期间子任务的 panic
 
 [^19]: [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)——两次 `.await` 之间 10–100 微秒的参考预算，及其“取决于应用”的限定
 
@@ -406,3 +472,7 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 [^23]: [Tokio `spawn`](https://docs.rs/tokio/latest/tokio/task/fn.spawn.html)——Future 及输出的 Send 与 static 约束，以及跨 await 保存状态的要求
 
 [^24]: [Tokio `LocalSet`](https://docs.rs/tokio/latest/tokio/task/struct.LocalSet.html)与[`spawn_local`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_local.html)——同线程非 Send 任务、本地上下文和 static 约束
+
+[^25]: [Tokio 1.53.3 `Sender::send`](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/struct.Sender.html#method.send)与[`Sender::reserve`](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/struct.Sender.html#method.reserve)——send 被 select 取消时消息未发送但 value 被丢弃；先预约容量可让 value 保留在外层，取消预约仍会失去排队位置
+
+[^26]: [tokio-util 0.7.20 `TaskTracker::close`](https://docs.rs/tokio-util/0.7.20/tokio_util/task/struct.TaskTracker.html#method.close)与[`TaskTracker::wait`](https://docs.rs/tokio-util/0.7.20/tokio_util/task/struct.TaskTracker.html#method.wait)——close 不阻止登记新任务，wait 以关闭且为空作为完成条件；配合 CancellationToken 分担停止通知与等待退出的责任

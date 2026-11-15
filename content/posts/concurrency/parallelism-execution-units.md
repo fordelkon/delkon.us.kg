@@ -1,6 +1,6 @@
 ---
 title: "并发编程（一）：并发、并行与执行单元"
-description: "并发不等于并行。系列第一篇从任务与执行单元出发，区分抢占式与协作式两种调度模型，并通过错误示例识别数据竞争，为后续同步与消息传递篇目铺垫。"
+description: "区分并发、并行、执行单元与调度模型，讨论任务粒度、负载均衡和并行成本，再通过错误示例识别数据竞争。"
 publishDate: "2 Sep 2026"
 tags: ["concurrency", "async", "rust", "go"]
 ---
@@ -225,7 +225,7 @@ async fn main() {
 
 `join!` 把两个 Future 分支放在同一个任务中轮询，并不创建新任务或并行线程[^6]。Future 可以先理解为保存异步计算进度的对象；执行器轮询任务，任务内部再轮询这些分支。`yield_now().await` 让当前分支暂时返回 `Pending`，`join!` 因而有机会推进另一分支。只有外层任务也返回 `Pending`，执行权才交还执行器；组合器可能使一次让出无法一直向上传播。第六篇会展开[Future 与任务的关系](/posts/concurrency/async-concurrency-task-lifecycle/#future由-poll-推进的计算)。
 
-删掉两处 `yield_now().await` 后，每个分支都能在一次轮询中运行到底，因此会看到一整段 `first task`，再看到一整段 `second task`。加上让出后，在 Tokio 1.53.3 的一次运行中得到如下交错；这里只截取前四行：
+删掉两处 `yield_now().await` 后，每个分支都能在一次轮询中运行到底，循环内部不再交错。这里不把哪个分支先执行作为接口保证；`join!` 默认会轮换优先轮询的分支，显式使用 `biased;` 才按源码顺序轮询[^6]。加上让出后，在 Tokio 1.53.3 的一次运行中得到如下交错；这里只截取前四行：
 
 ```text
 first task: 1
@@ -249,9 +249,37 @@ first task: 2
 | 主要风险 | 共享数据竞态，需同步保护         | 长计算或阻塞调用卡住整个线程；await 点之间的竞态条件仍需处理 |
 | 适合场景 | CPU 密集型、需要真并行           | 大量 I/O 等待、高并发连接                                    |
 
+## 并行任务的划分与成本
+
+多个线程能够同时执行，只是加速的前提。还需看任务之间有多少依赖、工作怎样分配，以及协调花费了多少时间。以处理一批数据为例，如果读取输入、汇总输出必须串行，只有中间计算可以分摊，那么增加线程只能缩短中间部分。
+
+**阿姆达尔定律**（Amdahl's law）刻画固定工作量下的这种限制：假设原来 20% 的执行时间不能并行，另外 80% 可以理想分摊到四个执行单元，耗时也只能降到原来的 40%，加速为 2.5 倍；即使可并行部分耗时趋近于零，也仍留下原来的 20%。这是忽略额外开销的理想模型，不能把它当成实际性能承诺；增大输入规模时，各部分占比也可能改变[^11]。
+
+### 任务粒度与负载均衡
+
+把每个元素都分成一个任务，和把整批数据只分成两个任务，会面临不同的成本：
+
+| 划分方式 | 可能的收益 | 主要限制 |
+| -------- | ---------- | -------- |
+| 少量大块 | 创建、派发与汇总次数少，容易保留连续访问 | 各块耗时不均时，先完成的执行单元会空闲 |
+| 大量小块 | 工作可以持续分摊，较容易吸收任务耗时差异 | 排队、唤醒、同步和任务管理可能占去更多时间 |
+| 分块计算后局部汇总 | 减少对共享计数器或输出容器的频繁访问 | 最终合并仍有成本，结果顺序与数值语义也需保持 |
+
+**任务粒度**（granularity）描述每次派发承担多少工作；**负载均衡**（load balancing）关注这些工作是否让执行单元都得到有效利用。等量数据不一定对应等量计算：解析不同复杂度的记录、搜索不同深度的子树，都可能产生不均衡。动态领取任务可以改善分配，但不能消除算法中的依赖，也不保证比静态分块更快[^11]。
+
+这一点会连接到第五篇的[任务池](/posts/concurrency/message-passing-workers-backpressure/#任务池复用执行单元)：固定 worker 复用执行单元，队列提供领取工作的方式；任务仍需由算法划分，worker 数量与任务数量也不必相同。
+
+### 性能测量回答什么
+
+并行计算通常比较同一输入下的完成耗时；服务程序还要分别看吞吐量与请求延迟。每秒完成更多请求，不代表每个请求更快，过长的排队还可能恶化尾延迟，例如延迟分布的第 99 百分位（p99），而平均耗时未必能反映这些慢请求。第五篇会进一步区分[队列容量、处理能力与等待](/posts/concurrency/message-passing-workers-backpressure/#容量吞吐与等待时间)。
+
+比较实现前，应先固定工作量、编译优化、结果要求与计时边界；端到端耗时应包括该实现实际需要的创建、派发、同步和汇总，若只测计算内核则应明确范围。循环里的日志、首次初始化与多次运行的波动都可能掩盖差异。Playground 适合观察输出与协议行为，共享运行环境中的耗时不能单独支撑稳定的性能结论。第二篇的[锁粒度](/posts/concurrency/locks-condvars-shared-memory-sync/#临界区范围与锁的粒度)和第三篇的原子操作同样需要按实际争用分析，不能只比较接口名称。
+
 ## 数据竞争：一个可以精确定义的问题
 
 前面已经两次提到线程共享数据的风险，值得在系列开篇把这个问题说得精确一些。中文讨论里常笼统地称之为"竞态条件"，而并发文献里有一个定义明确、边界清晰的术语：**数据竞争**（data race）。
+
+下面把范围限定在普通线程的读写；完整的 C++ 冲突定义还涉及对象生命周期开始、结束与重叠存储，不在这里展开[^4]。
 
 [Go 内存模型](https://go.dev/ref/mem)给出的非正式定义是：对某个内存位置的写，与对同一位置的另一个读或写**并发发生**，就构成数据竞争——除非所有相关访问都是原子操作[^3]。C++ 标准走得更远：两个**潜在并发**（potentially concurrent）的冲突访问，若至少一个是写、至少一个不是原子操作，且相互之间没有建立 happens-before 关系，程序的行为就是**未定义行为**[^4]。happens-before 是语言用来刻画内存访问先后关系的偏序：同一线程中由语言保证的求值先后可以建立这种顺序，跨线程则要靠同步操作连接——细节留到第三篇的[跨线程同步与 happens-before](/posts/concurrency/atomics-memory-model/#跨线程同步与-happens-before)。
 
@@ -308,12 +336,14 @@ fn main() {
 
 [^5]: [Go 1.14 Release Notes: Runtime](https://go.dev/doc/go1.14#runtime)——goroutine 异步抢占的引入，说明用户态调度不等于只能协作式让出
 
-[^6]: [Tokio `join!`](https://docs.rs/tokio/latest/tokio/macro.join.html)与[`yield_now`](https://docs.rs/tokio/latest/tokio/task/fn.yield_now.html)——同任务内的并发轮询，以及让出执行权不保证固定调度顺序的边界
+[^6]: [Tokio 1.53.3 `join!`](https://docs.rs/tokio/1.53.3/tokio/macro.join.html)与[`yield_now`](https://docs.rs/tokio/1.53.3/tokio/task/fn.yield_now.html)——同任务内的并发轮询，以及让出执行权不保证固定调度顺序的边界
 
 [^7]: [The Rust Reference: Behavior considered undefined](https://doc.rust-lang.org/reference/behavior-considered-undefined.html)——Rust 将数据竞争列为未定义行为，`unsafe` 不改变这一约束
 
 [^8]: [OSTEP ch4: The Abstraction: The Process](https://pages.cs.wisc.edu/~remzi/OSTEP/cpu-intro.pdf)——进程的地址空间、寄存器和 I/O 状态，以及 PCB 的作用；用于支撑抽象模型，不对应示意结构的精确字段
 
 [^9]: [OSTEP ch26: Concurrency: An Introduction](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-intro.pdf)——线程共享地址空间、各自保存执行上下文和栈，以及 TCB 的作用
+
+[^11]: [LLNL: Introduction to Parallel Computing](https://hpc.llnl.gov/documentation/tutorials/introduction-parallel-computing-tutorial)——固定工作量下的阿姆达尔定律、任务粒度、负载均衡、通信与同步成本，以及并行加速的测量范围
 
 [^10]: [The Rust Programming Language: Futures and the Async Syntax](https://doc.rust-lang.org/book/ch17-01-futures-and-syntax.html)与[Tokio 任务实现说明](https://docs.rs/tokio/latest/src/tokio/runtime/task/mod.rs.html)——前者说明 async 生成 Future，后者展示执行器维护的任务状态、引用计数与唤醒信息
