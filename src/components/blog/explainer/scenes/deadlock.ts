@@ -32,7 +32,7 @@ const frames = notes.map((note, step) => ({
 export const scene: Scene = {
 	diagram: `flowchart TB
  subgraph opposite[运行一：相反顺序]
- direction LR
+ direction RL
   a["A 持 L1"] -->|等 L2| b["B 持 L2"]
   b -->|等 L1| a
  end
@@ -40,7 +40,8 @@ export const scene: Scene = {
  direction LR
   first["A：L1 → L2"] -->|释放后| second["B：L1 → L2"]
  end
- opposite ~~~ ordered
+ opposite --- ordered
+ linkStyle 3 stroke:none
 `,
 	title: "相反顺序与统一顺序",
 	caption: "各持一锁、互等另一锁，就形成等待环；统一加锁顺序，让持锁者能先完成并释放。",

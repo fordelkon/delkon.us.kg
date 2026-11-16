@@ -1,56 +1,38 @@
-import { renderMermaid } from "@mermaid-js/mermaid-cli";
-import puppeteer from "puppeteer";
-import themeCSS from "./mermaid-theme.css?raw";
+import { renderMermaidSVG } from "beautiful-mermaid";
 import type { Scene } from "./scenes/types";
 
-// Build-time only: the browser receives SVG and the existing small playback script.
-export async function renderScene(id: string, scene: Scene): Promise<string[]> {
-	const browser = await puppeteer.launch({ headless: true });
+// Build-time only: rendering needs neither a browser nor system font libraries.
+export function renderScene(id: string, scene: Scene): string[] {
+	return scene.frames.map((frame, index) => {
+		const highlights = frame.activeNodes?.length
+			? `class ${frame.activeNodes.join(",")} active`
+			: "";
 
-	try {
-		const frames: string[] = [];
+		const edges =
+			frame.activeEdges
+				?.map((edge) => `linkStyle ${edge} stroke:var(--color-printer-accent),stroke-width:2.5px`)
+				.join("\n") ?? "";
 
-		for (const [index, frame] of scene.frames.entries()) {
-			const highlights = frame.activeNodes?.length
-				? `class ${frame.activeNodes.join(",")} active;`
-				: "";
+		const svg = renderMermaidSVG(
+			`${scene.diagram}\nclassDef active stroke:var(--color-printer-accent),stroke-width:2px,color:var(--color-printer-accent)\n${highlights}\n${edges}`,
+			{
+				bg: "var(--color-printer-paper)",
+				fg: "var(--color-printer-ink)",
+				font: "PingFang SC",
+				transparent: true,
+				padding: 8,
+				nodeSpacing: 16,
+				layerSpacing: 20,
+			},
+		);
 
-			const edges =
-				frame.activeEdges?.map((edge) => `linkStyle ${edge} stroke-width:3px;`).join("\n") ?? "";
+		const prefix = `${id}-${index}`;
 
-			const { data } = await renderMermaid(
-				browser,
-				`${scene.diagram}\n${highlights}\n${edges}`,
-				"svg",
-				{
-					backgroundColor: "transparent",
-					fontEmbed: false,
-					svgId: `${id}-${index}`,
-					mermaidConfig: {
-						startOnLoad: false,
-						securityLevel: "strict",
-						theme: "neutral",
-						look: "classic",
-						htmlLabels: false,
-						themeCSS,
-						fontFamily: '"Noto Sans CJK SC", "PingFang SC", sans-serif',
-						flowchart: {
-							htmlLabels: false,
-							curve: "linear",
-							nodeSpacing: 16,
-							rankSpacing: 20,
-							minNodeWidth: 40,
-							padding: 8,
-						},
-					},
-				},
-			);
-
-			frames.push(new TextDecoder().decode(data));
-		}
-
-		return frames;
-	} finally {
-		await browser.close();
-	}
+		// The library emits global CSS and remote font imports. Site CSS owns both.
+		// Namespace markers because every animation frame is inlined in one document.
+		return svg
+			.replace(/<style>[\s\S]*?<\/style>/g, "")
+			.replace(/ id="([^"]+)"/g, ` id="${prefix}-$1"`)
+			.replace(/url\(#([^)]+)\)/g, `url(#${prefix}-$1)`);
+	});
 }

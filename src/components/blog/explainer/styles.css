@@ -1,3 +1,5 @@
+@import "./mermaid-theme.css";
+
 .step-explainer {
 	--explainer-width: 22.5rem;
 	margin: 0 0 var(--receipt-section-gap, 2rem);
@@ -191,7 +193,8 @@
 .explainer-mermaid svg {
 	display: block;
 	max-height: 24rem;
-	width: 100%;
+	max-width: 100%;
+	width: auto;
 	height: auto;
 	margin-inline: auto;
 }

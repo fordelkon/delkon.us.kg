@@ -10,7 +10,7 @@ interface Props {
 const { scene: sceneId } = Astro.props;
 const scene = getScene(sceneId);
 const { caption, description } = scene;
-const svgs = scene.diagram ? await renderScene(sceneId, scene) : undefined;
+const svgs = scene.diagram ? renderScene(sceneId, scene) : undefined;
 let elapsedMs = 0;
 
 const frames = scene.frames.map((frame) => {

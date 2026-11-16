@@ -1,52 +1,28 @@
-marker path {
-	fill: var(--color-printer-ink-light);
+.explainer-mermaid {
+	--_text: var(--color-printer-ink);
+	--_text-sec: var(--color-printer-ink);
+	--_line: var(--color-printer-ink-light);
+	--_arrow: var(--color-printer-ink-light);
+	--_node-fill: var(--color-printer-paper);
+	--_node-stroke: var(--color-printer-ink-light);
+	--_group-fill: transparent;
+	--_group-hdr: transparent;
+	--_inner-stroke: transparent;
 }
-/* Mermaid appends and scopes these rules after its generated theme. */
-.node rect,
-.node polygon,
-.node path {
-	fill: var(--color-printer-paper);
-	stroke: var(--color-printer-ink-light);
+.explainer-mermaid text {
+	font-family: "Noto Sans CJK SC", "PingFang SC", sans-serif;
+	font-weight: 400;
 }
-.node rect {
+.explainer-mermaid .node text {
+	font-size: 16px;
+}
+.explainer-mermaid .node rect {
 	rx: 3px;
+	ry: 3px;
 }
-text,
-.nodeLabel,
-.edgeLabel,
-.edgeLabel text,
-.edgeLabel tspan,
-.node text,
-.node tspan,
-.cluster-label text {
-	color: var(--color-printer-ink);
-	fill: var(--color-printer-ink);
-}
-.cluster rect {
-	fill: transparent;
-	stroke: var(--color-printer-ink-light);
+.explainer-mermaid .subgraph > rect {
 	stroke-dasharray: 3 4;
 }
-.flowchart-link {
-	stroke: var(--color-printer-ink-light);
-}
-.edgeLabel rect {
-	fill: var(--color-printer-paper);
-}
-.node.active rect,
-.node.active polygon,
-.node.active path {
-	stroke: var(--color-printer-accent);
-	stroke-width: 2px;
-}
-.node.active .nodeLabel,
-.node.active text,
-.node.active tspan {
-	fill: var(--color-printer-accent);
-	color: var(--color-printer-accent);
-}
-
-/* linkStyle emits inline widths; color remains responsive to the site theme. */
-.flowchart-link[style*="stroke-width:3px"] {
-	stroke: var(--color-printer-accent);
+.explainer-mermaid .subgraph > rect:nth-child(2) {
+	display: none;
 }
