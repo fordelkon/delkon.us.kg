@@ -41,7 +41,7 @@ export const scene: Scene = {
  runnable["可运行"] -->|poll| running["执行中"]
  running -->|内部 Pending| waiting["等待中"]
  waiting -->|wake| runnable
- running -->|内部 Ready| ready["继续 await 之后"]
+ running -->|内部 Ready| ready["await 后继续"]
 `,
 	title: "唤醒不等于就绪",
 	caption: "Pending 时保存状态、交还线程；wake 只请求重轮询，Ready 才让等待继续。",

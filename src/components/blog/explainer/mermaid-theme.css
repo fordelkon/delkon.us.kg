@@ -9,12 +9,8 @@
 	--_group-hdr: transparent;
 	--_inner-stroke: transparent;
 }
-.explainer-mermaid text {
-	font-family: "Noto Sans CJK SC", "PingFang SC", sans-serif;
-	font-weight: 400;
-}
 .explainer-mermaid .node text {
-	font-size: 16px;
+	font-size: var(--explainer-node-font-size);
 }
 .explainer-mermaid .node rect {
 	rx: 3px;

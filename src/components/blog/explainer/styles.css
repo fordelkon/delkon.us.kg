@@ -2,7 +2,10 @@
 
 .step-explainer {
 	--explainer-width: 22.5rem;
-	margin: 0 0 var(--receipt-section-gap, 2rem);
+	--explainer-node-font-size: 16px;
+	--explainer-copy-font-size: 0.8125rem;
+	--explainer-copy-line-height: 1.7;
+	margin: 0 0 var(--receipt-section-gap);
 	padding: 0;
 	color: var(--color-printer-ink);
 }
@@ -26,8 +29,8 @@
 	max-width: 32em;
 	margin: 1rem auto 0;
 	color: var(--color-printer-ink-light);
-	font-size: 0.8125rem;
-	line-height: 1.7;
+	font-size: var(--explainer-copy-font-size);
+	line-height: var(--explainer-copy-line-height);
 	text-align: center;
 	text-wrap: pretty;
 }
@@ -101,10 +104,6 @@
 	animation-name: step-explainer-final;
 	animation-fill-mode: forwards;
 }
-.step-explainer-frame .step-explainer-active {
-	color: var(--color-printer-accent);
-	font-weight: 700;
-}
 .step-explainer-canvas[data-paused] .step-explainer-frame {
 	animation-play-state: paused;
 }
@@ -137,14 +136,18 @@
 	}
 }
 
+.explainer-diagram,
+.explainer-mermaid text {
+	font-family: var(--font-mono);
+	font-weight: var(--font-weight-normal);
+}
 .explainer-diagram {
 	width: 100%;
 	max-width: var(--explainer-width);
 	height: auto;
 	display: block;
 	margin-inline: auto;
-	font-family: "Noto Sans CJK SC", "PingFang SC", sans-serif;
-	font-size: 16px;
+	font-size: var(--explainer-node-font-size);
 }
 .explainer-node {
 	color: var(--color-printer-ink);
@@ -156,9 +159,6 @@
 }
 .explainer-node text {
 	fill: currentColor;
-}
-.explainer-detail {
-	font-size: 16px;
 }
 .explainer-node.is-active {
 	color: var(--color-printer-accent);
@@ -182,8 +182,8 @@
 .explainer-note {
 	max-width: 34em;
 	margin: 0.75rem auto;
-	font-size: 0.8125rem;
-	line-height: 1.7;
+	font-size: var(--explainer-copy-font-size);
+	line-height: var(--explainer-copy-line-height);
 	text-align: center;
 }
 .explainer-mermaid {
@@ -200,15 +200,15 @@
 }
 
 .step-explainer-transcript {
-	margin: 0.75rem 0 0;
+	margin: var(--receipt-heading-gap) 0 0;
 	text-align: start;
-	font-size: 0.8125rem;
-	line-height: 1.7;
+	font-size: var(--explainer-copy-font-size);
+	line-height: var(--explainer-copy-line-height);
 }
 .step-explainer-transcript summary {
 	min-height: 2.75rem;
 	margin-inline-start: 1.5rem;
-	padding-block: 0.625rem;
+	padding-block: var(--receipt-row-padding);
 	list-style-position: outside;
 	cursor: pointer;
 }

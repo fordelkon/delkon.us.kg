@@ -18,7 +18,6 @@ export function renderScene(id: string, scene: Scene): string[] {
 			{
 				bg: "var(--color-printer-paper)",
 				fg: "var(--color-printer-ink)",
-				font: "PingFang SC",
 				transparent: true,
 				padding: 8,
 				nodeSpacing: 16,
