@@ -144,13 +144,17 @@ assert_eq!(PAYLOAD.load(Ordering::Relaxed), 42);
 
 用这套语言重画发布程序：
 
-```text
-线程 A                             线程 B
-PAYLOAD.store(42, Relaxed)
-    │ sequenced-before
-READY.store(true, Release) ────────→ READY.load(Acquire) 读到这次 true
-                  synchronizes-with    │ sequenced-before
-                                   PAYLOAD.load(Relaxed) 得到 42
+```mermaid mobile-direction="TB" title="Release/Acquire 发布链" description="实线是线程内顺序（sequenced-before）；虚线是读到本次发布后建立的 synchronizes-with。两类边串成 happens-before；本例发布后不再改写 PAYLOAD，所以最后读取只能得到 42。"
+flowchart LR
+ subgraph writer[线程 A]
+  direction TB
+  write["写 PAYLOAD = 42<br/>Relaxed"] -->|sequenced-before| release["写 READY = true<br/>Release"]
+ end
+ subgraph reader[线程 B]
+  direction TB
+  acquire["读 READY：Acquire<br/>观察到本次 true"] -->|sequenced-before| read["读 PAYLOAD：Relaxed<br/>得到 42"]
+ end
+ release -.->|synchronizes-with| acquire
 ```
 
 **关键是读到了哪一次写入，而不是只给两个操作贴上 `Release`、`Acquire` 标签。** 如果 `Acquire` 读到的仍是初始的 `false`，就没有从这次发布建立同步边。更一般的规则还允许通过 `Release` 开头的连续原子读改写形成**释放序列**（release sequence）；这里先只讨论直接读到发布值的情况[^5]。
@@ -228,13 +232,17 @@ fn unlock() {
 
 把临界区的数据访问接到加锁与解锁两端，就得到完整链路：
 
-```text
-线程 A（持锁）                          线程 B（自旋）
-修改共享状态
-    │ 线程内顺序
-unlock: store(false, Release) ────────→ lock: CAS 成功，读到 false
-                   synchronizes-with       │ 线程内顺序
-                                           读取共享状态，可见 A 的修改
+```mermaid mobile-direction="TB" title="自旋锁的发布与接收" description="B 的 Acquire CAS 成功，并读到 A 解锁时写入的 false，才接上这条同步边。CAS 失败只会继续重试，不取得访问受保护数据的资格。"
+flowchart LR
+ subgraph owner[线程 A：持锁]
+  direction TB
+  write["修改共享状态"] -->|线程内顺序| unlock["unlock：写 false<br/>Release"]
+ end
+ subgraph successor[线程 B：接手锁]
+  direction TB
+  lock["CAS 成功：Acquire<br/>读到 A 释放的 false"] -->|线程内顺序| read["读取共享状态<br/>可见 A 的修改"]
+ end
+ unlock -.->|synchronizes-with| lock
 ```
 
 前文说“解锁的作用接近 `Release`、成功加锁接近 `Acquire`”——自旋锁里这两个“接近”就是字面本身：标准锁的解锁与后续成功加锁规定的正是这类同步边[^24]。
@@ -334,13 +342,17 @@ fn config() -> &'static str {
 
 以第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)为例，一个线程先修改状态、再解锁，另一个线程成功获取同一把锁后读取状态。C++ 标准明确规定，同一互斥锁的解锁与后续取得所有权的加锁同步；Go 内存模型也规定了相应的解锁到加锁顺序[^24]。把线程内顺序接上去，才得到数据写入到读取的顺序：
 
-```text
-线程 A                            线程 B
-修改共享状态
-    │ 线程内顺序
-释放锁 ─────────────────────────→ 成功获取同一把锁
-                  同步关系           │ 线程内顺序
-                                  读取共享状态
+```mermaid mobile-direction="TB" title="同一互斥锁上的同步链" description="A 释放锁与 B 随后成功获取同一把锁建立同步关系；接上两端的线程内顺序，才得到共享状态写入到读取的 happens-before。"
+flowchart LR
+ subgraph previous[线程 A]
+  direction TB
+  write["修改共享状态"] -->|线程内顺序| unlock["释放锁"]
+ end
+ subgraph next[线程 B]
+  direction TB
+  lock["成功获取同一把锁"] -->|线程内顺序| read["读取共享状态"]
+ end
+ unlock -.->|同一把锁上的同步关系| lock
 ```
 
 **同步边的成立有条件，不能只看两端都调用了同步接口。** 不同机制需要核对的条件不同：

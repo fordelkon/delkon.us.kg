@@ -64,6 +64,21 @@ For mathematical notation and formulas, read [mathematics](../.agents/skills/sit
 - Pick the language — C++, Rust, Go, or Python on this site — that carries the concept most clearly, instead of forcing one language across the series; when an example switches languages, the text states why.
 - Show a fix or refactor as a focused diff instead of re-pasting the whole file. Keep enough context to understand the change, and put a short explanation of the reason directly above it. Use the [code examples](../content/TEMPLATE-post.md#code-examples) for fence syntax and highlighting options.
 
+## Diagrams
+
+Use a `mermaid` fenced block for relationships or flows that benefit from a diagram. Include quoted `title` and `description` metadata: the title names the accessible graphic, and the description becomes its visible caption and text alternative. State the conditions behind arrows and distinguish causal order from elapsed time. Keep runnable examples and literal program output in their original code blocks.
+
+````markdown
+```mermaid title="Data publication" description="The acquire must observe the release write before the later data read is ordered after publication."
+flowchart TB
+ write["Write data"] --> publish["Release"]
+ publish -.->|observed by| receive["Acquire"]
+ receive --> read["Read data"]
+```
+````
+
+The build renders diagrams with beautiful-mermaid using the shared site theme. Wide diagrams scroll within their container instead of reducing labels to an unreadable size. An `LR` flowchart can add `mobile-direction="TB"` metadata to generate a vertical layout for narrow screens from the same source; both layouts retain the same nodes and edges. Use `<br/>` inside labels to break long lines. The Markdown transform and renderer live in `src/plugins/mermaid.ts` and `src/utils/mermaid.ts`; run `pnpm test:diagrams` when changing their integration.
+
 ## Algorithm Articles
 
 Before writing or reviewing [`content/posts/algorithm/`](../content/posts/algorithm/), read [algorithm conventions](../.agents/skills/site-writing/references/algorithms.md).

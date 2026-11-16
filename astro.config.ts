@@ -13,6 +13,7 @@ import { codeStamps } from "./src/plugins/code-stamps";
 import { copyFrames } from "./src/plugins/copy-frames";
 import { satteriGithubCardPlugin } from "./src/plugins/github-cards";
 import { satteriMathPlugin } from "./src/plugins/math";
+import { satteriMermaidPlugin } from "./src/plugins/mermaid";
 import {
 	satteriAutolinkHeadingsPlugin,
 	satteriExternalLinksPlugin,
@@ -96,6 +97,7 @@ export default defineConfig({
 				satteriUnwrapImagesPlugin(),
 				satteriReadingTimePlugin(),
 				satteriMathPlugin(),
+				satteriMermaidPlugin(),
 				satteriGithubCardPlugin(),
 				satteriAdmonitionsPlugin(),
 			],

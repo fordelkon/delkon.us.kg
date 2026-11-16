@@ -103,10 +103,14 @@ async fn main() {
 
 **执行器**（executor）负责轮询任务、维护调度状态并处理唤醒。可以把基本流程理解为：
 
-```text
-新任务或唤醒请求 → 进入就绪队列 → poll
-                                      ├─ Ready：记录结果，结束任务
-                                      └─ Pending：等待后续唤醒 ←── wake()
+```mermaid title="执行器的轮询与唤醒循环" description="这里轮询的是任务外层 Future：Ready 表示任务完成，Pending 表示尚未完成。wake 可在 poll 返回前发生，已有的重新调度请求必须保留；多个唤醒可合并，不保证一一排队。"
+flowchart TB
+ spawn["新任务"] --> queue["就绪队列"]
+ wake["wake 请求<br/>可合并"] --> queue
+ queue --> poll["poll 任务外层 Future"]
+ poll -->|Ready| done["记录结果<br/>结束任务"]
+ poll -->|Pending| wait["等待再次调度<br/>保留已有唤醒"]
+ wait -.->|已有或后续 wake| queue
 ```
 
 任务可以在 `poll` 返回前就被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，不是保证每次 wake 都对应一次独立排队[^2][^4]。

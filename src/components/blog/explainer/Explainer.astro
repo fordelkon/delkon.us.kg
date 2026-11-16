@@ -65,7 +65,7 @@ const frames = scene.frames.map((frame) => {
 					aria-hidden="true"
 				>
 					{svgs ? (
-						<div class="explainer-mermaid" set:html={svgs[index]} />
+						<div class="explainer-mermaid mermaid-diagram" set:html={svgs[index]} />
 					) : (
 						<Diagram frame={frame} marker={`${sceneId}-arrow-${index}`} height={scene.diagramHeight} />
 					)}

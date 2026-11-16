@@ -37,6 +37,9 @@ jobs:
       - name: Run checks
         run: pnpm check
 
+      - name: Test Markdown diagrams
+        run: pnpm test:diagrams
+
         # ensure build works
       - name: Run Astro build
         run: pnpm build

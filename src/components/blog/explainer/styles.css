@@ -1,8 +1,6 @@
-@import "./mermaid-theme.css";
-
 .step-explainer {
 	--explainer-width: 22.5rem;
-	--explainer-node-font-size: 16px;
+	--diagram-node-font-size: 16px;
 	--explainer-copy-font-size: 0.8125rem;
 	--explainer-copy-line-height: 1.7;
 	margin: 0 0 var(--receipt-section-gap);
@@ -136,8 +134,7 @@
 	}
 }
 
-.explainer-diagram,
-.explainer-mermaid text {
+.explainer-diagram {
 	font-family: var(--font-mono);
 	font-weight: var(--font-weight-normal);
 }
@@ -147,7 +144,7 @@
 	height: auto;
 	display: block;
 	margin-inline: auto;
-	font-size: var(--explainer-node-font-size);
+	font-size: var(--diagram-node-font-size);
 }
 .explainer-node {
 	color: var(--color-printer-ink);
