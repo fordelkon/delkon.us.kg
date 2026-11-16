@@ -1,4 +1,4 @@
-import type { SceneId } from "../components/blog/ascii/scenes/index.ts";
+import type { SceneId } from "../components/blog/explainer/scenes/index.ts";
 
 /** Select a post's opening scene without exposing scene details to the layout. */
 export function getPostExplainer(postId: string): SceneId | undefined {

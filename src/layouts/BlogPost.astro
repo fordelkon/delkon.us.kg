@@ -1,6 +1,6 @@
 ---
 import { type CollectionEntry, render } from "astro:content";
-import AsciiExplainer from "@/components/blog/ascii/AsciiExplainer.astro";
+import Explainer from "@/components/blog/explainer/Explainer.astro";
 import Masthead from "@/components/blog/Masthead.astro";
 import TOC from "@/components/blog/TOC.astro";
 import WebMentions from "@/components/blog/webmentions/index.astro";
@@ -39,7 +39,7 @@ const explainer = getPostExplainer(post.id);
 			<SeriesNav entry={post} />
 		</div>
 		<div class="prose prose-sm min-w-0 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-			{explainer && <AsciiExplainer scene={explainer} />}
+			{explainer && <Explainer scene={explainer} />}
 			<slot />
 			<WebMentions />
 		</div>

@@ -1,0 +1,52 @@
+marker path {
+	fill: var(--color-printer-ink-light);
+}
+/* Mermaid appends and scopes these rules after its generated theme. */
+.node rect,
+.node polygon,
+.node path {
+	fill: var(--color-printer-paper);
+	stroke: var(--color-printer-ink-light);
+}
+.node rect {
+	rx: 3px;
+}
+text,
+.nodeLabel,
+.edgeLabel,
+.edgeLabel text,
+.edgeLabel tspan,
+.node text,
+.node tspan,
+.cluster-label text {
+	color: var(--color-printer-ink);
+	fill: var(--color-printer-ink);
+}
+.cluster rect {
+	fill: transparent;
+	stroke: var(--color-printer-ink-light);
+	stroke-dasharray: 3 4;
+}
+.flowchart-link {
+	stroke: var(--color-printer-ink-light);
+}
+.edgeLabel rect {
+	fill: var(--color-printer-paper);
+}
+.node.active rect,
+.node.active polygon,
+.node.active path {
+	stroke: var(--color-printer-accent);
+	stroke-width: 2px;
+}
+.node.active .nodeLabel,
+.node.active text,
+.node.active tspan {
+	fill: var(--color-printer-accent);
+	color: var(--color-printer-accent);
+}
+
+/* linkStyle emits inline widths; color remains responsive to the site theme. */
+.flowchart-link[style*="stroke-width:3px"] {
+	stroke: var(--color-printer-accent);
+}

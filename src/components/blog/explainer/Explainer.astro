@@ -1,0 +1,94 @@
+---
+import Diagram from "./Diagram.astro";
+import { renderScene } from "./mermaid";
+import { getScene, type SceneId } from "./scenes/index";
+
+interface Props {
+	scene: SceneId;
+}
+
+const { scene: sceneId } = Astro.props;
+const scene = getScene(sceneId);
+const { caption, description } = scene;
+const svgs = scene.diagram ? await renderScene(sceneId, scene) : undefined;
+let elapsedMs = 0;
+
+const frames = scene.frames.map((frame) => {
+	const durationMs = frame.durationMs ?? 2200;
+	const rendered = { ...frame, delayMs: elapsedMs, durationMs };
+	elapsedMs += durationMs;
+
+	return rendered;
+});
+---
+
+<figure
+	class="step-explainer not-prose"
+	data-scene={sceneId}
+	aria-label={scene.title}
+	data-pagefind-ignore
+>
+	<step-explainer class="step-explainer-canvas">
+		<button
+			class="step-explainer-toggle"
+			type="button"
+			aria-label="播放 原理演示"
+			title="播放"
+			hidden
+		>
+			<svg
+				class="step-explainer-play"
+				width="14"
+				height="14"
+				viewBox="0 0 16 16"
+				fill="currentColor"
+				aria-hidden="true"
+			>
+				<path d="M4 2.5v11l9-5.5z" />
+			</svg>
+			<svg
+				class="step-explainer-pause"
+				width="14"
+				height="14"
+				viewBox="0 0 16 16"
+				fill="currentColor"
+				aria-hidden="true"
+			>
+				<path d="M4 3h3v10H4zM10 3h3v10h-3z" />
+			</svg>
+		</button>
+		<div class="step-explainer-visual" role="img" aria-label={description}>
+			{frames.map((frame, index) => (
+				<div
+					class="step-explainer-frame"
+					style={`animation-delay: ${frame.delayMs}ms; --step-frame-duration: ${frame.durationMs}ms`}
+					aria-hidden="true"
+				>
+					{svgs ? (
+						<div class="explainer-mermaid" set:html={svgs[index]} />
+					) : (
+						<Diagram frame={frame} marker={`${sceneId}-arrow-${index}`} height={scene.diagramHeight} />
+					)}
+					<p class="explainer-note">{frame.note}</p>
+				</div>
+			))}
+		</div>
+	</step-explainer>
+	<figcaption>
+		<p class="step-explainer-caption">{caption}</p>
+		<details class="step-explainer-transcript">
+			<summary>查看文字步骤</summary>
+			<ol>
+				{frames.map((frame) => <li>{frame.note}</li>)}
+			</ol>
+		</details>
+	</figcaption>
+</figure>
+
+<script>
+	import "./playback";
+</script>
+
+<style is:global>
+	@import "./styles.css";
+</style>

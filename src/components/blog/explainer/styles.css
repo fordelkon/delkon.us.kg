@@ -1,0 +1,222 @@
+.step-explainer {
+	--explainer-width: 22.5rem;
+	margin: 0 0 var(--receipt-section-gap, 2rem);
+	padding: 0;
+	color: var(--color-printer-ink);
+}
+.step-explainer-canvas {
+	display: block;
+	position: relative;
+	width: 100%;
+	max-width: 100%;
+	margin-inline: auto;
+	padding-top: 1.5rem;
+	font-family: var(--font-mono);
+	font-size: 0.875rem;
+}
+.step-explainer-visual {
+	display: grid;
+	justify-items: center;
+	max-width: var(--explainer-width);
+	margin-inline: auto;
+}
+.step-explainer-caption {
+	max-width: 32em;
+	margin: 1rem auto 0;
+	color: var(--color-printer-ink-light);
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	text-align: center;
+	text-wrap: pretty;
+}
+.step-explainer-toggle {
+	position: absolute;
+	inset-block-start: -0.25rem;
+	inset-inline-end: 0;
+	display: grid;
+	place-items: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	padding: 0;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: var(--color-printer-ink-light);
+	cursor: pointer;
+	touch-action: manipulation;
+}
+@media (pointer: coarse) {
+	.step-explainer-toggle {
+		/* Expand the touch target while keeping the icon at its original position. */
+		inset-block-start: -0.75rem;
+		inset-inline-end: -0.5rem;
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+}
+.step-explainer-pause {
+	display: none;
+}
+.step-explainer-canvas[data-playing] .step-explainer-play {
+	display: none;
+}
+.step-explainer-canvas[data-playing] .step-explainer-pause {
+	display: block;
+}
+.step-explainer-toggle[hidden] {
+	display: none;
+}
+.step-explainer-toggle:focus-visible {
+	outline: 2px solid var(--color-printer-accent);
+	outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+	.step-explainer-toggle:hover {
+		color: var(--color-printer-ink);
+	}
+}
+.step-explainer-frame {
+	grid-area: 1 / 1;
+	width: 100%;
+	min-width: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+.step-explainer-frame:last-child {
+	opacity: 1;
+}
+.step-explainer-canvas[data-playback="waiting"] .step-explainer-frame {
+	opacity: 0;
+}
+.step-explainer-canvas[data-playback="waiting"] .step-explainer-frame:first-child {
+	opacity: 1;
+}
+.step-explainer-canvas[data-playback="running"] .step-explainer-frame {
+	opacity: 0;
+	animation: step-explainer-frame var(--step-frame-duration) steps(1, end);
+}
+.step-explainer-canvas[data-playback="running"] .step-explainer-frame:last-child {
+	animation-name: step-explainer-final;
+	animation-fill-mode: forwards;
+}
+.step-explainer-frame .step-explainer-active {
+	color: var(--color-printer-accent);
+	font-weight: 700;
+}
+.step-explainer-canvas[data-paused] .step-explainer-frame {
+	animation-play-state: paused;
+}
+/* Play once and retain the scene's conclusion, including blocked terminal states. */
+@keyframes step-explainer-frame {
+	0% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes step-explainer-final {
+	0%,
+	100% {
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce), print {
+	.step-explainer-toggle {
+		display: none;
+	}
+	.step-explainer-canvas[data-playback] .step-explainer-frame,
+	.step-explainer-canvas[data-playback] .step-explainer-frame:first-child {
+		animation: none;
+		opacity: 0;
+	}
+	.step-explainer-canvas[data-playback] .step-explainer-frame:last-child {
+		opacity: 1;
+	}
+}
+
+.explainer-diagram {
+	width: 100%;
+	max-width: var(--explainer-width);
+	height: auto;
+	display: block;
+	margin-inline: auto;
+	font-family: "Noto Sans CJK SC", "PingFang SC", sans-serif;
+	font-size: 16px;
+}
+.explainer-node {
+	color: var(--color-printer-ink);
+}
+.explainer-node rect {
+	fill: var(--color-printer-paper);
+	stroke: var(--color-printer-ink-light);
+	stroke-width: 1;
+}
+.explainer-node text {
+	fill: currentColor;
+}
+.explainer-detail {
+	font-size: 16px;
+}
+.explainer-node.is-active {
+	color: var(--color-printer-accent);
+}
+.explainer-node.is-active rect {
+	stroke: var(--color-printer-accent);
+	stroke-width: 2;
+}
+.explainer-node.is-muted {
+	opacity: 0.65;
+}
+.explainer-edge {
+	fill: none;
+	stroke: var(--color-printer-ink-light);
+	stroke-width: 1.25;
+}
+.explainer-edge.is-active {
+	stroke: var(--color-printer-accent);
+	stroke-width: 2.5;
+}
+.explainer-note {
+	max-width: 34em;
+	margin: 0.75rem auto;
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	text-align: center;
+}
+.explainer-mermaid {
+	max-width: var(--explainer-width);
+	margin-inline: auto;
+}
+.explainer-mermaid svg {
+	display: block;
+	max-height: 24rem;
+	width: 100%;
+	height: auto;
+	margin-inline: auto;
+}
+
+.step-explainer-transcript {
+	margin: 0.75rem 0 0;
+	text-align: start;
+	font-size: 0.8125rem;
+	line-height: 1.7;
+}
+.step-explainer-transcript summary {
+	min-height: 2.75rem;
+	margin-inline-start: 1.5rem;
+	padding-block: 0.625rem;
+	list-style-position: outside;
+	cursor: pointer;
+}
+.step-explainer-transcript summary:focus-visible {
+	outline: 2px solid var(--color-printer-accent);
+	outline-offset: 2px;
+}
+.step-explainer-transcript ol {
+	list-style: decimal;
+	padding-inline-start: 1.5rem;
+}
+.step-explainer-transcript li + li {
+	margin-top: 0.5rem;
+}

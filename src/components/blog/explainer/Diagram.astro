@@ -1,0 +1,50 @@
+---
+import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, type Frame, NODE_HEIGHT } from "./scenes/types";
+
+interface Props {
+	frame: Frame;
+	marker: string;
+	height?: number | undefined;
+}
+
+const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
+---
+
+<svg class="explainer-diagram" viewBox={`0 0 ${DIAGRAM_WIDTH} ${height}`} aria-hidden="true" focusable="false">
+	<defs>
+		<marker
+			id={marker}
+			viewBox="0 0 8 8"
+			refX="7"
+			refY="4"
+			markerWidth="6"
+			markerHeight="6"
+			orient="auto-start-reverse"
+		>
+			<path d="M0 0 L8 4 L0 8z" fill="context-stroke" />
+		</marker>
+	</defs>
+	{frame.edges?.map((line) => (
+		<path
+			class:list={["explainer-edge", { "is-active": line.active }]}
+			d={line.path}
+			stroke-dasharray={line.dashed ? "3 3" : undefined}
+			marker-end={`url(#${marker})`}
+		/>
+	))}
+	{frame.boxes.map((node) => (
+		<g class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
+			<rect x={node.x} y={node.y} width={node.width} height={NODE_HEIGHT} rx="3" />
+			{node.lines.map((line, index) => (
+				<text
+					x={node.x + node.width / 2}
+					y={node.y + 19 + index * 19}
+					text-anchor="middle"
+					class:list={{ "explainer-detail": index === 1 }}
+				>
+					{line}
+				</text>
+			))}
+		</g>
+	))}
+</svg>

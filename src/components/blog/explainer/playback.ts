@@ -1,19 +1,26 @@
-class AsciiExplainerElement extends HTMLElement {
+class ExplainerElement extends HTMLElement {
 	#observer: IntersectionObserver | undefined;
 	#events: AbortController | undefined;
+	#motion: MediaQueryList | undefined;
 	#visible = false;
 	#paused = false;
 	#finished = false;
 
 	connectedCallback() {
 		this.#events?.abort();
+		this.#observer?.disconnect();
 		this.#events = new AbortController();
-		const replay = this.querySelector<HTMLButtonElement>(".ascii-explainer-toggle");
+		this.#motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const replay = this.querySelector<HTMLButtonElement>(".step-explainer-toggle");
 
 		if (replay) {
 			replay.hidden = false;
 			replay.addEventListener("click", () => this.#toggle(), { signal: this.#events.signal });
 		}
+
+		this.#motion.addEventListener("change", () => this.#syncMotion(), {
+			signal: this.#events.signal,
+		});
 
 		document.addEventListener(
 			"visibilitychange",
@@ -27,7 +34,7 @@ class AsciiExplainerElement extends HTMLElement {
 		this.addEventListener(
 			"animationend",
 			(event) => {
-				const last = this.querySelector(".ascii-explainer-frame:last-child");
+				const last = this.querySelector(".step-explainer-frame:last-child");
 
 				if (
 					event.target !== last ||
@@ -40,15 +47,8 @@ class AsciiExplainerElement extends HTMLElement {
 			},
 			{ signal: this.#events.signal },
 		);
-		this.#syncControl();
 
-		if (
-			this.dataset.playback === "running" ||
-			window.matchMedia("(prefers-reduced-motion: reduce)").matches
-		)
-			return;
-
-		this.dataset.playback = "waiting";
+		if (this.dataset.playback !== "running") this.#syncMotion();
 
 		// Account for the printer housing covering the top of the viewport.
 		const headerBottom =
@@ -58,13 +58,22 @@ class AsciiExplainerElement extends HTMLElement {
 		this.#observer = new IntersectionObserver(
 			(entries) => {
 				this.#visible = entries.some(
-					(entry) => entry.isIntersecting && entry.intersectionRatio >= 0.6,
+					(entry) => entry.isIntersecting && entry.intersectionRatio >= 0.25,
 				);
 				this.#start();
+				this.#syncControl();
 			},
-			{ threshold: 0.6, rootMargin: `-${inset}px 0px 0px 0px` },
+			{ threshold: 0.25, rootMargin: `-${inset}px 0px 0px 0px` },
 		);
 		this.#observer.observe(this);
+	}
+
+	#syncMotion() {
+		this.#finished = false;
+		this.#paused = false;
+		this.dataset.playback = this.#motion?.matches ? "static" : "waiting";
+		this.#start();
+		this.#syncControl();
 	}
 
 	#toggle() {
@@ -79,14 +88,14 @@ class AsciiExplainerElement extends HTMLElement {
 	}
 
 	#syncControl() {
-		const paused = this.#paused || document.hidden;
+		const paused = this.#paused || document.hidden || !this.#visible;
 		const playing = this.dataset.playback === "running" && !paused && !this.#finished;
 		this.toggleAttribute("data-paused", paused);
 		this.toggleAttribute("data-playing", playing);
 
 		// Resume may use Animation.play(), so also synchronize imperative play state.
 		if (this.dataset.playback === "running" && !this.#finished) {
-			for (const frame of this.querySelectorAll(".ascii-explainer-frame")) {
+			for (const frame of this.querySelectorAll(".step-explainer-frame")) {
 				for (const animation of frame.getAnimations()) {
 					if (paused && animation.playState === "running") animation.pause();
 					else if (!paused && animation.playState === "paused") animation.play();
@@ -99,12 +108,11 @@ class AsciiExplainerElement extends HTMLElement {
 		if (button) {
 			const label = playing ? "暂停" : this.#finished ? "重新播放" : "播放";
 			button.title = label;
-			button.setAttribute("aria-label", `${label} ASCII 演示`);
+			button.setAttribute("aria-label", `${label} 原理演示`);
 		}
 	}
 
 	#replay() {
-		this.#observer?.disconnect();
 		this.#visible = true;
 		this.#paused = false;
 		this.#finished = false;
@@ -118,10 +126,15 @@ class AsciiExplainerElement extends HTMLElement {
 	}
 
 	#start() {
-		if (this.dataset.playback === "running" || !this.#visible || document.hidden) return;
+		if (
+			this.dataset.playback !== "waiting" ||
+			!this.#visible ||
+			document.hidden ||
+			this.#motion?.matches
+		)
+			return;
 
 		this.dataset.playback = "running";
-		this.#observer?.disconnect();
 		this.#syncControl();
 	}
 
@@ -131,7 +144,7 @@ class AsciiExplainerElement extends HTMLElement {
 	}
 }
 
-if (!customElements.get("ascii-explainer"))
-	customElements.define("ascii-explainer", AsciiExplainerElement);
+if (!customElements.get("step-explainer"))
+	customElements.define("step-explainer", ExplainerElement);
 
 export {};
