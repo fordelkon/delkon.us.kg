@@ -220,3 +220,119 @@
 .step-explainer-transcript li + li {
 	margin-top: 0.5rem;
 }
+
+.explainer-scenes {
+	display: block;
+	margin-block-end: var(--receipt-section-gap);
+	--network-client: #245e92;
+	--network-delivery: #28704c;
+	--network-processing: #985019;
+	--network-secure: #79529b;
+}
+html[data-theme="dark"] .explainer-scenes {
+	--network-client: #8dbfe8;
+	--network-delivery: #91cba7;
+	--network-processing: #eab284;
+	--network-secure: #c4a8e1;
+}
+.explainer-scenes nav {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 0.4rem;
+}
+.explainer-scenes [hidden] {
+	display: none;
+}
+.explainer-scenes nav button {
+	min-height: 2.75rem;
+	padding: 0.5rem 0.7rem;
+	border: 1px solid var(--color-printer-ink-light);
+	border-radius: 3px;
+	font-size: 0.8125rem;
+	text-align: center;
+	cursor: pointer;
+}
+.explainer-scenes nav button[aria-pressed="true"] {
+	border-color: var(--color-printer-accent);
+	background: var(--color-printer-paper);
+	box-shadow: inset 0 -2px var(--color-printer-accent);
+}
+.explainer-scenes nav button:focus-visible {
+	outline: 2px solid var(--color-printer-accent);
+	outline-offset: 3px;
+}
+.explainer-heading,
+.explainer-chapter-title {
+	font-size: 0.9375rem;
+	font-weight: 600;
+	margin-block: 1rem;
+	text-align: center;
+}
+.explainer-legend {
+	text-align: center;
+}
+.explainer-legend,
+.explainer-assumptions {
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	color: var(--color-printer-ink-light);
+	margin-block: 0.75rem;
+}
+.network-explainer {
+	--diagram-node-font-size: 15px;
+}
+.network-explainer .explainer-node[data-tone="client"] {
+	--node-tone: var(--network-client);
+}
+.network-explainer .explainer-node[data-tone="delivery"] {
+	--node-tone: var(--network-delivery);
+}
+.network-explainer .explainer-node[data-tone="processing"] {
+	--node-tone: var(--network-processing);
+}
+.network-explainer .explainer-node[data-tone="secure"] {
+	--node-tone: var(--network-secure);
+}
+.network-explainer .explainer-node[data-tone] {
+	color: var(--node-tone);
+}
+.network-explainer .explainer-node[data-tone] rect {
+	stroke: var(--node-tone);
+}
+.network-explainer .explainer-node.is-active rect {
+	stroke-width: 3;
+}
+.network-explainer .step-explainer-transcript li {
+	margin-block: 1.5rem;
+}
+.explainer-step {
+	font-variant-numeric: tabular-nums;
+}
+@media print {
+	.explainer-scenes > section[hidden] {
+		display: block;
+	}
+	.explainer-scenes nav,
+	.explainer-scenes .step-explainer-canvas {
+		display: none;
+	}
+	.explainer-scenes details::details-content {
+		content-visibility: visible;
+	}
+}
+
+.explainer-reading {
+	text-align: center;
+	font-size: 0.8125rem;
+	margin-block: 1rem;
+}
+.explainer-reading a {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.explainer-edge-label {
+	fill: var(--color-printer-ink-light);
+	font-size: 11px;
+}

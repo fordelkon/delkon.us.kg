@@ -9,10 +9,12 @@ export interface Box {
 	width: number;
 	lines: string[];
 	active?: boolean;
+	tone?: "client" | "delivery" | "processing" | "secure";
 	muted?: boolean;
 }
 
 export interface Edge {
+	label?: { text: string; x: number; y: number };
 	id: string;
 	path: string;
 	active?: boolean;
@@ -29,6 +31,8 @@ export interface Frame {
 }
 
 export interface Scene {
+	chapters?: Scene[];
+	section?: string | undefined;
 	title: string;
 	diagram?: string;
 	diagramHeight?: number;

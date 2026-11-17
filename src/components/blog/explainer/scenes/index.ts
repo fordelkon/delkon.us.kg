@@ -12,7 +12,7 @@ import { scene as routingNaptTun } from "./routing-napt-tun.ts";
 import { scene as scheduling } from "./scheduling.ts";
 import { scene as socketBufferEof } from "./socket-buffer-eof.ts";
 import { scene as tlsHandshakeVisibility } from "./tls-handshake-visibility.ts";
-import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, NODE_HEIGHT } from "./types.ts";
+import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, NODE_HEIGHT, type Scene } from "./types.ts";
 import { scene as workerPool } from "./worker-pool.ts";
 
 const scenes = {
@@ -35,8 +35,8 @@ const scenes = {
 
 export type SceneId = keyof typeof scenes;
 
-export function getScene(id: SceneId) {
-	const scene = scenes[id];
+function validateScene(scene: Scene, id: string) {
+	for (const chapter of scene.chapters ?? []) validateScene(chapter, id);
 
 	if (!scene.frames.length) throw new Error(`Empty scene: ${id}`);
 
@@ -59,6 +59,11 @@ export function getScene(id: SceneId) {
 				throw new Error(`Invalid box ${node.id}: ${id}`);
 		}
 	}
+}
+
+export function getScene(id: SceneId): Scene {
+	const scene = scenes[id];
+	validateScene(scene, id);
 
 	return scene;
 }

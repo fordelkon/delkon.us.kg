@@ -1,6 +1,5 @@
 ---
-import Diagram from "./Diagram.astro";
-import { renderScene } from "./mermaid";
+import ScenePlayer from "./ScenePlayer.astro";
 import { getScene, type SceneId } from "./scenes/index";
 
 interface Props {
@@ -9,86 +8,28 @@ interface Props {
 
 const { scene: sceneId } = Astro.props;
 const scene = getScene(sceneId);
-const { caption, description } = scene;
-const svgs = scene.diagram ? renderScene(sceneId, scene) : undefined;
-let elapsedMs = 0;
-
-const frames = scene.frames.map((frame) => {
-	const durationMs = frame.durationMs ?? 2200;
-	const rendered = { ...frame, delayMs: elapsedMs, durationMs };
-	elapsedMs += durationMs;
-
-	return rendered;
-});
 ---
 
-<figure
-	class="step-explainer not-prose"
-	data-scene={sceneId}
-	aria-label={scene.title}
-	data-pagefind-ignore
->
-	<step-explainer class="step-explainer-canvas">
-		<button
-			class="step-explainer-toggle"
-			type="button"
-			aria-label="播放 原理演示"
-			title="播放"
-			hidden
-		>
-			<svg
-				class="step-explainer-play"
-				width="14"
-				height="14"
-				viewBox="0 0 16 16"
-				fill="currentColor"
-				aria-hidden="true"
-			>
-				<path d="M4 2.5v11l9-5.5z" />
-			</svg>
-			<svg
-				class="step-explainer-pause"
-				width="14"
-				height="14"
-				viewBox="0 0 16 16"
-				fill="currentColor"
-				aria-hidden="true"
-			>
-				<path d="M4 3h3v10H4zM10 3h3v10h-3z" />
-			</svg>
-		</button>
-		<div class="step-explainer-visual" role="img" aria-label={description}>
-			{frames.map((frame, index) => (
-				<div
-					class="step-explainer-frame"
-					style={`animation-delay: ${frame.delayMs}ms; --step-frame-duration: ${frame.durationMs}ms`}
-					aria-hidden="true"
-				>
-					{svgs ? (
-						<div class="explainer-mermaid mermaid-diagram" set:html={svgs[index]} />
-					) : (
-						<Diagram frame={frame} marker={`${sceneId}-arrow-${index}`} height={scene.diagramHeight} />
-					)}
-					<p class="explainer-note">{frame.note}</p>
-				</div>
-			))}
-		</div>
-	</step-explainer>
-	<figcaption>
-		<p class="step-explainer-caption">{caption}</p>
-		<details class="step-explainer-transcript">
-			<summary>查看文字步骤</summary>
-			<ol>
-				{frames.map((frame) => <li>{frame.note}</li>)}
-			</ol>
-		</details>
-	</figcaption>
-</figure>
+{scene.chapters ? (
+    <explainer-scenes class="explainer-scenes not-prose" data-pagefind-ignore>
+        <p class="explainer-heading">动态原理概览</p>
+        <nav aria-label="选择原理场景" hidden>
+            {scene.chapters.map((chapter, index) => (
+                <button type="button" aria-controls={`${sceneId}-panel-${index}`} aria-pressed={index === 0}>
+                    {index + 1}. {chapter.title}
+                </button>
+            ))}
+        </nav>
+        <p class="explainer-legend">蓝：客户端 · 橙：中间处理 · 紫：加密／代理 · 绿：交付<br/>粗边框标出当前状态；步骤停留时间不代表网络耗时。</p>
+        {scene.chapters.map((chapter, index) => (
+            <section id={`${sceneId}-panel-${index}`} aria-label={chapter.title}>
+                <h2 class="explainer-chapter-title">{chapter.title}</h2>
+                <ScenePlayer scene={chapter} sceneId={`${sceneId}-${index}`} study />
+            </section>
+        ))}
+    </explainer-scenes>
+) : <ScenePlayer scene={scene} sceneId={sceneId} />}
 
 <script>
-	import "./playback";
+    import "./scenario-navigation";
 </script>
-
-<style is:global>
-	@import "./styles.css";
-</style>

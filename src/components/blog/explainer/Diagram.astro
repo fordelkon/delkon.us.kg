@@ -32,8 +32,11 @@ const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
 			marker-end={`url(#${marker})`}
 		/>
 	))}
+	{frame.edges?.filter((line) => line.label).map((line) => (
+        <text class="explainer-edge-label" x={line.label?.x} y={line.label?.y} text-anchor="middle">{line.label?.text}</text>
+    ))}
 	{frame.boxes.map((node) => (
-		<g class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
+		<g data-tone={node.tone} class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
 			<rect x={node.x} y={node.y} width={node.width} height={NODE_HEIGHT} rx="3" />
 			{node.lines.map((line, index) => (
 				<text
