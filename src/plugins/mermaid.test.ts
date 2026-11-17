@@ -81,3 +81,31 @@ test("resets diagram identifiers for each compilation", async () => {
 
 	assert.equal(first.html, second.html);
 });
+
+test("renders sequence messages and notes without colliding arrow markers", async () => {
+	const sequence = [
+		'```mermaid title="TLS 消息" description="客户端发送，服务端回复。"',
+		"sequenceDiagram",
+		"participant Client as 客户端",
+		"participant Server as 服务端",
+		"Client->>Server: ClientHello",
+		"Server-->>Client: {Finished}",
+		"Note over Client: 验证服务身份",
+		"```",
+	].join("\n");
+
+	const { html } = await compile(`${sequence}\n\n${sequence}`);
+	const ids = [...html.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]);
+
+	assert.equal((html.match(/data-from="Client" data-to="Server"/g) ?? []).length, 2);
+	assert.equal((html.match(/data-from="Server" data-to="Client"/g) ?? []).length, 2);
+	assert.match(html, /\{Finished\}/);
+	assert.match(html, /验证服务身份/);
+	assert.equal(ids.length, new Set(ids).size);
+
+	for (const [, reference] of html.matchAll(/url\(#([^)]+)\)/g)) {
+		assert.ok(ids.includes(reference));
+	}
+
+	assert.doesNotMatch(html, /<style>|@import|fonts\.googleapis/);
+});

@@ -1,6 +1,7 @@
 .mermaid-diagram {
 	--_text: var(--color-printer-ink);
 	--_text-sec: var(--color-printer-ink);
+	--_text-muted: var(--color-printer-ink);
 	--_line: var(--color-printer-ink-light);
 	--_arrow: var(--color-printer-ink-light);
 	--_node-fill: var(--color-printer-paper);
@@ -13,10 +14,12 @@
 	font-family: var(--font-mono);
 	font-weight: var(--font-weight-normal);
 }
-.mermaid-diagram .node text {
+.mermaid-diagram .node text,
+.mermaid-diagram .actor text {
 	font-size: var(--diagram-node-font-size, 16px);
 }
-.mermaid-diagram .node rect {
+.mermaid-diagram .node rect,
+.mermaid-diagram .actor rect {
 	rx: 3px;
 	ry: 3px;
 }
