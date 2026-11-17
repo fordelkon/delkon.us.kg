@@ -9,6 +9,12 @@ tags: ["networking", "go"]
 
 本篇以 **Mihomo** 为配置参照，先解释 HTTP CONNECT 与 **SOCKS5**（Socket Secure v5），再把第三篇的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)用于透明接管。代码选用 Go 标准库（`net/http` 与 `net.TCPConn` 原生提供请求解析、`CloseWrite` 半关闭与 `SetDeadline`，无需第三方依赖即可完整演示字节流转发），最后用 `curl` 对照显式代理的实际行为。Mihomo 的可用选项与默认值可能随版本变化，阅读配置时应对照所用内核版本的文档。
 
+读完本篇后，你应能：
+
+- 追踪显式代理、普通 TUN 和 Fake-IP 三种入口到规则引擎的路径。
+- 判断域名映射或嗅探何时可用，何时只能按 IP 等信息处理。
+- 区分入口连接、DIRECT 出站、节点出站的生命周期，并验证半关闭。
+
 ## 显式代理：HTTP CONNECT 与 SOCKS5 的工作边界
 
 **显式代理**（Explicit Proxy）要求客户端主动知晓并配置代理端点。程序采用代理设置后，先把 Socket 连接到代理监听地址，例如 `127.0.0.1:7890`，再告诉代理要连接的目标。不同程序是否读取系统设置、环境变量及哪些变量，取决于实现，不能把“设置了系统代理”当作每个进程都会采用代理的保证。
@@ -196,6 +202,8 @@ client received: response after EOF
 
 阅读 Mihomo 配置时，先问每项配置决定哪一步：
 
+以下字段对照 Mihomo v1.19.34 的配置类型与官方 Wiki（2026 年 11 月 18 日查阅）说明。排查本机时，用 `mihomo -v` 确认实际内核版本，再查看客户端最终生成的配置；GUI 对订阅的覆盖也会改变生效结果[^version]。
+
 | 配置维度 | 决定什么 | 常见选项 |
 | --- | --- | --- |
 | 入站接入方式 | 流量怎样进入代理内核 | HTTP/SOCKS 监听端口、TUN |
@@ -206,6 +214,18 @@ client received: response after EOF
 `global` 选择的是已进入内核的流量的出站策略，不会替未采用显式代理、也未被 TUN 接管的应用捕获流量。TUN 也可以把流量交给 DIRECT；接管方式与是否使用远端节点是不同选择[^mode][^4]。
 
 ## 透明接管：TUN 提供 IP 包，域名需要额外关联
+
+先把应用配合方式与内核接管方式放在同一张表中，避免把透明接管等同于 TUN：
+
+| 入口 | 交给处理程序的对象 | 主要前提与限制 |
+| --- | --- | --- |
+| 系统代理 / 显式代理 | 应用发出的 HTTP 或 SOCKS 请求 | 应用须采用代理配置；不是系统路由强制接管 |
+| TUN | 三层 IP 包 | 需要接口、路由和流处理；本身不提供域名 |
+| TAP | 二层以太网帧 | 需要二层处理，可用于桥接；不是 Mihomo 的 TUN 选项 |
+| REDIRECT | 经本地重定向后交给监听 Socket 的流量 | 常见 Linux TCP 方案会改写目的；恢复原目的信息需要平台接口 |
+| TPROXY | 保留原目的地址的透明 Socket 流量 | Linux 需相应内核支持、策略路由及透明 Socket 配合，可用于 TCP/UDP |
+
+REDIRECT 与 TPROXY 的上述区别依据 Linux 内核文档，不能复制为 macOS 或 Windows 的部署命令。它们也不能单独解决 DNS 域名关联、代理出站或 TLS 解密问题[^transparent]。
 
 对不采用显式代理的应用，可以通过路由把匹配流量引向 TUN。Mihomo 的 `tun.enable` 与 `auto-route` 负责相应接口及自动路由配置，但实际范围仍受更具体路由、排除地址、策略路由与 IPv4/IPv6 配置影响。第三篇的[最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/)解释了为什么“已启用 TUN”不能直接证明所有连接都进入代理[^4]。
 
@@ -255,6 +275,31 @@ sequenceDiagram
 
 `dns-hijack` 把匹配的 DNS 连接送进内部模块，不是所有名称解析的总开关：普通 `any:53` 写法默认匹配 UDP，TCP 需要相应配置；浏览器 DoH 等加密 DNS 也不能仅凭端口 53 的规则接管。macOS、Windows 的局域网 DNS 劫持还存在文档列出的限制[^4]。因此，`dig @某服务器` 只指定了请求的表面目的地址，不能单凭参数证明实际处理者。
 
+### 映射没有命中时怎么办
+
+成功路径要求 DNS 应答、Fake-IP 映射与 TUN 接管保持一致。下面从“代理已收到连接”开始分支；如果应用流量根本没有进入代理，应先检查路由，而不是在规则引擎里寻找原因。
+
+```mermaid title="目标域名关联的成功与失败分支" description="限定连接已进入代理。Fake-IP 必须有可用映射，不能作为普通公网地址连接；真实 IP 可以按配置尝试嗅探，但 ECH 或自定义协议可能不提供真实域名。图中的停止表示没有足够目标信息，具体报错和恢复由实现决定，不保证自动补回映射。"
+flowchart TB
+ inbound["入站已收到目标地址"] --> fake{"目标属于配置的 Fake-IP 池？"}
+ fake -->|是| cache{"映射仍可用？"}
+ cache -->|命中| domain["恢复域名<br/>进入规则与出站处理"]
+ cache -->|未命中| repair["记录映射缺失<br/>检查 DNS 与持久化状态，重新解析"]
+ fake -->|否，真实 IP| sniff{"允许且成功取得域名元数据？"}
+ sniff -->|是| domain
+ sniff -->|否| iponly["仅按已有 IP 与其他元数据处理<br/>或依配置拒绝"]
+```
+
+| 条件 | 缺少什么 | 下一步证据 |
+| --- | --- | --- |
+| 代理重启或映射被清理，应用仍缓存 Fake-IP | 虚拟地址到原域名的可用映射 | 对照 DNS 回答时间、映射持久化和连接日志；不能向公网连接该地址 |
+| 应用自行使用 DoH，绕过内部 DNS | DNS 阶段的 Fake-IP 关联 | 检查应用 DNS 设置与实际收到的真实 IP；端口 53 劫持不覆盖 DoH |
+| 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 按 IP、进程等规则验证，不能凭 IP 断言唯一域名 |
+| TLS / QUIC 使用 ECH | 真实的内部 SNI | 外层公开名不能冒充真实目标名；其他已知映射仍可独立使用 |
+| IPv4 被接管，IPv6 地址或路由未配套 | 另一地址族的接管路径 | 分别核对 A/AAAA、IPv6 路由和代理日志，不能拿 IPv4 成功证明双栈完整 |
+
+持久化映射可减少某些重启场景的失配，却不保证应用缓存与代理状态永远同步。`fake-ip-filter` 命中的域名返回真实地址时，本来就应走真实 IP 的分析路径，而不是当作映射故障[^3]。
+
 ### 2. 域名嗅探：读取可见的协议元数据
 
 没有可用 Fake-IP 关联时，**域名嗅探**（Domain Sniffing）可以从部分协议数据取得目标名[^5]：
@@ -275,12 +320,15 @@ sequenceDiagram
 
 ```mermaid title="规则匹配、出站选择与响应返回" description="规则按顺序检查，还需核对出站适用性；真实目标 IP 按规则和出站需要获取。REJECT 在此终止，策略组选择需落实到最终出站，非拒绝结果按实际选择建立直连或代理会话。响应通过对应的出站会话和入站转发状态返回原应用，不是把远端 TCP 包原样塞回原连接。"
 flowchart TB
- app["应用"] --> entry["显式代理入口 / TUN"]
- entry --> metadata["整理目标、域名映射<br/>嗅探与进程等元数据"]
+ app["应用"] --> explicit["显式入站<br/>HTTP / SOCKS5"]
+ app --> transparent["透明入站<br/>TUN / REDIRECT / TPROXY"]
+ explicit --> metadata["整理目标、域名映射<br/>嗅探与进程等元数据"]
+ transparent --> metadata
  metadata --> rules["按规则顺序匹配<br/>检查出站适用性"]
  rules --> choice["确定最终出站<br/>DIRECT / REJECT / 节点"]
  choice -->|REJECT| reject["拒绝请求<br/>终止处理"]
- choice -->|其他结果| outbound["按所选方式建立<br/>直连或代理会话"]
+ choice -->|DIRECT| outbound["建立独立出站<br/>代理直连目标或连接远端节点"]
+ choice -->|代理节点| outbound
  outbound --> response["对应出站会话<br/>收到响应"]
  response --> inbound["入站转发状态"]
  inbound --> original["原应用"]
@@ -368,3 +416,7 @@ curl --noproxy '' --proxy socks5h://127.0.0.1:7890 \
 [^http-outbound]: [Mihomo：HTTP 出站](https://wiki.metacubex.one/config/proxies/http/)——HTTP 代理出站的 TLS 是独立可选配置。
 
 [^curl]: [curl 官方手册](https://curl.se/docs/manpage.html#--proxy)——HTTP 代理、SOCKS5/SOCKS5H 解析位置与 `--noproxy`；实验还需按本机 `curl --version` 确认功能。
+
+[^version]: [Mihomo v1.19.34 发布页](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)与[该版本配置类型](https://pkg.go.dev/github.com/metacubex/mihomo@v1.19.34/config)——固定本文配置字段的版本基线；平台行为另按各项官方文档及本机实际结果核对。
+
+[^transparent]: [Linux Kernel: Transparent proxy support](https://docs.kernel.org/networking/tproxy.html)——REDIRECT 的目的地址改写局限、TPROXY 与策略路由及 IP_TRANSPARENT 的配合；Mihomo 的入口字段另见[官方监听器文档](https://wiki.metacubex.one/config/inbound/listeners/)。

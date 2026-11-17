@@ -9,6 +9,33 @@ tags: ["networking"]
 
 本篇先解释性能指标及单流吞吐的约束，再分析“大传输失败”与路径 MTU 的关系，最后给出可重复的 curl 实验。排障记录应保留时间、命令版本、连接地址、代理方式、退出码与多次测量结果，让后续比较有共同条件。
 
+读完本篇后，你应能：
+
+- 从 IP 配置、DNS、路由、TCP/QUIC、TLS、HTTP 逐层寻找证据。
+- 在明确前提下解释 curl 累计计时、阶段差值与吞吐限制。
+- 结合 PMTU 线索、Wireshark 过滤和受控实验验证或排除假设。
+
+## 从哪一步开始排查
+
+排查网页访问，可以沿接口与选路、DNS、传输、TLS、HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始；HTTP/3 的传输分支检查 QUIC。
+
+```mermaid title="按证据选择下一项网络诊断" description="每个判断都针对本次请求和实际地址族，否分支是调查范围而不是根因结论。HTTP/3 使用 QUIC，不经过 TCP 建连；TUN 代理可能终结本地 TCP，所以传输成功仍需核对出站日志。已知状态可跳过相应步骤。"
+flowchart TB
+ start["记录 URL、地址族、时间<br/>显式代理与 TUN 状态"] --> local{"本次接口与选路符合预期？"}
+ local -->|否或不明| route["查地址、下一跳、邻居<br/>及策略路由、TUN 排除项"]
+ local -->|是| dns{"需要解析时得到可用结果？"}
+ dns -->|否或不明| resolver["对照系统、独立 DNS 查询<br/>状态码、缓存与实际解析路径"]
+ dns -->|是或已知地址| transport{"实际传输是否建立？"}
+ transport -->|否或不明| connect["TCP：SYN、RST、超时<br/>QUIC：UDP 路径、Initial 与响应"]
+ transport -->|是| tls{"目标 TLS 身份验证完成？"}
+ tls -->|否或不明| secure["核对证书、服务名与握手<br/>并排查重传、MTU 与代理出站"]
+ tls -->|是或明文 HTTP| http{"收到预期 HTTP 响应？"}
+ http -->|否| service["核对状态码、重定向、请求<br/>服务端及代理日志"]
+ http -->|是但慢| performance["重复测量阶段耗时、吞吐<br/>窗口、重传与应用供数"]
+```
+
+例如，DNS 返回 Fake-IP 时，后续连接需要本地映射；本地代理已经接受 TCP 连接时，还要查它是否连上远端。这些路径差异会直接影响后面的计时解释。
+
 ## 性能诊断的五个常用指标
 
 这些指标描述不同方面，但会相互影响。例如路由器或网关瓶颈处队列过长引发的**缓冲膨胀**（Bufferbloat），既可能显著推高**往返时延**（Round-Trip Time，RTT）与**时延抖动**（Jitter），也可能导致丢包和吞吐剧烈波动[^bufferbloat]。
@@ -105,6 +132,24 @@ sequenceDiagram
 | 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | `dig @服务器` 仍可能被接管；错误类型、Fake-IP 与真实公网地址应分开，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/) |
 | 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
 | TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
+
+### 平台命令对照
+
+下面是功能上的近似对应，不代表解析策略、字段或底层实现相同。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
+
+| 目的 | macOS | Linux | Windows / PowerShell |
+| --- | --- | --- | --- |
+| 接口与地址 | `ifconfig` | `ip addr` | `ipconfig /all` |
+| 路由表 | `netstat -rn` | `ip route`、`ip -6 route` | `route print`、`Get-NetRoute` |
+| 特定目标选路 | `route -n get <IP>` | `ip route get <IP>` | `Find-NetRoute -RemoteIPAddress <IP>` |
+| DNS 配置 | `scutil --dns` | `resolvectl status`，限 systemd-resolved 环境 | `Get-DnsClientServerAddress` |
+| DNS 查询 | `dig example.com A` | `dig example.com A` | `Resolve-DnsName example.com -Type A` |
+| 本地 DNS 缓存视图 | `dscacheutil` 查询名称服务，不是完整缓存转储 | 按实际缓存服务选择工具 | `ipconfig /displaydns` |
+| TCP 连接 | `netstat -anv -p tcp` | `ss -tin` | `Get-NetTCPConnection` |
+| 邻居表 | `arp -a`、`ndp -a` | `ip neigh` | `Get-NetNeighbor` |
+| 抓包 | tcpdump / Wireshark | tcpdump / Wireshark | Wireshark 配合 Npcap |
+
+Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不代表浏览器内置 DoH 或代理连接路径；权限和可用参数应按所用系统确认[^windows]。前面各篇使用的 Rust、Go、Python 程序应保存成文件运行；回环验证不要求改系统路由。
 
 ## 用 curl 记录请求耗时
 
@@ -206,6 +251,47 @@ curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
 先以相同 URL、HTTP 版本和地址族重复测量，再分别比较 IPv4/IPv6、系统解析与固定真实地址、显式代理与未指定显式代理。固定地址可用 `--resolve` 保留 URL 主机名、SNI 和证书校验；记录 `remote_ip` 和退出码，并核对 TUN 是否仍在接管。改变目标 IP 也可能改变 CDN 节点或网络路径，结论应停留在该组对照能支持的范围内。
 :::
 
+## Wireshark 实验：从一条连接验证阶段边界
+
+### 实验条件与捕获步骤
+
+目标是把前面的 `/fast`、`/slow` 回环对照与 TCP、HTTP 报文对齐。需要本机 Wireshark、可用的捕获权限及前面的 Python 服务；不访问外网、不修改接口配置。记录 Wireshark 与 curl 版本。macOS 的回环接口为 `lo0`，Linux 为 `lo`；Windows 可使用 Npcap 提供的回环捕获接口，具体名字按接口列表确认[^capture]。
+
+1. 启动前面的 Python HTTP 服务，在 Wireshark 选择回环接口，设置**捕获过滤器** `tcp port 18080` 后开始捕获。
+2. 在另一终端交替执行前面的 `/fast` 与 `/slow` curl 命令，各运行三次。它们每次新建连接，便于分别观察握手和响应前等待。
+3. 停止捕获，选择本次连接的一个包，读取其 `tcp.stream` 编号。通过 **Follow → TCP Stream** 查看重组后的明文 HTTP；不要把列表中一个包当作完整消息。
+4. 以该编号设置显示过滤器，例如 `tcp.stream == 0`；`0` 必须替换为实际编号。在同一流内比较请求与响应时间，再与 curl 的 TTFB 对照。
+
+也可用下面的 macOS 命令保存原始捕获，再在 Wireshark 中打开；Linux 把 `lo0` 换成 `lo`。`sudo` 用于捕获权限，文件写入当前目录，结束时按 Ctrl+C：
+
+```bash
+sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
+```
+
+捕获过滤器决定哪些包进入文件；下表的**显示过滤器**只筛选已经捕获的包，两种语法不能互换[^wireshark-filter]。
+
+### 显示过滤器与判断边界
+
+| 观察目标 | Wireshark 显示过滤器 | 可以怎样解释 |
+| --- | --- | --- |
+| 本次回环 HTTP 实验 | `tcp.port == 18080` | 先确认端口及连接；其他进程也可能使用该端口 |
+| 只看一条连接 | `tcp.stream == 0` | 将双向包归入同一捕获流；编号只对当前文件有效 |
+| 初始 SYN | `tcp.flags.syn == 1 and tcp.flags.ack == 0` | 找到新建 TCP 的尝试，不等于握手已完成 |
+| 正常结束或复位 | `tcp.flags.fin == 1 or tcp.flags.reset == 1` | 区分有序关闭与 RST，业务是否执行仍需应用证据 |
+| 疑似重传 | `tcp.analysis.retransmission or tcp.analysis.fast_retransmission` | 是分析器根据所见序号推断，抓包缺失或乱序也会影响判断 |
+| DNS 请求与响应 | `dns` | 仅在另行捕获 DNS 路径时有意义；本次数字回环地址实验预期不依赖 DNS |
+| TLS ClientHello | `tls.handshake.type == 1` | 仅适用另行捕获 TLS 的连接；未启用 ECH 时可检查可见 SNI |
+| IPv4 PMTU 反馈 | `icmp.type == 3 and icmp.code == 4` | 另行捕获时核对被引用原包及通告 MTU，不是本次回环实验必有事件 |
+| IPv6 Packet Too Big | `icmpv6.type == 2` | 与 IPv6 连接和过大原包关联后再解释 |
+
+这些字段以 Wireshark 官方显示过滤参考为依据[^wireshark-fields]。回环实验正常时应能重组 `GET /fast` 或 `GET /slow` 与相同正文；`/slow` 的响应前等待通常更长。TCP 包的数量、合并和 ACK 时机可以变化，不能要求每次恰好出现相同包序列。没有捕获到流量时先确认请求是否成功、接口与过滤器是否正确、捕获是否早于请求，再检查权限。
+
+### HTTPS 与代理路径需要另一次捕获
+
+观察公网 HTTPS 时，应使用第一篇的[实际目标选路与接口检查](/posts/networking/layered-architecture-packet-journey/#实验二先确定地址与接口再抓取协议头部)，不能继续在回环 `18080` 过滤器下寻找 TLS。普通 TLS 1.3 捕获没有会话密钥时，不能读取加密的 Certificate 或 HTTP 内容；ECH 还会保护内部 ClientHello。QUIC Initial 的保护本身不提供旁观者机密性，但 ECH 仍可独立保护其中的真实目标名，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)。
+
+若 TUN 代理终结本地 TCP，应分别捕获或记录应用侧与出站侧，两段连接的序号、ACK 和时间不能直接拼成同一条 TCP。若是真正承载完整 IP 包的隧道，则另按内外层观察。主机上的分段、聚合和校验和卸载还可能让捕获中的大段或校验和状态不同于物理线路，先核对捕获位置与卸载条件，不能直接认定线路发了坏包[^offload]。
+
 ## 把排障结果写成可复查的判断
 
 一个有用的结论包含三部分：已经观察到什么、它排除了什么、还需要什么证据。例如：“连续三次成功建连，但 TLS 完成前超时；当前选路经过 TUN，尚未取得远端节点握手日志。”它比“网不好”或“肯定是服务器慢”更便于下一步验证。
@@ -236,3 +322,13 @@ curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
 [^dplpmtu]: [RFC 8899 §4–§5](https://www.rfc-editor.org/rfc/rfc8899.html#section-4)——面向数据报传输的 DPLPMTUD 探测状态与确认机制
 
 [^curl]: [curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——里程碑计时、连接端点、重定向与连接复用的解释边界；本文命令以 curl 8.7.1 核对
+
+[^windows]: Microsoft Learn：[Find-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/find-netroute)、[Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection)、[Resolve-DnsName](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname)与[ipconfig](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig)——Windows 选路、连接、DNS 查询及本地缓存视图。
+
+[^capture]: [Wireshark User's Guide: Capturing Live Network Data](https://www.wireshark.org/docs/wsug_html_chunked/ChapterCapture.html)与[Npcap: Loopback Packet Capture](https://npcap.com/guide/npcap-users-guide.html#npcap-feature-loopback)——接口选择、捕获权限和 Windows 回环支持。
+
+[^wireshark-filter]: [Wireshark User's Guide: Filtering Packets While Viewing](https://www.wireshark.org/docs/wsug_html_chunked/ChWorkDisplayFilterSection.html)——显示过滤与捕获过滤的区别；[Follow Protocol Streams](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvFollowStreamSection.html)说明流重组视图。
+
+[^wireshark-fields]: Wireshark 官方字段参考：[TCP](https://www.wireshark.org/docs/dfref/t/tcp.html)、[TLS](https://www.wireshark.org/docs/dfref/t/tls.html)、[ICMP](https://www.wireshark.org/docs/dfref/i/icmp.html)与[ICMPv6](https://www.wireshark.org/docs/dfref/i/icmpv6.html)——本节显示过滤器的字段名称与版本范围；TCP 分析器的推断机制见[TCP Analysis](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvTCPAnalysis.html)。
+
+[^offload]: [Wireshark Wiki: CaptureSetup/Offloading](https://wiki.wireshark.org/CaptureSetup/Offloading)——校验和、分段与接收聚合卸载对主机抓包视图的影响。

@@ -9,6 +9,12 @@ tags: ["networking"]
 
 先理解地址的作用范围，再用普通局域网说明子网与下一跳，最后回到 DHCP 和 IPv6 自动配置。这样的阅读顺序先解释配置的含义，再解释配置从何而来；实际接入网络时，配置获取通常先于普通业务通信。
 
+读完本篇后，你应能：
+
+- 从 CIDR 计算子网范围，再用路由表确定下一跳。
+- 解释 ARP 的广播、应答与缓存，以及它不能跨越的广播域。
+- 区分 IPv6 RA、SLAAC、DHCPv6 和 NDP 的配置与交付职责。
+
 ## IP 地址的作用范围：公网、私网与共享地址
 
 IP 地址标识网络中的通信接口，而不是设备永久不变的身份。一台主机可以有多张接口，一张接口也可以同时拥有多个地址。**IPv4** 使用 32 位地址，通常写作 `192.168.1.10`；**IPv6** 使用 128 位地址，例如文档示例地址 `2001:db8::1`。两者有各自的头部格式、路由和邻居发现机制，排查双栈故障时应分别检查。
@@ -46,21 +52,37 @@ IP 地址标识网络中的通信接口，而不是设备永久不变的身份�
 
 **实际出接口与下一跳以路由选择结果为准。** 配置地址通常会建立相应的直连路由，因而上面的掩码模型能解释最常见的结果；如果另有 `192.168.1.50/32` 主机路由，目标即使属于这个 `/24`，也可能经另一个网关转发。下一篇的[最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由表与最长前缀匹配)会把这套简化模型推广到多接口与策略路由。
 
-这个前缀比较可以脱离网络做纯计算。下面的 Rust 完整程序用标准库解析 IPv4 地址，再把它们转换为 32 位整数做按位与；它只验证地址是否落在同一个 `/24`，不查询或修改系统路由。
+### 算清一个 /27 子网
+
+把本机改为 `192.168.10.37/27`，仍限定只有普通直连与默认路由。最后一字节的掩码为二进制 `11100000`：`37 & 224 = 32`，每个子网有 32 个地址。
+
+| 项目 | 计算结果 |
+| --- | --- |
+| 子网掩码 | `255.255.255.224` |
+| 网络地址 | `192.168.10.32` |
+| 广播地址 | `192.168.10.63` |
+| 常规主机范围 | `192.168.10.33` 至 `192.168.10.62`，共 30 个 |
+| 目标 `.62` / `.64` | `.62` 属于该前缀；`.64` 属于下一个 `/27` |
+
+下面的 Rust 完整程序验证掩码、网络地址、广播地址和前缀归属，不查询或修改系统路由：
 
 ```rust title="subnet_membership.rs"
 use std::net::Ipv4Addr;
 
 fn main() {
-    let local = Ipv4Addr::new(192, 168, 1, 10);
-    let prefix = 24_u32;
+    let local = Ipv4Addr::new(192, 168, 10, 37);
+    let prefix = 27_u32;
+    assert!(prefix <= 32);
     let mask = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
     let network = u32::from(local) & mask;
+    let broadcast = network | !mask;
+    println!("mask={}", Ipv4Addr::from(mask));
     println!("network={}/{}", Ipv4Addr::from(network), prefix);
+    println!("broadcast={}", Ipv4Addr::from(broadcast));
 
     for target in [
-        Ipv4Addr::new(192, 168, 1, 50),
-        Ipv4Addr::new(93, 184, 216, 34),
+        Ipv4Addr::new(192, 168, 10, 62),
+        Ipv4Addr::new(192, 168, 10, 64),
     ] {
         let same_prefix = u32::from(target) & mask == network;
         println!("target={target} same_prefix={same_prefix}");
@@ -71,12 +93,14 @@ fn main() {
 保存为 `subnet_membership.rs`，在该目录运行 `rustc subnet_membership.rs -o subnet_membership`，再运行 `./subnet_membership`，输出为：
 
 ```text
-network=192.168.1.0/24
-target=192.168.1.50 same_prefix=true
-target=93.184.216.34 same_prefix=false
+mask=255.255.255.224
+network=192.168.10.32/27
+broadcast=192.168.10.63
+target=192.168.10.62 same_prefix=true
+target=192.168.10.64 same_prefix=false
 ```
 
-这段纯计算也适合 [Rust Playground](https://play.rust-lang.org)；输出 `true` 只证明前缀相等，实际下一跳仍需查路由。
+这段纯计算也适合 [Rust Playground](https://play.rust-lang.org)；输出 `true` 只证明前缀相等，不检查普通主机地址是否合法，实际下一跳仍需查路由。
 
 在常规 IPv4 多址子网中，主机位全 `0` 的地址表示网络本身，全 `1` 的地址用于子网广播，不能分配给普通主机。因此对前缀长度 $n$（$n \le 30$），常见的可用主机地址数是 $2^{32-n}-2$。
 
@@ -88,6 +112,8 @@ target=93.184.216.34 same_prefix=false
 | `/32` | `255.255.255.255` | 1 | 不适用减二规则 | 单个地址的主机路由 |
 
 `/31` 点对点链路可使用两个地址，不套用常规广播子网的减二规则；IPv6 也没有 IPv4 这种子网广播地址[^31]。
+
+例如点对点配置 `192.0.2.10/31` 的两个端点可以是 `.10` 和 `.11`，而不是把它们分别扣成网络地址与广播地址。上面程序仍能计算 `/31` 的位范围，但打印为 `broadcast` 的范围上界在这种链路中不具有子网广播语义。
 
 ## 局域网交付：MAC 地址、交换机与 ARP / NDP
 
@@ -151,6 +177,8 @@ NDP 也定义路由器发现、前缀发现和邻居不可达检测。地址自�
 
 首次获取租约通常经历 **DORA**（Discover、Offer、Request、ACK）四步。客户端使用 UDP 端口 `68`，服务器使用 `67`[^6]：
 
+初始客户端尚无可用 IPv4 地址，Discover 通常从 `0.0.0.0:68` 发到 `255.255.255.255:67`，在以太网内使用广播。普通路由器不会把这份局域网广播直接转发到另一子网；DHCP 中继接收后填写 `giaddr` 等信息并转交服务器，服务器据此选择地址池和回复路径。`0.0.0.0` 在这里是尚未配置地址时的协议用法，不是已经租到的主机地址[^6]。
+
 | 阶段 | 作用 | 常见交付方式 |
 | --- | --- | --- |
 | Discover | 寻找可用服务器 | 客户端通常广播 |
@@ -190,6 +218,18 @@ sequenceDiagram
 4. 地址通过检测后，还受 preferred lifetime 与 valid lifetime 约束：首选期限到期后进入 deprecated 状态，既有通信可继续使用；有效期限到期后地址失效[^slaac]。
 
 RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）通告递归 DNS 服务器，通过 **DNS 搜索列表**（DNS Search List，DNSSL）通告搜索域；这些选项有自己的有效期，不能与默认路由或地址前缀的有效期混为一谈[^rdnss]。网络也可以使用 DHCPv6 提供地址或其他参数，但 IPv6 默认路由通常仍来自 RA。
+
+| 需要的配置 | 主要机制 | 排障时分别检查 |
+| --- | --- | --- |
+| 默认路由 | RA 的路由器信息与 Router Lifetime | 有全局地址不代表存在有效默认路由；RA 源地址是路由器的链路本地地址 |
+| 链路上前缀 | RA 前缀选项的 L 标志 | 判断前缀是否 on-link，与能否生成地址分开 |
+| SLAAC 地址 | RA 前缀选项的 A 标志、地址生成及 DAD | 普通以太网 SLAAC 通常使用 `/64`；A 与 L 不是同一个开关 |
+| DHCPv6 地址或参数 | 有状态地址分配，或 Information-request 等交互 | M/O 标志提供配置线索，客户端支持与策略仍影响行为；不能套用 DHCPv4 DORA |
+| DNS 服务 | RA RDNSS、DHCPv6 或本机配置 | 取得地址、路由和 DNS 是不同的成功条件 |
+
+主机可以先发送路由器请求 RS（Router Solicitation）促使路由器回复 RA，也可以接收周期性 RA。DHCPv6 的地址分配不能代替 RA 的默认路由发现；因此“一律屏蔽 ICMPv6”可能同时破坏邻居解析、路由发现和路径 MTU 反馈[^ra][^dhcpv6]。
+
+一张接口还可同时持有稳定地址与定期更换的**临时地址**（temporary address）。RFC 8981 的临时地址扩展减少长期使用同一接口标识符造成的关联，但不会隐藏网络前缀，也不等于匿名；具体是否生成、优先选择哪个源地址，要看系统策略。不要假定每个 IPv6 地址都由网卡 MAC 推导，也不要把地址变化直接认作另一台设备上线[^privacy]。
 
 ## 观察本机寻址与邻居表：实验与边界
 
@@ -242,7 +282,7 @@ sudo tcpdump -i en0 -nn -e arp
 00:00:5e:00:53:02 > 00:00:5e:00:53:01, ethertype ARP (0x0806): Reply 192.168.1.1 is-at 00:00:5e:00:53:02
 ```
 
-重点观察请求的广播目的 MAC、回复的单播目的 MAC，以及 ARP 内的目标 IP。结束后按 Ctrl+C 停止抓包。没有捕获到 ARP 既可能因为缓存命中，也可能因为接口选错或流量经虚拟接口处理，不能直接解释为“没有发包”。
+重点观察请求的广播目的 MAC、回复的单播目的 MAC，以及 ARP 内的目标 IP。先保存 `arp -a` 的缓存状态，抓包中重复两次同样的有限探测，再查看缓存：首次需要解析而后续使用缓存时，可能只有第一轮看到请求。若起初就有可用表项，应记录“缓存命中条件下未见新解析”，等待自然刷新后再对照，不需要清空全机缓存。结束后按 Ctrl+C 停止抓包。没有捕获到 ARP 也可能因为接口选错或流量经虚拟接口处理，不能直接解释为“没有发包”。
 
 ## 总结
 
@@ -280,3 +320,9 @@ sudo tcpdump -i en0 -nn -e arp
 [^slaac]: [RFC 4862 §5.4、§5.5.3、§5.5.4](https://www.rfc-editor.org/rfc/rfc4862.html#section-5.4)——SLAAC 候选地址、DAD 及地址首选/有效期限。
 
 [^rdnss]: [RFC 8106 §5、§6.1](https://www.rfc-editor.org/rfc/rfc8106.html#section-5)——RA 中的 RDNSS/DNSSL 选项及其独立有效期。
+
+[^ra]: [RFC 4861 §4.2、§4.6.2、§6](https://www.rfc-editor.org/rfc/rfc4861.html#section-4.2)——RA 的链路本地源地址、Router Lifetime、M/O 标志、前缀 A/L 标志与路由器发现。
+
+[^dhcpv6]: [RFC 9915 §1、§5、§18](https://www.rfc-editor.org/rfc/rfc9915.html#section-1)——DHCPv6 的地址及其他参数配置、消息类型与交互；2026 年 1 月取代 RFC 8415，默认路由发现仍由 NDP 负责。
+
+[^privacy]: [RFC 8981 §3、§4](https://www.rfc-editor.org/rfc/rfc8981.html#section-3)——临时地址的生成、更换、生命周期和隐私限制。

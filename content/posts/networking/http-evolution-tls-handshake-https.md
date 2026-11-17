@@ -9,6 +9,12 @@ tags: ["networking"]
 
 本篇先读一组最小 HTTP 消息，再比较三个版本的连接复用，最后沿 TLS 握手划清各方的观察边界。这些边界也会成为[第七篇代理分析](/posts/networking/proxies-tunnels-transparent-interception/)的依据：传输连接被代理分成两段，不表示应用的 TLS 也一定在那里终止。
 
+读完本篇后，你应能：
+
+- 比较 HTTP/1.1、HTTP/2、HTTP/3 的承载方式与不同层次的队头阻塞。
+- 沿 TLS 1.3 握手区分密钥派生、证书身份验证、签名与 Finished。
+- 判断链路旁观者、CONNECT 隧道和 TLS 终止代理分别能看到什么。
+
 ## HTTP 语义与连接复用的演进
 
 ### 先读一组请求与响应
@@ -56,27 +62,34 @@ HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接
 
 HTTP/3 避免的是丢包引起的跨流传输按序交付阻塞，并不保证一个流绝不受其他流影响。它所依赖的可靠性、流量控制与连接迁移见[第四篇的 QUIC](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)。
 
+### 缓存与 Cookie 不属于传输连接状态
+
+`Cache-Control: max-age=60` 允许响应在满足其他条件时保持 60 秒新鲜；`no-cache` 要求复用前验证，并不等于禁止存储；`no-store` 才要求缓存不要存储。过期响应若有 `ETag`，客户端可以发送 `If-None-Match`，服务端在条件满足时返回 `304`，复用已有正文。这种条件请求仍然会产生网络交互，应与完全命中本地缓存区分[^cache]。
+
+Cookie 则是 HTTP 层的状态管理：服务端用 `Set-Cookie` 设置，客户端按适用条件在后续请求中发送 `Cookie`，不依赖是否复用了同一条 TCP/TLS 连接。TLS 保护传输，但不能代替 Cookie 的作用域和访问控制；`Secure` 限制安全通道发送，`HttpOnly` 限制脚本读取，都不意味着服务端或 TLS 终止端看不到它[^cookie]。
+
 ## TLS 1.3 握手：密钥协商、证书校验与 SNI / ALPN
 
 明文 HTTP 的消息可以被路径上的观察者读取和修改。TLS 为通信提供机密性、完整性和对端身份认证机制，但应用必须正确配置并检查身份验证；“用了加密”本身不证明连到了预期服务。
 
 以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（**1-RTT**）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。在 `ClientHello` 与 `ServerHello` 中，双方已各自携带**椭圆曲线瞬时迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE）临时公钥 `key_share`（提供**前向保密**，Forward Secrecy，FS）；一旦服务端发出 `ServerHello`，双方即可通过基于哈希的密钥派生函数（HKDF）算出握手流量密钥，因此紧随其后的 `EncryptedExtensions`、`Certificate`、`CertificateVerify` 和 `Finished` 全部处于**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护之下[^5]：
 
-```mermaid title="TLS 1.3 完整握手与应用数据" description="示意仅认证服务端的 ECDHE 证书握手，未启用 ECH、0-RTT，也没有 HelloRetryRequest。花括号中的消息由握手密钥保护；双方分别验证对方的 Finished，应用数据使用应用流量密钥。箭头表示逻辑消息顺序，不对应固定数量的 TCP 报文段，也不按耗时比例绘制。"
+```mermaid title="TLS 1.3 完整握手与应用数据" description="示意仅认证服务端的 ECDHE 证书握手，未启用 ECH、0-RTT，也没有 HelloRetryRequest。实线表示明文握手消息，虚线表示密钥保护的消息；花括号中的消息由握手密钥保护，应用数据使用应用流量密钥。箭头是逻辑消息顺序，不对应固定数量的 TCP 报文段或真实耗时。"
 sequenceDiagram
  participant Client as 客户端
  participant Server as TLS 服务端
  Client->>Server: ClientHello (key_share, SNI, ALPN 候选)
  Server->>Client: ServerHello (key_share)
- Server->>Client: {EncryptedExtensions: ALPN 选择}
- Server->>Client: {Certificate}
- Server->>Client: {CertificateVerify: 握手签名}
- Server->>Client: {Finished: 握手校验}
+ Note over Client,Server: 派生握手密钥；此时尚未完成身份验证
+ Server-->>Client: {EncryptedExtensions: ALPN 选择}
+ Server-->>Client: {Certificate}
+ Server-->>Client: {CertificateVerify: 握手签名}
+ Server-->>Client: {Finished: 握手校验}
  Note over Client: 验证证书链与服务名<br/>验证签名和服务端 Finished
- Client->>Server: {Finished: 握手校验}
+ Client-->>Server: {Finished: 握手校验}
  Note over Server: 验证客户端 Finished
- Client->>Server: 加密 Application Data
- Server->>Client: 加密 Application Data
+ Client-->>Server: 加密 Application Data
+ Server-->>Client: 加密 Application Data
 ```
 
 `CertificateVerify` 用证书对应的私钥对握手上下文签名，证明持有该私钥，并把身份绑定到本次握手；证书链与服务名检查仍须另行完成。双方各自的 `Finished` 则校验握手记录并确认掌握相应密钥：本例客户端没有提供客户端证书，因此服务端验证客户端 `Finished` 不等于验证了客户端的实名身份[^5]。
@@ -92,6 +105,36 @@ sequenceDiagram
 
 吊销状态的获取和失败处理依客户端策略而异，不能声称所有工具都会在线确认“未被吊销”。浏览器、OpenSSL 和应用自带信任库也可能不同，诊断时应记录工具与信任配置。会话恢复与 0-RTT 还有另外的状态和重放边界，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/)，不应把早期发送等同于完整认证已经在零往返结束。
 
+| 材料或机制 | 回答的问题 | 不能代替什么 |
+| --- | --- | --- |
+| SNI | 客户端希望服务器选择哪个服务配置？ | 不能证明响应者就是该服务 |
+| SAN 名字匹配 | 证书里的适用身份是否匹配预期服务名？ | 不能代替信任链与有效期检查 |
+| CA 信任链及约束 | 这条证书路径是否受当前信任库认可？ | 不能单独证明持有私钥或名字正确 |
+| CertificateVerify / Finished | 是否持有相应私钥、握手记录和密钥是否一致？ | 不能免除证书身份与路径检查 |
+| ECH | 是否保护真实 ClientHello 中的敏感参数？ | 不能代替服务认证，也不隐藏目的 IP |
+
+### HTTP/3 怎样把 TLS 放进 QUIC
+
+HTTP/2 的普通新连接先建 TCP，再在字节流上运行 TLS；HTTP/3 则把 TLS 握手消息放进 QUIC 的 CRYPTO 帧，不使用 TLS 记录层。两者的建连过程如下，省略 DNS、重试、会话恢复与请求正文[^quic-handshake]：
+
+```mermaid mobile-direction="TB" title="HTTPS over TCP 与 QUIC 的建连对照" description="两组是独立的新连接，均无 0-RTT 或 HelloRetryRequest，QUIC 也没有 Retry。箭头表示阶段依赖，不表示相同耗时。QUIC Initial 的密钥可由公开信息导出，不能向旁观者保密；后续 Handshake 与 1-RTT 使用另外派生的密钥。"
+flowchart LR
+ subgraph tcp_case[HTTP/2：先建 TCP，再运行 TLS]
+  direction TB
+  tcp["TCP 三次握手"] --> tls["TLS 握手<br/>密钥协商与证书验证<br/>Finished"]
+  tls --> h2["HTTP/2 帧<br/>经 TLS 记录与 TCP 字节流传输"]
+ end
+ subgraph quic_case[HTTP/3：QUIC 内集成 TLS]
+  direction TB
+  initial["QUIC Initial<br/>CRYPTO 帧开始 TLS 握手"] --> handshake["Initial 携带 ServerHello<br/>Handshake 携带后续握手"]
+  handshake --> h3["客户端发送 Finished<br/>1-RTT 包承载 HTTP/3 流"]
+ end
+ tcp_case --- quic_case
+ linkStyle 4 stroke:none
+```
+
+QUIC 的应用流仍在流内按序交付；QPACK 的动态表依赖也可能让某些头部解码等待。减少跨流传输阻塞不能推导“HTTP/3 完全没有队头阻塞”，更不能保证 UDP 受限路径上一定比 HTTP/2 快。
+
 ### ECH：保护真实的 ClientHello
 
 **加密客户端问候**（Encrypted Client Hello，ECH）使用服务端提供的配置加密 `ClientHelloInner`，把真实 SNI 及其他受保护参数放在里面，`ClientHelloOuter` 则作为可见的外部封装。RFC 9849 定义 ECH 机制，RFC 9848 的 `ech` 服务参数定义了通过 `HTTPS` / `SVCB` 分发 `ECHConfigList` 的方式[^8][^ech-dns]。
@@ -100,7 +143,7 @@ ECH 不会把整个最初的握手都变成不可见：`ClientHelloOuter` 仍是
 
 ```mermaid mobile-direction="TB" title="ECH 的公开外层与受保护的 ClientHello" description="展示通过 DNS HTTPS 或 SVCB 的 ech 参数取得配置、并成功使用 ECH 的路径，不表示每次都要重新查询 DNS，也不表示所有站点都提供 ECH。配置包含公钥与 public_name；ClientHelloInner 中的真实 SNI 和受保护 ALPN 被加密后放进外层 ECH 扩展。持有对应私钥的 ECH 前端可恢复 inner，旁观者只能读取外层及网络元数据；客户端仍需完成 TLS 服务身份验证。"
 flowchart LR
- dns["DNS ech 配置<br/>公钥与 public_name"] --> seal["客户端构造并加密 inner<br/>真实 SNI 与受保护 ALPN"]
+ dns["HTTPS / SVCB 的 ech 参数<br/>解码为 ECHConfigList"] --> seal["按公钥与 public_name 构造外层<br/>加密 inner 的真实 SNI 与 ALPN"]
  seal --> outer["ClientHelloOuter<br/>公开名与加密 inner"]
  outer -->|可读外层| observer["旁观者<br/>不能解密 inner"]
  outer -->|解密| frontend["ECH 前端<br/>用私钥恢复 inner"]
@@ -193,7 +236,7 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 ## 延伸阅读
 
 - [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html)——进一步查阅方法、状态码、缓存与网关语义
-- [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446.html)——查阅 TLS 1.3 状态机、恢复、密钥推导与记录层
+- [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455.html)——需要双向消息通信时，进一步了解 WebSocket 的握手与消息帧；它与 HTTP 缓存、连接复用是不同主题
 
 [^1]: [RFC 9110 §6、§9、§15](https://www.rfc-editor.org/rfc/rfc9110.html#section-6)——跨版本的消息、请求方法与状态码语义
 
@@ -203,11 +246,11 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 
 [^4]: [RFC 9114 §2、§3](https://www.rfc-editor.org/rfc/rfc9114.html#section-2)——HTTP/3 的 QUIC 映射、ALPN 与端点发现；[RFC 9204 §2](https://www.rfc-editor.org/rfc/rfc9204.html#section-2)说明 QPACK 的头部依赖和受阻流
 
-[^5]: [RFC 8446 §2、§4、§5、§7](https://www.rfc-editor.org/rfc/rfc8446.html#section-2)——TLS 1.3 常见 1-RTT 完整握手、ECDHE 前向保密、HKDF 密钥派生以及 ServerHello 之后握手消息的 AEAD 加密保护
+[^5]: [RFC 9846 §2、§4、§5、§7](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 常见 1-RTT 完整握手、ECDHE 前向保密、HKDF 密钥派生以及 ServerHello 之后握手消息的 AEAD 加密保护；取代 RFC 8446
 
 [^6]: [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)——`server_name` 扩展在 ClientHello 中传递服务名，不代替客户端身份验证
 
-[^7]: [RFC 7301 §3](https://www.rfc-editor.org/rfc/rfc7301.html#section-3)与[RFC 8446 §4.3.1](https://www.rfc-editor.org/rfc/rfc8446.html#section-4.3.1)——ALPN 的协议选择及 TLS 1.3 服务端在加密扩展中的响应
+[^7]: [RFC 7301 §3](https://www.rfc-editor.org/rfc/rfc7301.html#section-3)与[RFC 9846 §4.4.1](https://www.rfc-editor.org/rfc/rfc9846.html#section-4.4.1)——ALPN 的协议选择及 TLS 1.3 服务端在加密扩展中的响应；新版主规范调整了章节编号。
 
 [^8]: [RFC 9849 §3、§10](https://www.rfc-editor.org/rfc/rfc9849.html#section-3)——ClientHelloInner / Outer、ECH 保护目标，以及 IP 与流量分析等剩余隐私边界（2026 年 3 月发布）
 
@@ -222,3 +265,9 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 [^openssl]: [OpenSSL 3.6 `s_client`](https://docs.openssl.org/3.6/man1/openssl-s_client/)与[验证选项](https://docs.openssl.org/3.6/man1/openssl-verification-options/)——SNI 默认行为、`-noservername`、`-verify_hostname` 与 `-verify_return_error`
 
 [^curl]: [curl 手册：location、http2、head、noproxy](https://curl.se/docs/manpage.html)——重定向跟随、协议协商、HEAD 与显式代理排除选项
+
+[^cache]: [RFC 9111 §4.2、§4.3、§5.2](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2)——新鲜度、重新验证与 no-cache / no-store 等指令；条件请求语义见 [RFC 9110 §13](https://www.rfc-editor.org/rfc/rfc9110.html#section-13)。
+
+[^cookie]: [RFC 6265 §4.1、§4.2、§5.4](https://www.rfc-editor.org/rfc/rfc6265.html#section-4.1)——Set-Cookie、Cookie 的作用域和发送条件，以及 Secure、HttpOnly 属性。
+
+[^quic-handshake]: [RFC 9001 §4、§5.2](https://www.rfc-editor.org/rfc/rfc9001.html#section-4)——QUIC CRYPTO 帧中的 TLS 握手与公开可导出的 Initial 密钥；HTTP/3 的 QUIC 流映射见 [RFC 9114 §6](https://www.rfc-editor.org/rfc/rfc9114.html#section-6)。

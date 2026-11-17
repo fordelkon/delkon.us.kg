@@ -9,6 +9,12 @@ tags: ["networking"]
 
 沿着这个顺序，可以分别理解三种不同动作：路由决定交给哪里，NAT 改写地址与端口，TUN 提供内核与程序之间的 IP 包接口。第七篇再把它们组合成具体的代理接管与出站过程。
 
+读完本篇后，你应能：
+
+- 区分策略选表与同表内的最长前缀匹配。
+- 追踪 NAT 地址端口转换及回程状态，并与防火墙、代理区分。
+- 解释 TUN/TAP 的数据对象，以及代理出站为何需要绕过接管。
+
 ## 路由表与最长前缀匹配
 
 路由表按“目的网络前缀 → 下一跳 / 出接口 / 其他属性”组织条目，而不是为每一个可能的 IP 单独建表。先看一个只讨论 IPv4、固定查找同一张路由表的简化例子：
@@ -29,6 +35,15 @@ tags: ["networking"]
 :::note[两条 /1 路由能覆盖什么]
 `0.0.0.0/1` 与 `128.0.0.0/1` 共同覆盖 IPv4 地址空间，并优先于原有 `/0` 默认路由。因此，把它们指向虚拟接口，可以接管原本依赖默认路由的 IPv4 流量；`/24`、`/32` 等更具体路由仍可能优先命中，策略规则也可能选择其他表。它们不控制 IPv6，删除这两条路由后的行为还取决于剩余配置。
 :::
+
+下面是两个独立配置的查询结果对照，目标均为 `93.184.216.34`，固定同一张 IPv4 路由表且没有更具体的例外：
+
+| 配置 | 相关候选路由 | 本次命中 |
+| --- | --- | --- |
+| A：未接管 | `/0 → en0` | 经物理出口的默认路由 |
+| B：另有 TUN 路由 | `/0 → en0`、`0.0.0.0/1 → utun`、`128.0.0.0/1 → utun` | 目标首位为 0，命中 `0.0.0.0/1` |
+
+两种配置分别得到不同的出口。IPv6 则使用 `::/0` 及其更具体路由，可能出现 IPv4 进入 TUN、IPv6 仍走物理出口的双栈配置。
 
 ## 路由选择与逐跳转发：TTL 与 ICMP
 
@@ -59,6 +74,17 @@ IPv6 使用独立的 ICMPv6 类型，例如 Hop Limit 超时和 Packet Too Big�
 ## NAT：多台内网设备如何共用一个公网 IP
 
 [私网地址](/posts/networking/ip-addressing-subnet-lan-delivery/#ip-地址的作用范围公网私网与共享地址)不用于普通全球公网路由。家庭网络若用多个私网 IPv4 地址共享一个公网 IPv4 地址，出口常采用**网络地址端口转换**（Network Address Port Translation，NAPT，也称 PAT），同时改写地址与端口。只转换地址、不转换端口的 Basic NAT 则是另一种形式[^4]。
+
+SNAT、DNAT 按改写方向命名，NAPT 强调端口参与映射，端口转发则是常见的配置场景[^4]：
+
+| 名称 | 改动 | 例子 |
+| --- | --- | --- |
+| SNAT | 某方向包的源地址，必要时也改源端口 | 出站把私网源地址转换为出口地址 |
+| DNAT | 某方向包的目的地址，必要时也改目的端口 | 把访问公网地址的请求交给内部服务 |
+| NAPT / PAT | 在地址转换中引入传输端口映射 | 多台主机共用同一个公网 IPv4 |
+| 端口转发 | 常见的静态入向 DNAT 配置场景 | `203.0.113.5:8443 → 192.168.1.20:443` |
+
+家用设备往往同时执行 NAT 与防火墙规则：前者改写地址端口，后者决定是否放行，两者都不提供传输加密。家庭 NAT 之外还有 CGNAT 时，家庭端口转发只解决其中一层，参见[共享地址与入站路径](/posts/networking/ip-addressing-subnet-lan-delivery/#ip-地址的作用范围公网私网与共享地址)。
 
 假设路由器公网地址为文档示例地址 `203.0.113.5`，两台内网主机使用相同源端口访问同一个 TCP 服务。下面是本次通信的一种可能转换：
 
@@ -100,7 +126,16 @@ RFC 4787 针对 UDP 分别描述映射与过滤行为，并指出旧的 Full Con
 | TAP | 以太网帧，包含链路层头部 | 虚拟机桥接、二层网络模拟 |
 | TUN | IP 包，不含以太网帧头 | 三层 VPN、通过 IP 包入口工作的透明代理 |
 
-平台接口不同：Linux 常通过 `/dev/net/tun` 创建 TUN/TAP，macOS 的三层隧道接口通常显示为 `utunX`；Linux 的设备配置 API 不应被解释为所有平台的统一创建方式。用户态读写时还可能有平台专用元数据，表中描述的是核心网络数据单元。
+平台接口不同：Linux 常通过 `/dev/net/tun` 创建 TUN/TAP，macOS 的三层隧道接口通常显示为 `utunX`；Linux 的设备配置 API 不应被解释为所有平台的统一创建方式。用户态读写时还可能有平台专用元数据，表中描述的是核心网络数据单元。Apple 的 Network Extension 提供 `NEPacketTunnelProvider` / `packetFlow` 等隧道接口及包含、排除路由配置，但并非所有 `utun` 都由同一种 API 创建[^apple-tunnel]。
+
+| 目的 | Linux | macOS |
+| --- | --- | --- |
+| 查看 IPv4 / IPv6 路由 | `ip route` / `ip -6 route` | `netstat -rn -f inet` / `netstat -rn -f inet6` |
+| 查询特定目标 | `ip route get <IPv4>` / `ip -6 route get <IPv6>` | `route -n get <IPv4>` / `route -n get -inet6 <IPv6>` |
+| 检查策略控制 | `ip rule`、`fwmark` 和相应路由表 | 接口作用域、系统路由与具体 Network Extension 配置 |
+| 三层接口 | TUN 设备及其创建程序 | `utunX` 及其创建程序或扩展 |
+
+macOS 的接口作用域与网络扩展策略有自己的实现，表中的命令只按观察目的对应。判断出站是否绕过虚拟入口，仍需结合该平台的选路结果。
 
 TUN 本身只确定“程序可以读写 IP 包”。它既不规定加密协议，也不规定是否终结 TCP，更不保证所有应用流量都会进入该接口。范围由 IPv4/IPv6 路由、策略规则和排除项共同决定。
 
@@ -212,3 +247,5 @@ traceroute -n -m 5 -q 1 -w 1 93.184.216.34
 [^ttl]: [RFC 1812 §5.3.1](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.3.1)——IPv4 路由器转发时递减 TTL，TTL 耗尽时丢弃并按规则生成 ICMP Time Exceeded；本机交付与转发处理需要区分。
 
 [^ipv6-hdr]: [RFC 8200 §3、§4.5](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 固定 40 字节基础头部取消头部校验和字段，仅保留 Hop Limit 逐跳递减。
+
+[^apple-tunnel]: [Apple: NEPacketTunnelProvider](https://developer.apple.com/documentation/networkextension/nepackettunnelprovider)、[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)与[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)——Packet Tunnel 的包读写及包含、排除路由；不把 Linux TUN API 套用为 macOS 的统一实现。

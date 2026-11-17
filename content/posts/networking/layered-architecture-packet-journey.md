@@ -7,6 +7,12 @@ tags: ["networking"]
 
 输入一个网址以后，浏览器交给操作系统的是什么？路由器转发的又是什么？这是计算机网络系列的第一篇，先用协议分层与一次 HTTPS 请求建立全局地图——它们是后面七篇讨论[本地交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[跨网转发](/posts/networking/routing-forwarding-nat-virtual-interfaces/)、[传输接口](/posts/networking/transport-tcp-udp-socket-quic/)、[名字解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[安全通信](/posts/networking/http-evolution-tls-handshake-https/)、[代理接管](/posts/networking/proxies-tunnels-transparent-interception/)与[排障](/posts/networking/network-diagnostics-performance-troubleshooting/)时共用的坐标系。实验以 macOS 和 Linux 常见工具为主，解释结果时会区分协议保证、软件实现与具体环境条件。
 
+读完本篇后，你应能：
+
+- 区分 HTTP 消息、TLS 记录、TCP 段、IP 包与链路帧的边界。
+- 追踪逐跳转发中 MAC、IP、TTL 的变化，并解释回程与连接复用。
+- 区分 Socket 接口、NAT 转发和代理创建连接的职责。
+
 ## 为什么需要分层模型
 
 把数据从一台电脑上的浏览器送到另一台机器上的 Web 服务进程，至少要同时解决四类完全不同的问题：应用程序如何表达业务语义（请求哪个路径、返回什么状态码），端到端主机如何区分不同进程并处理丢包乱序，跨越多个中间网络时如何选择下一跳，以及电信号或无线电波如何在一段物理链路上把比特送到相邻设备。
@@ -23,6 +29,8 @@ tags: ["networking"]
 | 链路层（Link） | 同一本地链路上的成帧、校验与介质访问 | 以太网（Ethernet）、Wi-Fi | **媒体访问控制地址**（Media Access Control Address，MAC 地址） |
 
 教学与工程讨论中还会遇到**开放系统互连七层参考模型**（Open Systems Interconnection Reference Model，简称 OSI 七层模型：物理层、数据链路层、网络层、传输层、会话层、表示层、应用层）[^osi]。与互联网四层模型相比，OSI 把链路与物理介质拆成两层，并在传输层之上额外划分出会话层与表示层；而在实际互联网协议栈中，会话管理与数据编码加密（例如 TLS 与 HTTP 压缩）通常由应用层协议或库自行承担，内核协议栈并没有独立的第 5、6 层数据结构。入门阶段先以四层模型作为主地图即可，排查双工协商或网线故障时再补入物理层视角。
+
+物理层负责双绞线、光纤或无线信道上的编码、调制和信号恢复。五层教学模型将这部分从链路层的讨论范围中单独拆出。以太网和 Wi-Fi 都包含链路控制与物理传输规范；表中的 MAC 适用于这类链路，PPP、回环和 TUN 等接口则有各自的数据格式。
 
 :::note[协议职责与代码运行位置]
 四层模型划定协议职责与数据边界，不规定源码必须分成四个目录。常见应用通过用户态 TLS 库完成握手与记录层处理；部分实现也会把记录层的加解密移入内核或硬件，例如 Linux kTLS，握手仍由用户态处理[^ktls]。QUIC 则常在用户态借助 UDP 实现可靠传输、多路复用与拥塞控制。判断某一层的职责，要看它解释什么数据、提供什么保证；运行位置需要另查具体实现。
@@ -63,6 +71,15 @@ flowchart LR
  linkStyle default stroke:none
 ```
 
+以 HTTPS over TCP 为例，逻辑栈是 HTTP → TLS → TCP → IP → 当前链路。TLS 记录有自己的定界，TCP 再把这些记录编码后的字节放进字节流。下面用字节编号说明两套边界可以怎样错开；实际长度由实现与协议限制决定[^5]：
+
+| TCP 字节流中的示例范围 | TLS 记录边界 | 一种可能的 TCP 分段 |
+| --- | --- | --- |
+| `0…999` | 记录 A 的编码字节 | 段 1 载 `0…599`；段 2 载 `600…1399` |
+| `1000…1799` | 记录 B 的编码字节 | 段 2 同时载 A 的尾部与 B 的开头；段 3 载 `1400…1799` |
+
+这里的编号包含 TLS 记录头及受保护载荷，不是 HTTP 正文的编号。HTTP 消息也可以跨记录，TLS 记录也可容纳多个 HTTP 消息或帧的字节。接收方先由 TCP 重组有序字节，再由 TLS 恢复记录，最后由 HTTP 解释消息。
+
 接收端之所以知道该把剥出来的载荷交给上层的哪一个协议模块，靠的是每一层头部预留的**复用标识字段**（multiplexing identifier）：
 
 1. 以太网帧头中的 **EtherType** 指明载荷类型，例如 `0x0800` 代表 IPv4、`0x86DD` 代表 IPv6、`0x0806` 代表 ARP[^4]。
@@ -82,7 +99,7 @@ flowchart LR
 因此，一次跨网通信中存在两条边界截然不同的生命周期：
 
 1. **链路层帧头是逐跳重写的**（hop-by-hop）：同一份 IP 数据报从你的电脑到家用路由器、再到运营商接入设备，每经过一次三层路由转发，外层的源/目的 MAC 地址都会被替换成当前这段链路的收发双方。
-2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。NAT 路由器会在转发时改写 IP 包的源 IP 与源端口，而代理服务器干脆在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
+2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。常见家庭 NAPT 会在转发时改写 IP 包的源 IP 与源端口，而代理服务器干脆在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
 
 下面把这些职责放回同一条路径。为方便比较，图中每段链路都按以太网表示；节点标注的是本例的处理职责，不是设备能力的上限。
 
@@ -135,6 +152,19 @@ TCP 提供可靠、有序的字节流，不提供机密性与服务身份认证�
 浏览器将 HTTP/1.1 请求或 HTTP/2 帧交给 TLS 记录层加密，再写入 Socket。普通内核 TCP/IP 发送路径将其分段、封装并送往下一跳；TLS 终止端收到密文后解密、解析请求，再将响应经回程路径送回浏览器。回程未必与去程相同。
 
 在本例的信任与连接模型下，浏览器和 TLS 终止端能读取 HTTP 路径与内容；这个终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，未启用 ECH 时还可能重组 `ClientHello` 读取 SNI；它不一定恰好装在一个包中。可见性取决于观察位置，不能仅凭“经过代理”判断内容是否被解密。
+
+### 已有连接和缓存时，请求怎样变化
+
+前面的四步描述一次冷启动访问。已经访问过的服务可能留下缓存、连接或 TLS 恢复状态，下一次请求的路径也会随之变化：
+
+| 本次状态 | 还需要的网络工作 |
+| --- | --- |
+| 本地 HTTP 缓存可直接满足请求 | 可能完全不发网络请求；需要验证缓存时则仍会访问服务端 |
+| 同一来源已有可用 HTTP/2 连接 | 在已有 TLS 连接上创建 HTTP 流，不重新执行 TCP/TLS 握手 |
+| 连接已关闭，但 DNS 和 TLS 恢复状态仍有效 | 可以复用地址和恢复材料，仍需新建传输连接并执行恢复握手 |
+| 首次访问且没有可用状态 | 按前面的 DNS、TCP、TLS、HTTP 模型展开 |
+
+连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。HTTP/3 的传输建立方式另见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)。
 
 ## 观察一次请求：实验能证明什么，不能证明什么
 
@@ -196,8 +226,8 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 - 互联网四层模型（应用、传输、网络、链路）按职责隔离变化；实际软件实现不必机械对应四段独立代码，但每一层的头部边界必须清晰。
 - 发送端自顶向下逐层封装、接收端逐层解封装，并通过链路层 EtherType、IP 协议号与传输层端口号完成解复用。
-- 链路层 MAC 帧头逐跳重写，IP 与端口在常规直连中端到端保持；NAT 会改写外层地址端口，而代理则在应用或传输边界终结并重建连接。
-- Socket 是操作系统向应用暴露的编程接口而非网络协议；应用写入 Socket 成功只代表交付给本机内核缓冲区。
+- 链路层 MAC 帧头逐跳重写，IP 与端口在常规直连中端到端保持；NAT 按配置改写包头中的地址或端口，而代理则在应用或传输边界终结并重建连接。
+- Socket 是操作系统向应用暴露的编程接口而非网络协议；应用写入 Socket 成功只代表本地发送路径接受了相应字节。
 
 下一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)将深入最底层与网络层的交界：当本机已经拿到目标 IP 后，如何获取自己的网络配置，又如何判断该直接把帧交给同一局域网里的另一台设备，还是交给默认网关？
 
@@ -214,7 +244,9 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 [^4]: [IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
 
-[^5]: [RFC 8446: The Transport Layer Security (TLS) Protocol Version 1.3](https://www.rfc-editor.org/info/rfc8446/)——定义 TLS 1.3 握手流程与记录层边界，以及 ClientHello 中明文 SNI 扩展的作用
+[^5]: [RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
+
+[^reuse]: [RFC 9113 §9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)——HTTP/2 连接复用及不同来源共用连接时的权威性和证书要求；[RFC 9111 §4](https://www.rfc-editor.org/rfc/rfc9111.html#section-4)说明直接使用缓存响应与重新验证的条件。
 
 [^6]: [Beej's Guide to Network Programming: What is a socket?](https://beej.us/guide/bgnet/html/split/what-is-a-socket.html)——解释 Socket 作为操作系统文件描述符与网络编程接口的抽象定位
 

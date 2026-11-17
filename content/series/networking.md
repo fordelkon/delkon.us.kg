@@ -26,6 +26,12 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 
 八篇按机制依赖连续展开，阅读顺序不等于一次请求的实际发生顺序：先在第四篇建立 TCP、UDP 与 QUIC 的传输语义，第五篇才能对比传统 DNS 与 DoT、DoH、DoQ 的传输差异；第六篇讨论 TLS 握手、SNI 与 ECH 时，再回接第五篇的 HTTPS/SVCB 记录与第四篇的队头阻塞。第七篇以 Mihomo 为例组装前面的路由、TUN、DNS 与代理协议，第八篇则用可复现的受控实验收束全系列的诊断方法。
 
-需要具备基本命令行经验；Rust 和 Go 的完整回环程序分别用于展示 TCP 半关闭与 SOCKS5/HTTP 代理转发，Python 标准库用于构造可控制的 DNS、TLS 与诊断对照实验。命令以 macOS 为主，同时给出 Linux（`iproute2` / `ss`）对应写法。实验说明会交代环境前提、观察重点与判断边界，本机输出不必与示例逐字一致。
+需要具备基本命令行经验；Rust 和 Go 程序分别展示 TCP 半关闭与 HTTP CONNECT 转发，Python 标准库用于回环验证和响应计时对照。命令以 macOS 为主，同时给出 Linux（`iproute2` / `ss`）对应写法。实验说明会交代环境前提、观察重点与判断边界，本机输出不必与示例逐字一致。
 
 本系列以客户端、主机协议栈与日常工程排障为范围，重点建立地址作用域、下一跳决策、连接状态机、加密可见性与代理接管路径的分析方法。数据中心交换与生成树协议、OSPF/BGP 等动态路由协议细节、组播以及无线物理层调制，属于进一步展开的主题。
+
+## 本地实验与平台命令
+
+第二篇的[子网计算](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)、第四篇的[半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)、第七篇的[CONNECT 回环验证](/posts/networking/proxies-tunnels-transparent-interception/#go-示例保留预读数据与两个方向的结束状态)和第八篇的[响应等待对照](/posts/networking/network-diagnostics-performance-troubleshooting/#控制变量实验只改变服务端响应前的等待)均不依赖外网，适合先在本机运行。抓包实验另需捕获权限，并注意接口、过滤器和捕获时机。
+
+Windows 读者可先查第八篇的[平台命令对照](/posts/networking/network-diagnostics-performance-troubleshooting/#平台命令对照)，再回到对应机制。平台命令是功能上的近似对应；Linux 的策略路由、TPROXY 与 Apple Network Extension 有各自的系统边界。
