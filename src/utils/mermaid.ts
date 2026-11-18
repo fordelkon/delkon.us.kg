@@ -1,8 +1,16 @@
 import { renderMermaidSVG } from "beautiful-mermaid";
 
+const nodeRoles = ["actor", "resource", "state", "result", "risk"].map(
+	(role) => `classDef ${role} fill:var(--diagram-${role}-fill),stroke:var(--diagram-${role}-ink)`,
+);
+
 /** Render trusted, authored diagrams at build time without browser or font dependencies. */
 export function renderDiagram(source: string, prefix: string): string {
-	const svg = renderMermaidSVG(source, {
+	const themedSource = /^\s*(?:flowchart|graph)\s/.test(source)
+		? `${source}\n${nodeRoles.join("\n")}`
+		: source;
+
+	const svg = renderMermaidSVG(themedSource, {
 		bg: "var(--color-printer-paper)",
 		fg: "var(--color-printer-ink)",
 		transparent: true,

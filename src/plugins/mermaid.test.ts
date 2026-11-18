@@ -109,3 +109,16 @@ test("renders sequence messages and notes without colliding arrow markers", asyn
 
 	assert.doesNotMatch(html, /<style>|@import|fonts\.googleapis/);
 });
+
+test("applies a shared role to the same flowchart node in both layouts", async () => {
+	const responsive = diagram
+		.replace('title="发布链"', 'mobile-direction="TB" title="发布链"')
+		.replace("flowchart TB", "flowchart LR")
+		.replace("B[读取]", "B[读取]\n class B result");
+
+	const { html } = await compile(responsive);
+
+	assert.equal((html.match(/fill="var\(--diagram-result-fill\)"/g) ?? []).length, 2);
+	assert.equal((html.match(/stroke="var\(--diagram-result-ink\)"/g) ?? []).length, 2);
+	assert.equal((html.match(/fill="var\(--_node-fill\)"/g) ?? []).length, 2);
+});

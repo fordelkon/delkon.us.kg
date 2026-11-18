@@ -37,11 +37,13 @@ A tag is a reusable category that aggregates posts and notes for retrieval, not 
 ## Emphasis
 
 - The theme renders strong text with a highlighter band, so every bold is visually loud: reserve bold for term definitions and genuine key claims.
+- At the first substantive definition, bold the Chinese term and place its English name and abbreviation outside the bold span. Use the established term or abbreviation in later mentions. Use inline code for literal fields, flags, commands, and configuration keys.
 - Keep the English gloss outside the bold Chinese term. Follow the [emphasis examples](../content/TEMPLATE-post.md#emphasis-and-cross-references) to avoid ambiguous Markdown boundaries.
 
 ## Cross-references
 
 - Link every titled mention of a sibling post; a mention rendered as plain text reads like a dead end. Ordinal mentions ("第二篇讲了…") stay plain text.
+- Put a complete reading route on the series page. In an article, add links where they establish a dependency or offer relevant depth.
 - Link important conceptual dependencies at the point of use: a reused definition, a prerequisite for the argument, or a mechanism applied in a new setting. Review the body as well as series navigation; an ordinal mention can stay plain while the concept beside it carries the link.
 - Give each concept a primary explanatory home and link to the relevant section, using the concept or explanatory phrase as link text. Include forward references where an explanation is deliberately deferred, and confirm the target fulfills that promise.
 - Keep the local argument understandable with a short reminder; let the link provide depth. Connect related mechanisms while preserving differences in their guarantees, APIs, and abstraction levels.
@@ -50,6 +52,7 @@ A tag is a reusable category that aggregates posts and notes for retrieval, not 
 ## References and footnotes
 
 - Cite sources with footnotes at the claims they support, and annotate which claims each source backs. Follow the [footnote example](../content/TEMPLATE-post.md#references) for marker placement and the generated reference section.
+- Cite externally verifiable protocol guarantees, implementation behavior, version-specific options, and empirical claims. Uncited transitions, original worked examples, and summaries of already sourced claims usually need no new reference.
 - Match each source to the claim’s language, API, version, and scope. A source showing one version’s behavior does not establish when that behavior began; cross-language comparisons need evidence for each language.
 - Reuse the same marker label when one source supports several passages; each citation site still gets its own back-reference.
 - Entries with no natural citation site in the body (general further reading, course schedules, convenience tools) go into a hand-written further-reading section instead.
@@ -77,7 +80,9 @@ flowchart TB
 ```
 ````
 
-The build renders diagrams with beautiful-mermaid using the shared site theme. Wide diagrams scroll within their container instead of reducing labels to an unreadable size. An `LR` flowchart can add `mobile-direction="TB"` metadata to generate a vertical layout for narrow screens from the same source; both layouts retain the same nodes and edges. Use `<br/>` inside labels to break long lines. The Markdown transform and renderer live in `src/plugins/mermaid.ts` and `src/utils/mermaid.ts`; run `pnpm test:diagrams` when changing their integration.
+The build renders diagrams with beautiful-mermaid using the shared site theme. Use `flowchart` for relationships and data paths, `sequenceDiagram` for ordered exchanges between participants, and `stateDiagram-v2` for state transitions. The shared theme supplies typography, outlines, and light and dark backgrounds. Flowcharts can assign shared roles with `class thread actor` or `class input,output resource`: `actor` for executors, `resource` for queues or locks, `state` for state or synchronization, `result` for completion, and `risk` for failure or blocking. Keep the meaning in labels, shapes, and line styles so it also reads without color.
+
+Wide diagrams scroll within their container at their original label size. An `LR` flowchart can add `mobile-direction="TB"` metadata to generate a vertical layout for narrow screens from the same source; both layouts retain the same nodes and edges. Use `<br/>` inside flowchart node labels to break long lines. The Markdown transform and renderer live in `src/plugins/mermaid.ts` and `src/utils/mermaid.ts`; run `pnpm test:diagrams` when changing their integration.
 
 ## Algorithm Articles
 

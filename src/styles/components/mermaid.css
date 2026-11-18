@@ -1,27 +1,50 @@
 .mermaid-diagram {
+	--diagram-actor-ink: var(--color-admonition-note);
+	--diagram-resource-ink: var(--color-admonition-caution);
+	--diagram-state-ink: var(--color-admonition-important);
+	--diagram-result-ink: var(--color-admonition-tip);
+	--diagram-risk-ink: var(--color-admonition-warning);
+	--diagram-actor-fill: color-mix(in oklab, var(--diagram-actor-ink) 12%, var(--_paper));
+	--diagram-resource-fill: color-mix(in oklab, var(--diagram-resource-ink) 12%, var(--_paper));
+	--diagram-state-fill: color-mix(in oklab, var(--diagram-state-ink) 12%, var(--_paper));
+	--diagram-result-fill: color-mix(in oklab, var(--diagram-result-ink) 12%, var(--_paper));
+	--diagram-risk-fill: color-mix(in oklab, var(--diagram-risk-ink) 12%, var(--_paper));
+	--_paper: var(--color-printer-paper);
 	--_text: var(--color-printer-ink);
 	--_text-sec: var(--color-printer-ink);
 	--_text-muted: var(--color-printer-ink);
+	--_text-faint: var(--color-printer-ink-light);
 	--_line: var(--color-printer-ink-light);
 	--_arrow: var(--color-printer-ink-light);
-	--_node-fill: var(--color-printer-paper);
+	--_node-fill: color-mix(in oklab, var(--_text) 4%, var(--_paper));
 	--_node-stroke: var(--color-printer-ink-light);
 	--_group-fill: transparent;
 	--_group-hdr: transparent;
-	--_inner-stroke: transparent;
+	--_inner-stroke: color-mix(in oklab, var(--_text) 15%, var(--_paper));
+	--_key-badge: var(--_node-fill);
 }
 .mermaid-diagram text {
 	font-family: var(--font-mono);
-	font-weight: var(--font-weight-normal);
 }
 .mermaid-diagram .node text,
 .mermaid-diagram .actor text {
-	font-size: var(--diagram-node-font-size, 16px);
+	font-size: var(--diagram-node-font-size, 13px);
 }
-.mermaid-diagram .node rect,
+.mermaid-diagram .node:where([data-shape="rectangle"]) rect,
 .mermaid-diagram .actor rect {
-	rx: 3px;
-	ry: 3px;
+	rx: 4px;
+	ry: 4px;
+}
+.mermaid-diagram .edge-label rect {
+	stroke: none;
+}
+.mermaid-diagram .actor {
+	--_node-fill: var(--diagram-actor-fill);
+	--_node-stroke: var(--diagram-actor-ink);
+}
+.mermaid-diagram .node[data-shape="rounded"] {
+	--_node-fill: var(--diagram-state-fill);
+	--_node-stroke: var(--diagram-state-ink);
 }
 .mermaid-diagram .subgraph > rect {
 	stroke-dasharray: 3 4;
@@ -31,7 +54,6 @@
 }
 
 .prose-diagram {
-	--diagram-node-font-size: 14px;
 	margin-block: var(--receipt-section-gap);
 	color: var(--color-printer-ink);
 }
@@ -68,17 +90,11 @@
 	display: none;
 }
 @media (max-width: 639px) {
-	.prose-diagram-responsive .mermaid-diagram {
-		width: 100%;
-	}
-	.prose-diagram-responsive .prose-diagram-hint,
 	.prose-diagram .prose-diagram-wide {
 		display: none;
 	}
 	.prose-diagram .prose-diagram-narrow {
 		display: block;
-		max-width: 100%;
-		height: auto;
 	}
 }
 .prose-diagram figcaption {
