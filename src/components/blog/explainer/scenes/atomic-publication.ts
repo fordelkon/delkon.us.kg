@@ -46,7 +46,7 @@ const publication: Scene = {
 	section: "release--acquire发布与接收的边界",
 	diagramHeight: 336,
 	description:
-		"本图假设：payload 与 ready 都是原子变量，初值 0 / false，只发布一次，之后不再改写。实线表示线程内顺序；横向虚线仅在读取观察到对应发布时表示同步。最后一帧是独立的弱序对照。",
+		"本图假设：payload 与 ready 都是原子变量，初值 0 / false，只发布一次，之后不再改写。纵向实线是 sequenced-before；横向虚线仅在读到本次发布时表示 synchronizes-with。沿三条边推导出 happens-before。最后一帧是独立的弱序对照。",
 	caption:
 		"Acquire 必须读到对应发布，才能把线程内顺序接成 happens-before；原子标志本身不自动发布其他数据。",
 	frames: [
@@ -167,6 +167,13 @@ const ordering: Scene = {
 	caption:
 		"Release/Acquire 是有条件的局部同步，SeqCst 为这组原子访问提供共同全序；两者都不把任意业务操作自动变成事务。",
 	frames: [
+		interaction(
+			"X 和 Y 是两个独立的原子对象，各有自己的修改顺序：两条链都从初始写 0 到该对象上的写 1。仅凭逐对象顺序，无法给两个线程跨对象的四个访问排出共同顺序。",
+			["X 的修改顺序", "初始 0 → A 写 1"],
+			["Y 的修改顺序", "初始 0 → B 写 1"],
+			["两个独立的原子对象", "每条链只排序对应对象的修改"],
+			["跨对象的读取", "还需看具体内存序"],
+		),
 		interaction(
 			"若写为 Release、读为 Acquire，两边仍可能都读到初始 0：没有读取到对方的发布，就没有所需的同步边。此例也说明不能用普通交错时间线穷尽弱内存模型。",
 			["A", "x=1 → 读 y"],

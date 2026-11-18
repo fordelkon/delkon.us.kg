@@ -18,11 +18,14 @@ description: "从执行与调度、共享状态与同步，到消息协作与任
 | 阶段 | 篇章 | 核心问题 |
 | ---- | ---- | -------- |
 | 执行与调度 | [① 并发、并行与执行单元](/posts/concurrency/parallelism-execution-units/) | 任务由谁推进？并发何时能转化为并行，调度与任务划分有什么代价？ |
-| 共享状态与正确性 | [② 锁与条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/)、[③ 原子操作与内存模型](/posts/concurrency/atomics-memory-model/)、[④ 并发程序的正确性](/posts/concurrency/deadlock-livelock-correctness/) | 怎样维护完整操作的不变量、建立可见顺序，并分析死锁与其他进展问题？ |
-| 协作与生命周期 | [⑤ 消息传递、任务池与背压](/posts/concurrency/message-passing-workers-backpressure/)、[⑥ 异步并发与任务的生命周期](/posts/concurrency/async-concurrency-task-lifecycle/) | 怎样交付工作、限制积压，并在失败、取消或关停时明确结果和任务的归属？ |
+| 共享状态 | [② 锁与条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/) | 哪些步骤必须置于同一临界区？等待者怎样复查状态？ |
+| 内存模型 | [③ 原子操作与内存模型](/posts/concurrency/atomics-memory-model/) | 单次操作何时不可分割？跨线程的可见顺序从哪里来？ |
+| 正确性与进展 | [④ 并发程序的正确性](/posts/concurrency/deadlock-livelock-correctness/) | 对象的操作历史是否符合规格？调用能否最终完成？ |
+| 通信与容量 | [⑤ 消息传递、任务池与背压](/posts/concurrency/message-passing-workers-backpressure/) | 任务何时被接纳、领取、完成？输入和结果分别在哪里积压？ |
+| 异步生命周期 | [⑥ 异步并发与任务的生命周期](/posts/concurrency/async-concurrency-task-lifecycle/) | 谁负责轮询、唤醒和取消？由谁确认任务已退出？ |
 
 六篇按上述依赖连续展开。第三篇的[进阶补充](/posts/concurrency/atomics-memory-model/#进阶补充同步接口与规范边界)供规范回查，首次阅读可以先跳过。第六篇分为异步计算的运行机制与任务生命周期两部分，可分别阅读。
 
-示例以 Rust 为主，需要了解所有权、借用和闭包；C++ 与 Go 用于对照具体同步和取消语义。完整示例可在各语言的 Playground 中尝试，局部片段与结构示意需结合上下文阅读，loom 模型的运行方式在第四篇说明。
+示例以 Rust 为主，需要了解所有权、借用和闭包；C++ 与 Go 用于对照具体同步和取消语义。标准库示例可独立编译，局部片段与结构示意需结合上下文阅读。[Tokio 示例的依赖配置](/posts/concurrency/async-concurrency-task-lifecycle/#综合示例失败或超时后收束任务)和 [loom 模型的运行方式](/posts/concurrency/deadlock-livelock-correctness/#并发缺陷的排查)见对应章节。
 
 本系列以单机并发为范围，重点建立访问协议、等待依赖、容量限制与任务收束的分析方法。并行性能的系统测量，以及无锁容器中的 ABA、线性化证明和内存回收，属于进一步展开的主题。

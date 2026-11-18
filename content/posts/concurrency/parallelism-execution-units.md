@@ -20,13 +20,32 @@ tags: ["concurrency", "async", "rust", "go"]
 
 并发编程真正关注的对象不是进程、线程或协程本身，而是**任务**（Task）：程序中可以独立推进的一项逻辑工作，例如一次网络请求、一次文件读写或一次用户事件处理。
 
-任务不一定是操作系统直接调度的对象。进程、线程和协程是承载任务的不同执行抽象。它们的关系可以理解为：任务是要完成的逻辑工作，执行单元是推进任务的载体。三者的差异主要体现在隔离级别、调度层级和运行开销上：
+任务可以由原生线程直接推进，也可以交由用户态运行时安排。进程提供地址空间和资源边界，内核把可运行的 OS 线程调度到逻辑 CPU 上；需要用户态调度时，运行时再安排这些线程推进哪个任务。Linux 的进程和线程都由内核的 task 机制表示，调度针对各自的可调度实体[^8][^9][^12]。
 
-| 执行单元 | 主要特点               | 调度层级          | 适用场景             |
-| -------- | ---------------------- | ----------------- | -------------------- |
-| 进程     | 地址空间独立，隔离性强 | 操作系统          | 多程序隔离、服务进程 |
-| 线程     | 共享进程资源，切换较轻 | 操作系统          | CPU 密集型并行任务   |
-| 协程     | 用户态调度，轻量级     | 运行时 / 事件循环 | 高并发 I/O 任务      |
+```mermaid title="任务、运行时、线程与 CPU" description="两条路径分别展示线程直接执行工作，以及用户态运行时先安排任务。OS 线程始终由内核调度到逻辑 CPU；进程提供线程共享的资源边界。箭头写明调度、归属或执行关系。"
+flowchart TB
+ work["逻辑工作<br/>请求、计算、事件"]
+ runtime["用户态运行时 / 执行器"]
+ thread["OS 线程"]
+ process["进程资源<br/>地址空间、打开的文件"]
+ cpu["逻辑 CPU"]
+ work -->|直接交给| thread
+ work -->|交由| runtime
+ runtime -->|安排工作线程| thread
+ process -.->|由同进程线程共享| thread
+ thread -->|内核调度到| cpu
+ class thread,runtime,cpu actor
+ class process resource
+```
+
+下面比较代表性实现。进程有地址空间，单独的调用栈属于其中的执行流。用户态工作可由运行时安排到另一个 OS 线程继续，OS 线程本身也可由内核迁移到另一个逻辑 CPU，两种迁移发生在不同层级[^2][^9][^10][^12][^13]。
+
+| 执行抽象 | 谁调度或推进 | 挂起状态 | 承载与迁移 |
+| -------- | ------------ | -------- | --------------------- |
+| Linux 进程 | 内核调度其线程 | 地址空间由进程提供，各线程保有自己的栈 | 进程可以包含多个线程 |
+| OS 线程 | 内核调度器 | 独立线程栈、寄存器上下文 | 可由内核在逻辑 CPU 之间迁移 |
+| Go goroutine | Go runtime | 运行时管理的独立栈和执行现场 | 通常可以，`LockOSThread` 可绑定 |
+| Rust `async fn` 返回的 Future | 由执行器或调用方轮询；独立 Task 由运行时调度 | 状态机保存跨挂起点所需的值 | 取决于轮询方式和 `Send` 约束 |
 
 ### 进程
 
@@ -34,7 +53,7 @@ tags: ["concurrency", "async", "rust", "go"]
 
 不同进程拥有相互独立的虚拟地址空间，一个进程中的内存错误通常不会破坏另一个进程。这种隔离提高了安全性和稳定性，但代价通常是更高的创建和切换成本：进程之间交换数据要借助管道、消息队列、共享内存、Socket 等进程间通信机制，具体成本取决于隔离需求、通信机制和传输量。
 
-下面的结构体是 PCB 的简化示意（并非可编译实现，也不对应某个内核的精确字段布局）。真实内核中的上下文保存点常在每线程的内核栈上——例如 Linux 用 `task_struct` 兼作 TCB，并不区分进程、线程两套控制块。每份控制块回答的都是同一组问题：这个执行单元是谁、能不能被调度、停在了哪里——再加上这一层特有的资源。后面两份控制块会反复出现这副骨架：
+下面的结构体是 PCB 的简化示意（并非可编译实现，也不对应某个内核的精确字段布局）。真实内核中的上下文保存点常在每线程的内核栈上——例如 Linux v6.12 的 `task_struct` 描述单个 task，线程组通过组 ID、组首领以及共享资源等关系组织[^12]。每份控制块回答的都是同一组问题：这个执行单元是谁、能不能被调度、停在了哪里——再加上这一层特有的资源。后面两份控制块会反复出现这副骨架：
 
 :::note[深入阅读：PCB 的简化布局]
 
@@ -167,11 +186,11 @@ Go 的协程是**有栈的**（stackful），需要保存私有栈与挂起现�
 
 ## 抢占式与协作式
 
-讲完执行单元，接下来是调度问题：任务之间如何切换？两种基本模型对应了两种答案。
+分析调度时分别问三个问题：决策发生在内核还是用户态？切换需要当前任务主动让出吗？任务不主动让出时，调度器能否异步发起抢占？例如 Go 的决策在用户态，运行时支持异步抢占；Rust Future 的一次 `poll` 需交还控制权，承载它的 OS 线程仍可被内核抢占[^5][^10]。
 
 ### 抢占式并发
 
-**抢占式**（preemptive）并发是操作系统常用的调度方式：调度器几乎可以在任意时刻中断当前执行单元，切换到另一个执行单元——切换发生在时钟中断等硬件中断和调度点上。任务不需要主动让出 CPU，操作系统根据时间片、优先级、阻塞状态等因素统一调度。
+**抢占式**（preemptive）并发是操作系统常用的调度方式：调度器可以在执行单元未主动让出时发起切换，真正切换仍受内核或运行时的安全点与执行状态约束。任务不需要主动让出 CPU，操作系统根据时间片、优先级、阻塞状态等因素统一调度。
 
 抢占式并发的典型载体是线程。开发者通过线程库把程序中的不同任务拆分出来，交由操作系统调度；在硬件核心数合适的情况下，这些任务不仅可以并发推进，还可以在多核 CPU 上并行执行。
 
@@ -314,6 +333,20 @@ fn main() {
 
 未定义行为不能简单解释为“偶尔少加几次”：程序不保证输出偏小，也不保证开启优化后会输出什么。即使某次恰好得到 2000000，也不能证明程序正确。修复需要改变访问协议，例如把整次加一放进同一把锁的临界区，或使用合适的原子读改写操作。另一种思路是不共享：把可变状态的所有权交给单一所有者，任务之间通过消息传递协作——[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/)会展开这一方向。
 
+如果只需要累计次数，可以直接把上面的共享变量、更新和最终读取换成下面三处。每次 `fetch_add` 都为同一个计数器执行一次原子读改写；主线程在两个 `join` 返回后读取，得到 2000000。这里没有用计数器发布其他数据，`Relaxed` 已足够。第三篇会完整演示[原子读改写计数器](/posts/concurrency/atomics-memory-model/#把锁保护的加一换成原子加一)[^14]。
+
+```diff lang="rust"
++use std::sync::atomic::{AtomicU64, Ordering};
+-static mut COUNTER: u64 = 0;
++static COUNTER: AtomicU64 = AtomicU64::new(0);
+@@
+-                unsafe { COUNTER += 1 };
++                COUNTER.fetch_add(1, Ordering::Relaxed);
+@@
+-    let result = unsafe { COUNTER };
++    let result = COUNTER.load(Ordering::Relaxed);
+```
+
 **竞态条件**（race condition）的范围更广：程序结果取决于不合要求的执行先后——它也不限于线程，单线程事件驱动程序同样可能因事件到达顺序而产生竞态。例如，即使对共享数据的每次访问都加了锁（因此没有数据竞争），“检查余额”和“扣款”这一先检查后扣款的复合操作仍可能被交错执行，让两个线程都通过余额检查。排除数据竞争是基础，维护完整操作的不变量才是程序的目标。[《并发编程（四）：死锁、活锁与并发程序的正确性》](/posts/concurrency/deadlock-livelock-correctness/)会用原子性违规、顺序违规等具体错误类别展开这个区分。
 
 本篇先识别这类错误；[《并发编程（三）：原子操作与内存模型》](/posts/concurrency/atomics-memory-model/)会用 happens-before 解释同步顺序如何建立，以及原子性与操作组合的区别。这里需要带走的结论是：**只要可变数据被多个任务并发访问，数据竞争就是一个必须正面回答的问题。**
@@ -347,3 +380,10 @@ fn main() {
 [^11]: [LLNL: Introduction to Parallel Computing](https://hpc.llnl.gov/documentation/tutorials/introduction-parallel-computing-tutorial)——固定工作量下的阿姆达尔定律、任务粒度、负载均衡、通信与同步成本，以及并行加速的测量范围
 
 [^10]: [The Rust Programming Language: Futures and the Async Syntax](https://doc.rust-lang.org/book/ch17-01-futures-and-syntax.html)与[Tokio 任务实现说明](https://docs.rs/tokio/latest/src/tokio/runtime/task/mod.rs.html)——前者说明 async 生成 Future，后者展示执行器维护的任务状态、引用计数与唤醒信息
+
+
+[^12]: Linux v6.12 [`task_struct`](https://github.com/torvalds/linux/blob/v6.12/include/linux/sched.h) 与 [`__schedule` / `context_switch`](https://github.com/torvalds/linux/blob/v6.12/kernel/sched/core.c)——task 与线程组字段、线程切换和地址空间切换的实现
+
+[^13]: [Go `runtime.LockOSThread`](https://pkg.go.dev/runtime#LockOSThread)、[Rust `Future::poll`](https://doc.rust-lang.org/std/future/trait.Future.html#tymethod.poll) 与 [Tokio 1.53.3 `spawn`](https://docs.rs/tokio/1.53.3/tokio/task/fn.spawn.html)——线程绑定、轮询与跨线程调度约束
+
+[^14]: [Rust 原子操作 `fetch_add`](https://doc.rust-lang.org/std/sync/atomic/struct.Atomic.html#method.fetch_add) 与 [`JoinHandle::join`](https://doc.rust-lang.org/std/thread/struct.JoinHandle.html#method.join)——原子读改写以及工作线程完成到 join 返回的同步

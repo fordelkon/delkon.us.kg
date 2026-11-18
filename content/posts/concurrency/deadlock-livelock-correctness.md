@@ -9,7 +9,16 @@ tags: ["concurrency", "synchronization", "rust"]
 
 ## 结果正确与任务推进
 
-并发程序的正确性可以从两个角度检查：**安全性**（safety）要求不发生不允许的事情，例如余额被重复扣减；**活性**（liveness）要求期望发生的事情终将发生，例如等待锁的任务最终获得锁、提交的任务最终完成。程序可能没有数据竞争，却算错结果；也可能始终保持数据完整，却因死锁无法结束。本篇讨论的正确性就限定在这两个层面：数据竞争之外的安全性与任务的进展。
+并发程序的正确性可以从两个角度检查：**安全性**（safety）要求不发生不允许的事情，例如余额被重复扣减；**活性**（liveness）要求期望发生的事情终将发生，例如等待锁的任务最终获得锁、提交的任务最终完成。程序可能没有数据竞争，却算错结果；也可能始终保持数据完整，却因死锁无法结束。用扣款服务可以同时提出三个不同的问题。安全性关注应用的不变量，线性化关注并发对象能否解释成符合顺序规格的操作历史，活性关注调用能否结束。线性化本身属于安全性质，约束的是对象历史；满足它并不推出每个调用最终都返回[^12]。
+
+```mermaid title="扣款服务的三个正确性问题" description="余额非负是应用不变量；两次重叠的扣款必须能排成符合顺序规格的历史；等待中的请求是否最终完成需要另证。三条边表示从同一个例子提出的三个问题。"
+flowchart TB
+ service["并发扣款"]
+ service --> safety["安全性<br/>余额始终非负？"]
+ service --> history["线性化<br/>操作历史能按规格解释？"]
+ service --> progress["活性<br/>等待的调用能完成？"]
+ class safety,history,progress state
+```
 
 第一篇已经[区分过数据竞争与竞态条件](/posts/concurrency/parallelism-execution-units/#数据竞争一个可以精确定义的问题)：
 
@@ -56,6 +65,36 @@ Lu 等人分析了 MySQL、Apache、Mozilla 与 OpenOffice 的 105 个并发缺�
 | CAS 循环扣减 | 成功 CAS 才提交新余额；CAS 失败后必须用重新观察到的状态再判断和计算 |
 | 两账户转账 | 所有读写方遵守两账户的锁协议，操作完成更新前不能暴露中间余额；不能把单独一次原子减法当成整笔转账的提交 |
 
+用上一节的例子可以运行下面的单余额 CAS 版本。此处只有一个原子值，且余额不会增加；失败后用新观察值再次检查，两个各扣 80 的调用至多有一个成功。多账户转账还需共同维护两个余额，这段代码只覆盖单账户扣款。
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+
+fn withdraw(balance: &AtomicU64, amount: u64) -> bool {
+    let mut current = balance.load(Ordering::Relaxed);
+    loop {
+        let Some(next) = current.checked_sub(amount) else {
+            return false;
+        };
+        match balance.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn main() {
+    let balance = AtomicU64::new(100);
+    thread::scope(|scope| {
+        let first = scope.spawn(|| withdraw(&balance, 80));
+        let second = scope.spawn(|| withdraw(&balance, 80));
+        assert_ne!(first.join().unwrap(), second.join().unwrap());
+    });
+    assert_eq!(balance.load(Ordering::Relaxed), 20);
+}
+```
+
 这里的线性化点用于说明外部可观察的业务语义，不要求整个函数由一条机器指令完成。`SeqCst` 约束原子访问的共同顺序，也不会自动为多个字段的组合操作建立这个语义边界。线性化同样不保证进展：一把锁保护的对象可以有清楚的操作语义，却仍因调用方的加锁顺序发生死锁。分析时应分别检查“完成的操作是否符合规格”和“操作能否完成”[^12]。
 
 ### 顺序违规：依赖尚未建立
@@ -97,6 +136,20 @@ fn main() {
 ```
 
 两个线程分别持有 A、B，又等待对方持有的锁。`thread::scope` 会等待作用域内的线程结束，因此也无法返回。这里用屏障固定执行关系；仅靠 `sleep` 扩大竞争窗口，不能保证每次复现。
+
+```mermaid title="两把独占锁的等待环" description="两把锁各只有一个实例，持有者不会被外部强制解锁。虚线从请求者指向所等待的锁，实线从锁指向当前持有者。环内每条等待都依赖对方释放，两个线程都已阻塞。"
+flowchart LR
+ first["线程 1"]
+ second["线程 2"]
+ a["锁 A"]
+ b["锁 B"]
+ a -->|当前由其持有| first
+ first -.->|等待取得| b
+ b -->|当前由其持有| second
+ second -.->|等待取得| a
+ class first,second actor
+ class a,b resource
+```
 
 ### 四个必要条件
 
@@ -174,6 +227,18 @@ fn main() {
 | 活锁 | 持续响应、退让或重试             | 可能很高；带退避时也可能很低       | 相关参与者持续活动却没有实质进展 |
 | 饥饿 | 某个任务持续得不到资源或调度机会 | 不能据此判断                       | 其他任务有进展，该任务却无法推进 |
 
+```mermaid title="活锁中的反复退让" description="假设双方以相反顺序取得第一把锁，且每轮同步重试。一次 try_lock 失败后都先释放已有锁；如果下一轮又同时开始，循环可以继续，业务完成数仍是零。退避只降低重复碰撞的概率。"
+flowchart TB
+ each["A、B 各持一把锁"]
+ fail["尝试第二把锁，双方都失败"]
+ back["双方先释放持有的锁"]
+ each --> fail
+ fail --> back
+ back -.->|同时重试，再次冲突| each
+ class fail risk
+ class each,back state
+```
+
 公平排队、缩短临界区和限制竞争可以帮助改善等待，但公平性必须看具体接口的保证。CPU 调度公平不等于锁获取公平，随机选择也不等于等待时间有上界；Rust 标准库的 RwLock 就不承诺固定优先策略。
 
 ### 优先级反转与优先级继承
@@ -198,7 +263,7 @@ fn main() {
 
 竞态条件同样可以通过模型断言暴露，前提是把业务要求写进检查。下面是一份使用 loom 替代类型的完整测试：两个线程各加一次，要求最终计数为 2；错误版本把读取与写回拆成两次原子操作[^9]。
 
-这段代码是测试而非 `main` 程序。本地运行时，在 Cargo 项目的 `[dev-dependencies]` 中加入 `loom = "0.7.2"`，保存为 `tests/counter.rs`，执行 `cargo test --test counter` 即可；直接使用 loom 类型不需要额外的 cfg 开关。错误版本预期在断言处失败，显示实际值 1、期望值 2，表示模型探索发现了丢失更新的执行。
+这段代码是测试而非 `main` 程序。本地运行时，在 Cargo 项目的 `[dev-dependencies]` 中加入 `loom = "=0.7.2"`，保存为 `tests/counter.rs`，执行 `cargo test --test counter` 即可；直接使用 loom 类型不需要额外的 cfg 开关。错误版本预期在断言处失败，显示实际值 1、期望值 2，表示模型探索发现了丢失更新的执行。
 
 ```rust title="tests/counter.rs"
 use loom::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -253,7 +318,47 @@ loom 可以探索到这样的交错：A 读到 0，B 也读到 0，A 写入 1，
 | 请求超时 | 区分停止等待、请求取消与任务结束；外部副作用仍按业务协议确认 |
 | 关停与提交交错 | 接纳边界清楚，已接受工作有归属，最终等待执行单元结束 |
 
-构造这些场景时，应控制关键事件，而不只重复运行正常程序。例如用屏障让两个线程都取得第一把锁，用通道确认 worker 已开始处理，再制造失败或下游断连；检查的是指定交错下的结果和退出路径。仅让测试进程等到超时，可以发现“未及时返回”，但不能单凭超时定位死锁，也不能把测试超时当作被测任务已经回收。
+下面用 loom 建模一个只有一个槽、只提交一次的邮箱。关停与入队并发，已接纳的值在关闭后仍可领取。保存为 `tests/mailbox.rs`，在同一 Cargo 项目运行 `cargo test --test mailbox`。状态和槽位由一把锁共同保护；测试分别检查关闭前接纳、关闭后拒绝两种顺序的约束，以及值只被领取一次[^9]。
+
+```rust title="tests/mailbox.rs"
+use loom::sync::{Arc, Mutex};
+use loom::thread;
+
+#[derive(Default)]
+struct Mailbox {
+    closed: bool,
+    slot: Option<u8>,
+}
+
+fn submit(mailbox: &Mutex<Mailbox>, value: u8) -> bool {
+    let mut state = mailbox.lock().unwrap();
+    if state.closed || state.slot.is_some() {
+        return false;
+    }
+    state.slot = Some(value);
+    true
+}
+
+#[test]
+fn close_preserves_accepted_work() {
+    loom::model(|| {
+        let mailbox = Arc::new(Mutex::new(Mailbox::default()));
+        let input = Arc::clone(&mailbox);
+        let sender = thread::spawn(move || submit(&input, 7));
+
+        let mut state = mailbox.lock().unwrap();
+        state.closed = true;
+        let claimed = state.slot.take();
+        drop(state);
+
+        assert_eq!(claimed, sender.join().unwrap().then_some(7));
+        assert!(!submit(&mailbox, 8));
+        assert!(mailbox.lock().unwrap().slot.take().is_none());
+    });
+}
+```
+
+这个模型让关停者在关闭时取走剩余值，省去了独立 worker 和通知。实际队列还需验证关闭与领取交错时，所有等待者都能被唤醒、已领取的任务也有明确归属。构造这些场景时，应控制关键事件，而不只重复运行正常程序。例如用屏障让两个线程都取得第一把锁，用通道确认 worker 已开始处理，再制造失败或下游断连；检查的是指定交错下的结果和退出路径。仅让测试进程等到超时，可以发现“未及时返回”，但不能单凭超时定位死锁，也不能把测试超时当作被测任务已经回收。
 
 还要区分终态断言与过程不变量：最终结果数量正确，不足以证明没有重复执行、暂时超额接纳或遗留后台任务。对有容量与生命周期要求的组件，还需在入队、领取、完成、取消和退出等状态转换处检查相应约束。loom 适合探索经过建模的小协议；包含真实 I/O 的组件仍需针对真实接口做故障和退出验证，不能从一个模型测试推广为全部运行路径的证明[^9]。
 

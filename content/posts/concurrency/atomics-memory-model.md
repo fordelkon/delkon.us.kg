@@ -142,9 +142,9 @@ assert_eq!(PAYLOAD.load(Ordering::Relaxed), 42);
 
 把这些边接起来，就能传递 happens-before 关系：如果 A 在 B 之前，B 又在 C 之前，那么 A 也在 C 之前。Mutex 的解锁与后续成功加锁、线程完成与 `join` 返回，也提供各自文档规定的同步关系；解锁的作用接近 `Release`、成功加锁接近 `Acquire`，第二篇的 Mutex 正确性正依赖这里定义的机制。
 
-用这套语言重画发布程序：
+按 Rust 原子访问采用的规则，下面的虚线只有在 Acquire 读到标出的 Release 写入时成立。粗实线表示沿三条边推出的传递关系[^4][^5][^17]。
 
-```mermaid mobile-direction="TB" title="Release/Acquire 发布链" description="实线是线程内顺序（sequenced-before）；虚线是读到本次发布后建立的 synchronizes-with。两类边串成 happens-before；本例发布后不再改写 PAYLOAD，所以最后读取只能得到 42。"
+```mermaid mobile-direction="TB" title="Release/Acquire 发布链" description="实线是线程内顺序（sequenced-before）；虚线是读到本次发布后建立的 synchronizes-with。粗实线是由两类边推出的 happens-before。本例发布后不再改写 PAYLOAD，所以最后读取只能得到 42。"
 flowchart LR
  subgraph writer[线程 A]
   direction TB
@@ -155,6 +155,9 @@ flowchart LR
   acquire["读 READY：Acquire<br/>观察到本次 true"] -->|sequenced-before| read["读 PAYLOAD：Relaxed<br/>得到 42"]
  end
  release -.->|synchronizes-with| acquire
+ write ==>|happens-before| read
+ class release,acquire state
+ class read result
 ```
 
 **关键是读到了哪一次写入，而不是只给两个操作贴上 `Release`、`Acquire` 标签。** 如果 `Acquire` 读到的仍是初始的 `false`，就没有从这次发布建立同步边。更一般的规则还允许通过 `Release` 开头的连续原子读改写形成**释放序列**（release sequence）；这里先只讨论直接读到发布值的情况[^5]。
@@ -187,6 +190,24 @@ fn try_claim() -> bool {
 
 `compare_exchange` 成功返回 `Ok(旧值)`，失败返回 `Err(读到的值)`；两个内存序参数分别约束成功时的读改写与失败时的读取。成功路径是一次完整的读改写，可以按所选内存序接收先前的发布，或发布此前的访问；失败路径只读取，因此不能使用 `Release` 或 `AcqRel`。
 
+下图列出 Rust CAS 成功和失败的内存序范围。弱 CAS 即使比较值相等也可以走失败分支[^3][^6]。
+
+```mermaid title="CAS 的成功、失败与完成发布" description="成功是一次读改写，可选五种内存序。失败只读，可选 Relaxed、Acquire 或 SeqCst。弱 CAS 可以虚假失败；认领成功后还要初始化，并单独发布完成状态。"
+flowchart TB
+ cas["compare_exchange<br/>读取并比较旧值"]
+ won["成功：原子读改写<br/>返回 Ok(旧值)"]
+ fail["失败：只读，未写入<br/>返回 Err(读到的值)"]
+ init["已认领，正在初始化"]
+ ready["初始化完成，另行发布"]
+ cas -->|满足比较且写入成功| won
+ cas -->|值不符或弱 CAS 虚假失败| fail
+ won --> init
+ init --> ready
+ class cas,init state
+ class fail risk
+ class ready result
+```
+
 两条路径按各自需要选择：`try_claim` 没有要发布的数据，也没有要接收的发布，两个参数都用 `Relaxed` 就够了。
 
 如果成功认领后才初始化数据，还需要在初始化完成后另行发布完成状态；认领 CAS 即使用 Release，也不能发布发生在它之后的写入。失败参数是否需要 Acquire，则取决于读到的状态是否代表一次发布，以及失败后需要访问什么数据。
@@ -203,46 +224,58 @@ fn try_claim() -> bool {
 
 ### 自旋锁：CAS 为什么需要内存序
 
-把场景从 `try_claim` 的认领标志换成第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)：锁保护的正是共享状态，获取锁就意味着要接收上一任持有者发布的修改。这样一把最小的自旋锁可以用 CAS 写出：
+把场景从 `try_claim` 的认领标志换成第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)：锁保护的正是共享状态，获取锁就意味着要接收上一任持有者发布的修改。下面只实现锁标志与 guard，省略受保护数据的容器。调用方把 guard 保留到临界区末尾，由 `Drop` 解锁。
 
 ```rust
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static LOCKED: AtomicBool = AtomicBool::new(false);
 
-fn lock() {
+struct Guard;
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        LOCKED.store(false, Ordering::Release);
+    }
+}
+
+fn lock() -> Guard {
+    let mut attempts = 1;
     while LOCKED
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
-        std::hint::spin_loop();
+        for _ in 0..attempts {
+            std::hint::spin_loop();
+        }
+        attempts = (attempts * 2).min(64);
     }
-}
-
-fn unlock() {
-    LOCKED.store(false, Ordering::Release);
+    Guard
 }
 ```
 
 三个内存序各对应协议的一段：
 
-- 成功路径用 `Acquire`：CAS 成功意味着取得锁。除首次从初始未加锁状态获取锁外，这次读取拿到的 `false` 来自上一任持有者的 `unlock` 写入。按[发布协议](#release--acquire发布与接收的边界)，两个操作建立 synchronizes-with 边，此后对受保护数据的读取可以看见上一任在解锁前的全部修改。首次获取可能读到初始的 `false`；受保护数据的初始化仍需通过线程创建或对象发布等已有协议，对使用它的线程可见。
+- 成功路径用 `Acquire`：CAS 成功意味着取得锁。除首次从初始未加锁状态获取锁外，这次读取拿到的 `false` 来自上一任持有者释放 guard 时写入。按[发布协议](#release--acquire发布与接收的边界)，两个操作建立 synchronizes-with 边，此后对受保护数据的读取可以看见上一任在解锁前的全部修改。首次获取可能读到初始的 `false`；受保护数据的初始化仍需通过线程创建或对象发布等已有协议，对使用它的线程可见。
 - 失败路径用 `Relaxed`：CAS 失败说明锁仍被占用，线程没有取得访问受保护数据的资格，这次读取也不需要接收任何发布，自旋重试即可。
-- `unlock` 用 `Release`：为临界区内的修改建立发布的一端。
+- guard 的 `Drop` 用 `Release`：为临界区内的修改建立发布的一端。
 
 把临界区的数据访问接到加锁与解锁两端，就得到完整链路：
 
-```mermaid mobile-direction="TB" title="自旋锁的发布与接收" description="B 的 Acquire CAS 成功，并读到 A 解锁时写入的 false，才接上这条同步边。CAS 失败只会继续重试，不取得访问受保护数据的资格。"
+```mermaid mobile-direction="TB" title="自旋锁的发布与接收" description="B 的 Acquire CAS 成功，并读到 A 解锁时写入的 false，才接上这条同步边。实线是 sequenced-before，虚线是 synchronizes-with，粗实线是由两者推出的 happens-before。"
 flowchart LR
  subgraph owner[线程 A：持锁]
   direction TB
-  write["修改共享状态"] -->|线程内顺序| unlock["unlock：写 false<br/>Release"]
+  write["修改共享状态"] -->|sequenced-before| unlock["guard 析构：写 false<br/>Release"]
  end
  subgraph successor[线程 B：接手锁]
   direction TB
-  lock["CAS 成功：Acquire<br/>读到 A 释放的 false"] -->|线程内顺序| read["读取共享状态<br/>可见 A 的修改"]
+  lock["CAS 成功：Acquire<br/>读到 A 释放的 false"] -->|sequenced-before| read["读取共享状态<br/>可见 A 的修改"]
  end
  unlock -.->|synchronizes-with| lock
+ write ==>|happens-before| read
+ class unlock,lock state
+ class read result
 ```
 
 前文说“解锁的作用接近 `Release`、成功加锁接近 `Acquire`”——自旋锁里这两个“接近”就是字面本身：标准锁的解锁与后续成功加锁规定的正是这类同步边[^24]。
@@ -250,7 +283,7 @@ flowchart LR
 如果 `lock` 与 `unlock` 都改成 `Relaxed`，锁标志上的 CAS 仍能控制同一时刻只有一个持有者，但不再为前后两段临界区建立所需的 happens-before。若临界区访问普通非原子数据，且没有其他同步关系，这些冲突访问就构成数据竞争，在 Rust/C++ 中属于未定义行为，不能只理解为“可能读到旧值”。若相关数据本身也是原子的，则没有这类数据竞争，但仍需另外证明跨对象的访问顺序。这与前面的[数据发布失败](#原子标志与数据发布)是同一种协议缺口。
 
 :::note[自旋锁用于演示，不是使用建议]
-这个例子把等待画成自旋，是为了让 CAS 上的内存序可见。长时间等待应当让出 CPU：第二篇的[条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)在锁的保护下阻塞等待，`std::hint::spin_loop` 只是忙等提示[^7]。真实的锁实现也通常把短促自旋与系统级阻塞结合起来，而不是无限自旋。
+这个例子把等待画成自旋，是为了让 CAS 上的内存序可见。长时间等待应当让出 CPU：第二篇的[条件变量](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)在锁的保护下阻塞等待，`std::hint::spin_loop` 只是忙等提示[^7]。示例将两次 CAS 之间的自旋提示次数逐步增加，最多 64 次，仍可能无限等待。若持锁线程被抢占，其他线程可能白白消耗 CPU；普通共享状态优先用标准库 Mutex，把等待和唤醒交给有完整协议的实现。
 :::
 
 回到 `AcqRel`：获取锁只需要接收，释放锁只需要发布，两侧各自的单向内存序恰好够用。只有当同一次读改写既要接收先前的发布、又要发布自己的写入时，才轮到 `AcqRel`——它是按需拼装的结果，不是比 `Relaxed` 更安全的默认值。
@@ -294,7 +327,9 @@ fn main() {
 
 要排除 `(0, 0)`，需要给访问加上一个共同全序。对应 SC 的内存序是 `SeqCst`：它对读取提供 `Acquire` 效果，对写入提供 `Release` 效果，对读改写提供两者，并额外要求所有 SeqCst 操作存在一个共同的全序[^5][^6]。将四处访问全部改为 SeqCst 后，`(0, 0)` 被排除[^5]。
 
-这个全序的范围是 SeqCst 操作；把某一处换成 SeqCst，不会自动把其他弱内存序操作也纳入其中。它也不会把多次独立操作合成一个事务。性能成本取决于目标架构、操作与竞争情况，不能脱离场景断言“最强就一定最慢”。
+先分清两种顺序。每个原子对象都有自己的修改顺序，例如本例分别是 `X: 初始 0 → 写 1`、`Y: 初始 0 → 写 1`，只给该对象的修改排序。SeqCst 还为两个对象上的 SeqCst 读、写共同排序。按 C++20 的表述，共同全序要尊重 SeqCst 操作之间的强 happens-before，并满足逐对象的一致性约束；本例两条线程内的先写后读都必须保留。混用弱内存序时，不能把任意 happens-before 链都当作共同全序约束[^4][^5]。
+
+这个全序的范围是 SeqCst 操作；把某一处换成 SeqCst，不会自动把其他弱内存序操作也纳入其中。它也不会把多次独立操作合成一个事务。普通共享数据仍需有覆盖冲突访问的同步协议。性能成本取决于目标架构、操作与竞争情况，不能脱离场景断言“最强就一定最慢”。
 
 成对同步替代不了共同全序。甚至把两次写改为 `Release`、两次读改为 `Acquire`，`(0, 0)` 仍然允许：两次读取若都读到初始值，就没有接收到对方的发布，自然也没有建立那两条同步边。
 
@@ -311,6 +346,19 @@ fn main() {
 | `SeqCst`  | 读、写、读改写   | 对应的 `Acquire`/`Release` 效果，加上所有 SeqCst 操作的全序 | 是否依赖跨对象的共同顺序才能排除某个结果？ |
 
 但注意：没有数据竞争、甚至用上了同步边，也不等于整个程序满足顺序一致性。
+
+### 原子操作的进展保证
+
+下表以一次调用能否完成为观察对象。能否完成和是否返回正确结果要分别检查；第四篇会继续分析[活性和饥饿](/posts/concurrency/deadlock-livelock-correctness/#活锁与饥饿)[^1][^28]。
+
+| 性质 | 进展边界 |
+| ---- | -------- |
+| Blocking | 一个暂停的持锁者可能让其他调用无法完成 |
+| Obstruction-free | 调用若能独自执行足够多步，就能完成 |
+| Lock-free | 参与者持续执行时，系统中总有调用取得进展；单个调用仍可能饥饿 |
+| Wait-free | 每个持续获得执行机会的调用都在有限个自身步骤内完成 |
+
+即使原子指针的 CAS 具备进展保证，从链表摘下的节点也可能仍被其他读者持有。地址在回收后被复用，比较值还可能从 A 变到 B 再变回 A，让 CAS 看不出期间的变化，这属于 ABA 问题。基于 epoch 的回收把销毁推迟到相关读者都离开保护期；实际算法还需要同时证明对象的线性化、进展和回收安全[^3][^29]。
 
 ## 把一次性初始化交给库
 
@@ -342,17 +390,19 @@ fn config() -> &'static str {
 
 以第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)为例，一个线程先修改状态、再解锁，另一个线程成功获取同一把锁后读取状态。C++ 标准明确规定，同一互斥锁的解锁与后续取得所有权的加锁同步；Go 内存模型也规定了相应的解锁到加锁顺序[^24]。把线程内顺序接上去，才得到数据写入到读取的顺序：
 
-```mermaid mobile-direction="TB" title="同一互斥锁上的同步链" description="A 释放锁与 B 随后成功获取同一把锁建立同步关系；接上两端的线程内顺序，才得到共享状态写入到读取的 happens-before。"
+```mermaid mobile-direction="TB" title="同一互斥锁上的同步链" description="实线是 sequenced-before，虚线是同一把锁上的 synchronizes-with，粗实线是由这三条边推出的 happens-before。"
 flowchart LR
  subgraph previous[线程 A]
   direction TB
-  write["修改共享状态"] -->|线程内顺序| unlock["释放锁"]
+  write["修改共享状态"] -->|sequenced-before| unlock["释放锁"]
  end
  subgraph next[线程 B]
   direction TB
-  lock["成功获取同一把锁"] -->|线程内顺序| read["读取共享状态"]
+  lock["成功获取同一把锁"] -->|sequenced-before| read["读取共享状态"]
  end
- unlock -.->|同一把锁上的同步关系| lock
+ unlock -.->|synchronizes-with| lock
+ write ==>|happens-before| read
+ class unlock,lock state
 ```
 
 **同步边的成立有条件，不能只看两端都调用了同步接口。** 不同机制需要核对的条件不同：
@@ -369,6 +419,12 @@ flowchart LR
 这些是分析协议的入口，并不是一份跨语言通用的 API 规范。尤其要区分“线程结束”与“有同步保证地等待结束”：Go 内存模型明确指出，goroutine 退出本身不保证同步到其他事件；需要通道、锁等同步机制才能观察其效果[^26]。[结构化的任务作用域](/posts/concurrency/async-concurrency-task-lifecycle/#结果与生命周期的归属)则把等待纳入生命周期管理，仍应查清它等待哪些任务、覆盖哪些清理步骤。例如 Rust 的 `thread::scope` 自动 join 作用域线程，但当前文档特别说明，返回时线程局部变量的析构可能仍在运行[^20]。
 
 所有权与同步也要分开理解。允许某个值跨线程传递或共享，是类型约束；此前写入如何对接收方可见，是访问协议的保证。Rust 的 `Send`、`Sync` 属于前者，`Arc` 管理共享生命周期；它们不自动给内部数据的任意后续修改建立所需的同步顺序，详见第二篇的 [Send / Sync](/posts/concurrency/locks-condvars-shared-memory-sync/#send--sync跨线程传递与共享)。同样，[信号量](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)可用于资源计数，也可参与事件排序，但分析具体程序时，必须查明许可交接的同步契约；只证明同时进入的任务数受限，还没有证明特定写入已被发布。
+
+### 缓存一致性与伪共享
+
+**缓存一致性**（cache coherence）协调多个核心对同一内存位置的观察；硬件内存顺序还决定跨位置访问可以怎样被观察。语言内存模型从程序角度规定哪些执行合法，编译器和硬件共同实现这些保证。降低原子操作的内存序可以减轻某些顺序约束，缓存行上的写入竞争仍然存在[^6][^false-sharing]。
+
+例如两个线程分别更新两个独立计数器。若计数器碰巧处在同一缓存行，一方的写可能使另一方必须重新获取这条缓存行，尽管双方不需要对方的数据。这叫**伪共享**（false sharing）。可以先用每线程局部计数再汇总，或在确认热点和目标机器的布局后分离这些字段；分离会增加占用，应以测量判断收益[^false-sharing]。
 
 ### 唤醒与同步：以 Park / Unpark 为例
 
@@ -465,3 +521,9 @@ Rust/C++ 则允许程序显式使用弱内存序。一个便于使用的充分�
 [^26]: [Go 内存模型：Synchronization](https://go.dev/ref/mem#sync)——goroutine 退出本身不提供同步、通道发送到对应接收完成的同步，以及 Once 初始化完成到调用返回的顺序
 
 [^27]: [C++ 标准草案：barrier](https://eel.is/c++draft/thread.barrier.class)——阶段完成步骤的结束 strongly happens-before 由该步骤解除阻塞的调用返回；此保证不排列阶段内部访问
+
+[^false-sharing]: [Linux 内核文档：False Sharing](https://docs.kernel.org/kernel-hacking/false-sharing.html)——缓存行一致性的性能影响、伪共享和缓解方法
+
+[^28]: Maurice Herlihy, Victor Luchangco, Mark Moir, [Obstruction-Free Synchronization: Double-Ended Queues as an Example](https://cs.brown.edu/people/mph/HerlihyLM03/main.pdf), ICDCS 2003——obstruction-free、lock-free 和 wait-free 的进展边界
+
+[^29]: [crossbeam-epoch：Pinning](https://docs.rs/crossbeam-epoch/0.9.21/crossbeam_epoch/#pinning)——移除共享节点后延迟销毁，直到受保护的读者可以安全离开

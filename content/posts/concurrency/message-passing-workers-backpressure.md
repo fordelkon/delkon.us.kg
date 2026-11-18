@@ -70,11 +70,33 @@ fn main() {
 
 消息传递除了交付值，还能提供发送方与接收方之间的同步顺序，但要按具体通道契约确定配对条件。例如 Go 内存模型明确规定，一次发送同步于对应接收的完成；把发送前的数据写入与接收后的访问接到两端，就得到第三篇所说的[happens-before 链](/posts/concurrency/atomics-memory-model/#release--acquire发布与接收的边界)[^11]。交接消息不意味着对共享状态的所有后续访问都已同步：发送值可以交付已构造的数据，发送指针或共享所有权句柄则仍需约定后续修改的访问规则。
 
-还要区分三个时刻：发送成功、接收成功、处理完成。有缓冲的接口通常允许消息入队后发送就返回；直接会合可以等待接收方接手，但接手也不等于完成后续业务。这些边界要落到接口上核对：Rust 的 `Sender::send` 返回 `Ok` 不保证消息最终一定被接收，接收端可能随后断开；`SyncSender::send` 在容量为 0 时成功返回，才保证消息已被接收。Go 的无缓冲通道也明确规定接收与对应发送完成之间的同步，但这条边不包含接收后的处理步骤[^12][^11]。
+以下定义用于本篇的进程内任务池。它们是协议边界，调用者实际观察到的返回时刻还取决于调度。
+
+| 阶段 | 执行方完成了什么 | 提交方能据此确认什么 |
+| ---- | ---------------- | -------------------- |
+| Accepted（已接纳） | 任务入队，或由零容量通道直接交接 | 提交接口已接管本次工作 |
+| Delivered（已领取） | Worker 取得任务及后续处理责任 | 领取只确认移交 |
+| Completed（已处理） | Worker 得到成功结果或明确的业务失败 | 还需通过结果或确认把状态交给调用方 |
+| Result received（已收到结果） | 调用方取得结果或确认 | 可按业务协议判断本次调用的结果 |
+
+```mermaid mobile-direction="TB" title="接纳、领取、完成与确认" description="有缓冲的进程内通道以入队作为接纳边界，Worker 领取后处理，处理完成后单独交付结果。结果端关闭时，调用方可能收不到已完成工作的结果。"
+flowchart LR
+ submit["提交任务"] -->|入队成功| accepted["Accepted<br/>已接纳"]
+ accepted -->|Worker 领取| delivered["Delivered<br/>已领取"]
+ delivered -->|产生成功或失败结果| completed["Completed<br/>已处理"]
+ completed -->|调用方收到结果| result["已收到结果"]
+ completed -.->|结果端关闭| lost["结果无法交付"]
+ class submit actor
+ class accepted,delivered state
+ class result result
+ class lost risk
+```
+
+有缓冲的接口通常允许消息入队后发送就返回；直接会合可以等待接收方接手，但接手也不等于完成后续业务。这些边界要落到接口上核对：Rust 的 `Sender::send` 返回 `Ok` 不保证消息最终一定被接收，接收端可能随后断开；`SyncSender::send` 在容量为 0 时成功返回，才保证消息已被接收。Go 的无缓冲通道也明确规定接收与对应发送完成之间的同步，但这条边不包含接收后的处理步骤[^12][^11]。
 
 如果生产者必须等到处理完成才能继续，应让消费者在处理后发送确认，并等待这条确认，而不是把 `send` 返回当作完成凭证。多个生产者的消息可以交错；消费者接收到 A 的一条消息，也不能据此认定 B 已发送或完成。这与前面的示例只要求十个任务各处理一次、不规定生产者之间的全局执行顺序一致。
 
-还要给“接受任务”规定明确含义。若提交接口在成功入队后返回，它承诺的是工作已交付给队列，而不是工作已成功执行；worker 失败时，已接受的任务仍需要可观察的失败结果或另行约定的恢复方式。若工作已经产生外部副作用，但确认未送达，调用方无法仅凭超时判断它是否执行；直接重试可能重复执行。任务编号、去重或幂等处理应围绕业务效果设计，通道的线程安全不会自动提供“恰好执行一次”的保证。这个区别会继续影响第六篇的[取消与外部副作用](/posts/concurrency/async-concurrency-task-lifecycle/#丢弃-future-与清理资源)。
+进程崩溃可能丢掉仍在内存中的任务和结果。持久消息服务还需分别约定持久化、确认和重投递；“至多一次”允许漏投，“至少一次”允许重复投递，“恰好一次”必须说明指哪一段协议的哪个效果。进程内任务池没有这些跨故障交付保证。若工作已经产生外部副作用，但确认未送达，调用方无法仅凭超时判断它是否执行；直接重试可能重复执行。任务编号、去重或幂等处理应围绕业务效果设计，通道的线程安全不会自动提供“恰好执行一次”的保证。这个区别会继续影响第六篇的[取消与外部副作用](/posts/concurrency/async-concurrency-task-lifecycle/#丢弃-future-与清理资源)。
 
 ## 任务池与流水线
 
@@ -137,6 +159,38 @@ fn main() {
 
 worker 创建完毕后，主线程也丢弃原始 `task_rx`，只让 worker 持有任务接收端。若全部 worker 提前退出或在锁外业务处理中 panic，最后一份接收端会被释放，使阻塞于满队列的生产者从 `send` 得到错误，避免主线程一直卡在 `producer.join()`[^12]。示例用 `unwrap()` 让意外断连或线程 panic 暴露为失败；`unwrap()` 本身无法解除阻塞，退出还依赖上述所有权释放。这里讨论默认的 panic 展开行为；`panic=abort` 会直接终止进程。若 worker 一直阻塞在业务操作中而没有退出，释放主线程的引用也不能强行取消它。
 
+正常结果与预期业务失败可以作为 `Result` 经同一结果通道交回。Worker 在领取后 panic 时，原示例通过 `join` 暴露故障，该任务可能没有结果；如果允许重试，所有者需要记录已领取的任务及其业务标识。调用方提前退出时，结果发送失败应走明确的停止或回收路径；丢弃通道端可解除对应的通信等待，已经在执行的工作仍需自己的停止协议。
+
+```mermaid title="Worker 或下游失效后的任务归属" description="预期的业务失败作为结果返回。若 Worker 在处理时 panic，由任务池所有者检查尚未收到结果的任务；若结果接收端关闭，由 Worker 根据关停协议结束或回收结果。图中不自动重试，避免未知副作用被重复执行。"
+flowchart TB
+ work["Worker 已领取任务"]
+ business["返回 Result，包含业务失败"]
+ panic["Worker panic"]
+ output["结果端关闭"]
+ owner["所有者核对任务与已产生的效果"]
+ stop["按协议退出或回收结果"]
+ work --> business
+ work -.-> panic
+ panic --> owner
+ business -.->|发送失败| output
+ output --> stop
+ class work,owner actor
+ class business result
+ class panic,output risk
+```
+
+### 共享接收端与调度队列
+
+| 接收方式 | 谁能领取 | 等待方式与协调成本 |
+| -------- | -------- | ------------------ |
+| `std::sync::mpsc` 加 `Arc<Mutex<Receiver<T>>>` | 多个 worker 通过同一接收锁分摊 | `recv` 阻塞线程，领取串行化 |
+| `crossbeam_channel::bounded` | 原生 MPMC，各 worker 可持有自己的接收端 | `recv` 阻塞线程，竞争由通道实现协调 |
+| Tokio MPSC | 单个接收端可由派发任务持有，再将工作交给其他任务 | `recv().await` 挂起任务，派发仍需限制在途工作 |
+
+这些接口的吞吐取决于消息大小、任务粒度、队列竞争和线程与异步调度成本，应在相同负载与退出语义下比较[^2][^7][^15]。
+
+队列还可以放在调度器内部，用于分摊**就绪任务**。以 Tokio 1.53.3 的多线程运行时为例，每个 worker 有本地队列，另有一个全局队列供共享；本地和全局队列均无可取工作时，worker 可从其他 worker 的本地队列**窃取工作**（work stealing）。本地领取减少频繁访问共享队列的开销，窃取让空闲 worker 分担不均的负载，但也涉及跨线程协调与缓存局部性。这里移动的是可运行任务；外部业务队列仍需定义自己的接纳与容量，执行器的调度策略不会替应用限制请求数[^16]。
+
 ### fan-out / fan-in：分工与汇总
 
 **流水线**（pipeline）把工作拆成由通道连接的阶段。一个阶段可以有多个 worker：它们从同一输入领取工作，称为 **fan-out**；把多个输出合并为一个输出，称为 **fan-in**。这里的 fan-out 是分摊任务，每条消息由一个接收者取走，并非广播[^6]。
@@ -152,6 +206,8 @@ flowchart TB
  sq2 --> out2["输出通道 2"]
  out1 --> merge["merge：合并输出"]
  out2 --> merge
+ class gen,sq1,sq2,merge actor
+ class input,out1,out2 resource
 ```
 
 这里引入 Go，是因为它允许多个接收者直接共享通道，且后面可以用 `select` 清楚展示取消信号与数据发送之间的选择。Go 的结束协议需要另行说明：向已关闭通道发送、重复关闭通道都会 panic，因此应由发送方负责关闭；多个发送者共享输出时，需由协调者确认全部发送结束后再关闭，官方 `merge` 就用 `WaitGroup` 等待所有转发结束。关闭后仍可取完缓冲中的值，随后接收得到零值，`v, ok := <-ch` 返回 `ok == false`，`for range` 随之结束；`nil` 通道的发送与接收都会永远阻塞，在 `select` 中相应分支永远不会就绪。Rust 标准库通道通过最后一个发送端被丢弃表示不再有消息；两种机制都需要明确结束发送的责任[^2][^6][^13]。
@@ -166,6 +222,25 @@ flowchart TB
 
 因此还需检查压力有没有真正传回入口。如果每次提交都先创建一个任务，再让它等待 `send().await`，消息虽然没进队列，等待发送的任务仍可能无限增长。消息大小不受限时，消息数量有界也不等于内存占用有固定上限。
 
+下图把等待许可、执行和等待发送结果都画在 worker 的生命周期内。假设入口最多保留 S 个待发送值，任务队列容量为 Q，W 个 worker 各持有至多一项工作或一份尚未发出的结果，结果队列容量为 R，那么这段管线中每项工作只占一个位置，合计至多 S + Q + W + R 项。若把等待许可移到单独的派发任务里，那些任务就需要独立上限；许可数 K 仅限制同时占用资源的工作。
+
+```mermaid mobile-direction="TB" title="任务池中的容量与等待位置" description="入口等待 S、任务队列 Q、Worker 持有 W、结果队列 R 是四处独立的积压位置。等待许可、执行业务、等待发送结果共用 W 个 Worker 槽；资源许可单独限制资源占用，调用方取走结果后释放结果队列空间。"
+flowchart LR
+ submit["待提交<br/>最多 S 项"] -->|接纳| queue["任务队列<br/>容量 Q"]
+ subgraph workers[W 个 Worker 槽]
+  permit["等待或取得许可"] --> run["占用资源并执行<br/>至多 K 份许可"]
+  run --> send["等待发送结果"]
+ end
+ queue -->|领取| permit
+ send -->|结果入队| resultq["结果队列<br/>容量 R"]
+ resultq -->|取走| consume["结果接收方"]
+ class queue,resultq resource
+ class permit,send state
+ class consume actor
+```
+
+上下游若额外缓存已构造的任务、结果或重试记录，需另计。若一个任务同时保留输入和结果，计算内存时还需将两份数据都计入该槽的占用。
+
 队列满时的策略取决于业务：
 
 | 策略       | 适用要求                       | 需要处理的问题                     |
@@ -179,6 +254,8 @@ flowchart TB
 ### 容量、吞吐与等待时间
 
 队列容量回答“允许多少工作等待”，处理能力回答“单位时间能完成多少工作”。在到达负载不变时，增大缓冲可以吸收短时突发；如果长期提交速度超过处理能力，只增大容量只会推迟队列再次填满。系统最终仍需放慢上游、拒绝部分提交或改变处理能力，无法同时维持无限接受、有限积压与全部及时完成。
+
+在长期稳定、统计边界一致的情况下，Little 定律给出平均在途数量 = 有效吞吐率 × 平均停留时间。只分析任务队列时，停留时间指从入队到领取的等待；分析端到端时，在途数量和耗时也都必须采用端到端边界。这是长期平均关系，不能用瞬间队列长度推导单个任务的延迟[^17]。
 
 因此，观察过载要区分提交尝试、成功接纳和处理完成三个速率。只统计已完成任务的耗时，会漏掉入口等待和拒绝；只看瞬间队列为空，也可能漏掉 worker 已领取却阻塞在外部资源上的工作。至少应分别观察入口等待、排队、处理与结果交付，并确认结果队列和等待发送者是否也在积压。
 
@@ -323,3 +400,10 @@ Tokio 的有界 `mpsc` 还提供 `Receiver::close()`：接收端保留队列，�
 [^14]: [Tokio 1.53.3 `Receiver::close`](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/struct.Receiver.html#method.close)与[`mpsc` 的 Clean Shutdown](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/index.html#clean-shutdown)——关闭接收入口后排空消息、未使用许可对通道结束的影响，以及直接丢弃接收端会丢弃未读消息的区别
 
 [^13]: [Go 规范：Channel types](https://go.dev/ref/spec#Channel_types)、[Close](https://go.dev/ref/spec#Close)与[Select statements](https://go.dev/ref/spec#Select_statements)——通道阻塞、关闭与 nil 通道语义，以及 select 的伪随机分支选择和 default 规则
+
+
+[^15]: [Crossbeam Channel 0.5.17：Sharing channels](https://docs.rs/crossbeam-channel/0.5.17/crossbeam_channel/#sharing-channels)——可复制接收端与多消费者分摊
+
+[^16]: [Tokio 1.53.3：Multi threaded runtime](https://docs.rs/tokio/1.53.3/tokio/runtime/#multi-threaded-runtime-behavior-at-the-time-of-writing)——多线程运行时的本地与全局队列、工作窃取及其实现版本边界
+
+[^17]: John D. C. Little, [A Proof for the Queuing Formula: L = λW](https://doi.org/10.1287/opre.9.3.383), Operations Research 9(3), 1961——平均在途量、吞吐率与平均停留时间之间的关系

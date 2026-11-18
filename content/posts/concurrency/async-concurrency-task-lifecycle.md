@@ -97,11 +97,45 @@ async fn main() {
 
 与第二篇的[条件变量等待协议](/posts/concurrency/locks-condvars-shared-memory-sync/#条件变量等待状态满足条件)一样，这里也要把状态检查与登记等待放在同一把锁下。锁覆盖“检查完成状态并登记 Waker”，避免定时线程恰好在两步之间完成、造成遗漏唤醒。如果线程先完成，下一次 `poll` 直接看到 `done`；如果登记先完成，线程就取走 Waker 并唤醒。每次等待都保留最新的 Waker，因为同一 Future 后续可能由不同任务轮询。
 
+下面展示登记先于完成的一次执行。定时线程可能在 `poll` 释放互斥锁后、返回 Pending 前调用 `wake`。如果完成先发生，Timer 则在持锁检查时直接观察到 `done`，无需依靠补发通知。互斥锁同时保护检查、登记和完成，事件线程不能在检查与登记之间修改状态[^1][^2][^3]。
+
+```mermaid title="Timer 在 poll 返回前被唤醒" description="下图是 Timer 的一种合法时序。检查与登记位于同一临界区；定时线程在释放锁后调用 Waker。执行器保留早于 Pending 的调度请求，下一次 poll 得到结果。"
+sequenceDiagram
+ participant E as 执行器
+ participant F as Timer Future
+ participant T as 定时线程
+ E->>F: poll
+ F->>F: 持锁检查并登记 Waker
+ F->>F: 解锁
+ T->>T: 持锁置 done，取走 Waker 并解锁
+ T->>E: wake 请求重调度
+ F-->>E: 此次 poll 返回 Pending
+ E->>F: 再次 poll
+ F-->>E: Ready
+```
+
+在 `Pending` 后，执行器可继续轮询并更新 Waker。Future 一旦返回 `Ready`，调用方应停止轮询该 Future；通用契约允许再次调用时 panic 或永久阻塞。本 Timer 恰好会再次返回 `Ready(())`，这不是其他 Future 的保证[^1]。
+
 这只是展示协议的教学实现：每个定时器创建一个线程，不能代表运行时管理大量定时器的方式。丢弃 Timer 也不会中断已启动的睡眠线程；外部工作的生命周期与 Future 本身需要分别考虑。
 
 ### 执行器：轮询与唤醒的循环
 
-**执行器**（executor）负责轮询任务、维护调度状态并处理唤醒。可以把基本流程理解为：
+**执行器**（executor）负责调度任务和安排轮询；**任务**（task）是运行时管理的调度实体，保存外层 Future 的调度状态并处理其结果。一个任务可以在外层 Future 内嵌套多个内部 Future。I/O 或定时器通过 Waker 通知的是关联任务，这延续了第一篇的[执行层次](/posts/concurrency/parallelism-execution-units/#任务与执行单元)[^1][^2][^4]。
+
+```mermaid title="Executor、Task、Future 与 Waker" description="事件源通过 Waker 请求再次调度任务。执行器安排线程轮询任务的外层 Future，外层可以轮询多个内部 Future。内部 Ready 只是子计算完成；外层 Ready 才表示任务得到正常返回值。"
+flowchart TB
+ event["I/O 或定时器"] -.->|事件发生时调用| waker["Waker"]
+ waker -.->|请求再次调度| executor["Executor"]
+ executor -->|安排线程轮询| task["Task<br/>调度状态与结果"]
+ task -->|poll| outer["外层 Future"]
+ outer -->|按需轮询| inner["内层 Future"]
+ outer -->|返回 Ready| complete["任务正常完成"]
+ class executor,task actor
+ class waker,outer,inner state
+ class complete result
+```
+
+Wake 是调度请求，内层 `Ready` 表示子计算完成，外层 `Ready` 才使该任务正常完成。把观察对象固定为外层 Future，就得到下面的轮询循环。
 
 ```mermaid title="执行器的轮询与唤醒循环" description="这里轮询的是任务外层 Future：Ready 表示任务完成，Pending 表示尚未完成。wake 可在 poll 返回前发生，已有的重新调度请求必须保留；多个唤醒可合并，不保证一一排队。"
 flowchart TB
@@ -111,6 +145,9 @@ flowchart TB
  poll -->|Ready| done["记录结果<br/>结束任务"]
  poll -->|Pending| wait["等待再次调度<br/>保留已有唤醒"]
  wait -.->|已有或后续 wake| queue
+ class spawn,queue actor
+ class poll,wait,wake state
+ class done result
 ```
 
 任务可以在 `poll` 返回前就被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，不是保证每次 wake 都对应一次独立排队[^2][^4]。
@@ -236,6 +273,15 @@ async fn main() {
 
 Go 的 context 用信号表达取消：第五篇手写的[`close(done)` 通道广播](/posts/concurrency/message-passing-workers-backpressure/#提前退出与取消)，正是 `WithCancel` 内建的语义。派生出的 Context 在取消时关闭 `Done()` 通道，使用者需要主动监听；信号不会强行终止 goroutine，也不会中断一个不支持 context 的阻塞调用。`WithCancel` 或 `WithTimeout` 返回的 cancel 函数，可以及时释放关联资源[^13]。
 
+| 操作 | 取消怎样传达 | 怎样确认已退出 |
+| ---- | ------------ | -------------- |
+| Go `CancelFunc` | 关闭 `Done()`，并向派生 Context 传播；工作需主动响应 | 从结果通道接收或另行等待 goroutine |
+| 丢弃 Rust 组合中的 Future | 所有者不再轮询它，已持有的值同步析构 | 析构完成后控制权回到调用者；外部工作有独立生命周期 |
+| Tokio `JoinHandle::abort` | 请求运行时在任务交还控制权时销毁 Future | `await` 句柄，检查取消、正常完成或 panic |
+| Tokio `CancellationToken` | 通知主动等待令牌的任务，允许执行异步善后 | 用句柄或 `TaskTracker` 等待任务退出 |
+
+Go Context 还携带期限和请求范围的值。它的退出通知更接近 Tokio 的协作式 `CancellationToken`，而 Tokio `abort` 走运行时的取消路径。三者都需要额外的退出确认，才能把取消请求与完成善后区分开[^10][^13][^26][^27]。
+
 下面让工作 goroutine 在模拟操作与超时信号之间选择。主 goroutine 等待工作结果，确认它已经走到退出路径：
 
 ```go
@@ -280,6 +326,13 @@ func main() {
 
 `tokio::join!` 在当前任务内组合多个 Future，正常返回前等待全部完成，但不会因某个分支返回 `Err` 就自动停止其他分支。`tokio::spawn` 则创建独立任务，丢弃返回的 `JoinHandle` 只是放弃等待，任务仍可能在运行时存活期间继续执行；父任务结束也不会自动取消它[^10][^15]。
 
+| 组织方式 | 结果归谁 | 停止与收束由谁负责 |
+| -------- | -------- | ------------------ |
+| `join!` / `try_join!` 直接组合 Future | 当前任务拿到分支结果 | 组合者拥有分支；退出时析构仍由它持有的 Future |
+| `spawn` + `JoinHandle` | 保留句柄的一方等待结果 | 句柄持有者可 abort 并 await；仅丢弃句柄会分离任务 |
+| `JoinSet` | 集合所有者通过 `join_next` 获得结果 | 所有者可以发出中止请求并等待集合清空 |
+| `TaskTracker` + `CancellationToken` | 业务结果另走通道或句柄 | 所有者先停止接纳，再发信号并等待 tracker 关闭且为空 |
+
 ### spawn 的 Send 与生命周期约束
 
 `tokio::spawn` 要求传入的 Future 及其输出满足 `Send + 'static`。第二篇的 [Send / Sync](/posts/concurrency/locks-condvars-shared-memory-sync/#send--sync跨线程传递与共享)讨论值能否跨线程传递；这里的 Send 要求意味着任务可能在线程间迁移，尤其需要检查跨 `.await` 保存的状态。即使使用 current-thread 运行时，`tokio::spawn` 的接口也仍然要求 Send[^23]。
@@ -316,7 +369,43 @@ Tokio 为这些约束提供了现成接口：`try_join!` 在某个分支返回 `
 
 `tokio_util` 的 `TaskTracker` 则负责登记和等待，不主动中止任务。`close()` 只是允许 `wait()` 在 tracker 同时关闭且为空时完成；它不阻止之后继续登记任务，也不通知已有任务退出。一套完整的关停协议仍需由所有者关闭新工作入口、协调其他可能派生任务的入口，通过 `CancellationToken` 等机制通知已有任务停止并完成善后，再配合 `close()` 与 `wait().await` 等待登记任务退出。否则，某次等待完成并不表示之后不会再出现新任务[^26]。
 
+下面的教学状态图把取消请求和结束分开。正常完成与取消之间可能发生竞争，调用方要用句柄或任务集合来观察结果[^10][^18]。
+
+```mermaid title="Tokio 异步任务的推进与结束" description="这是外层 Future 的简化生命周期。Pending 后由已有或后续的 wake 请求再次调度。abort 发出请求，运行时取得控制权后才能析构；请求到达时也可能已正常完成。"
+stateDiagram-v2
+ state "就绪" as Scheduled
+ state "轮询中" as Polling
+ state "等待唤醒" as Pending
+ state "正常完成" as Completed
+ state "已请求取消" as CancelRequested
+ state "已析构" as Dropped
+ [*] --> Scheduled: spawn
+ Scheduled --> Polling: poll
+ Polling --> Pending: Pending
+ Pending --> Scheduled: 记录 wake
+ Polling --> Completed: Ready
+ Scheduled --> CancelRequested: abort
+ Pending --> CancelRequested: abort
+ Polling --> CancelRequested: abort
+ CancelRequested --> Dropped: 运行时接手
+ CancelRequested --> Completed: 正常完成在先
+ Completed --> [*]
+ Dropped --> [*]
+```
+
 ### 综合示例：失败或超时后收束任务
+
+本篇的 Tokio 示例可共用下面的依赖配置。在空目录执行 `cargo init --bin --edition 2024`，用下面的内容替换 `Cargo.toml`，把要运行的完整 Rust 示例保存为 `src/main.rs`，然后执行 `cargo run`。重新运行相同的依赖解析结果时保留 Cargo 生成的锁文件，使用 `cargo run --locked`。
+
+```toml title="Cargo.toml"
+[package]
+name = "concurrency-examples"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "=1.53.3", features = ["macros", "rt", "sync", "time"] }
+```
 
 下面用 JoinSet 管理两项工作，用信号量许可代表需要释放的资源。工作函数包含模拟 I/O，也允许返回业务错误；`run` 用同一个 budget 等待这一组任务的结果，成功时收集全部结果，失败或超时时停止剩余任务并等待析构完成。budget 只约束结果等待阶段，之后的 `shutdown().await` 收尾耗时另计，因此它不是整个 `run` 的总耗时上限[^11][^18]：
 
@@ -374,6 +463,50 @@ async fn main() {
 把 `should_fail` 改为 true 可观察业务失败路径，缩短 budget 可观察超时路径；时间预算不是确定复现某种调度的工具，运行环境也可能让正常工作超时。任务完成顺序不固定，示例只在输出前排序。每条返回路径都会经过 `shutdown().await`，之后许可数量恢复；收尾本身没有这里的 budget 限制，仍依赖任务及时交还执行权。`shutdown` 会忽略收束期间子任务的 panic，若需要逐一记录这些错误，应显式 abort 后循环接收结果[^18]。
 
 这里等待的是任务持有值的同步析构，不包含异步资源善后，也不会撤销已经发生的外部副作用。若 `run` 本身被父任务丢弃，JoinSet 的析构只请求中止，不能执行后面的异步等待；需要更外层的所有者负责关停与收束。这个例子因此明确了成功、业务失败和超时三条路径，并没有声称任意父级取消都能自动清理完毕。
+
+### 父任务退出后由谁收束
+
+如果父任务可能被外部中止，而调用方必须确认工作已经退出，可以让更长寿的监督者代它启动和管理子任务。下面用两个一次性通道确认子任务已持有资源、父任务已收到启动确认。随后监督者中止父任务并等待其退出，再收束子任务，最后检查许可已经归还[^10][^18]。
+
+```rust
+use std::future::pending;
+use std::sync::Arc;
+use tokio::sync::{oneshot, Semaphore};
+use tokio::task::JoinSet;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let slots = Arc::new(Semaphore::new(1));
+    let mut children = JoinSet::new();
+    let (started_tx, started_rx) = oneshot::channel();
+    let child_slots = Arc::clone(&slots);
+
+    children.spawn(async move {
+        let _permit = child_slots.acquire_owned().await.unwrap();
+        started_tx.send(()).unwrap();
+        pending::<()>().await;
+    });
+
+    let (parent_ready_tx, parent_ready_rx) = oneshot::channel();
+    let parent = tokio::spawn(async move {
+        started_rx.await.unwrap();
+        parent_ready_tx.send(()).unwrap();
+        pending::<()>().await;
+    });
+
+    parent_ready_rx.await.unwrap();
+    assert_eq!(slots.available_permits(), 0);
+
+    parent.abort();
+    assert!(parent.await.unwrap_err().is_cancelled());
+    assert_eq!(slots.available_permits(), 0);
+
+    children.shutdown().await;
+    assert_eq!(slots.available_permits(), 1);
+}
+```
+
+这里在父任务退出时仍能观察到孩子占用许可；调用 `shutdown().await` 后才确认其析构结束。需要异步关闭连接或刷出缓冲时，监督者应先发协作式停止信号，让任务执行明确的异步善后，再等它返回。
 
 ### 多阶段期限与关停责任
 
@@ -480,3 +613,6 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 [^25]: [Tokio 1.53.3 `Sender::send`](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/struct.Sender.html#method.send)与[`Sender::reserve`](https://docs.rs/tokio/1.53.3/tokio/sync/mpsc/struct.Sender.html#method.reserve)——send 被 select 取消时消息未发送但 value 被丢弃；先预约容量可让 value 保留在外层，取消预约仍会失去排队位置
 
 [^26]: [tokio-util 0.7.20 `TaskTracker::close`](https://docs.rs/tokio-util/0.7.20/tokio_util/task/struct.TaskTracker.html#method.close)与[`TaskTracker::wait`](https://docs.rs/tokio-util/0.7.20/tokio_util/task/struct.TaskTracker.html#method.wait)——close 不阻止登记新任务，wait 以关闭且为空作为完成条件；配合 CancellationToken 分担停止通知与等待退出的责任
+
+
+[^27]: [tokio-util 0.7.20 `CancellationToken`](https://docs.rs/tokio-util/0.7.20/tokio_util/sync/struct.CancellationToken.html)——取消通知、向子令牌传播，以及任务主动等待取消的接口
