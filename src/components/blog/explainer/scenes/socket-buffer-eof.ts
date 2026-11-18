@@ -1,4 +1,4 @@
-import { chain, node, withRoles } from "./diagram-layout.ts";
+import { chain, logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -167,7 +167,7 @@ const transports: Scene = {
 export const scene: Scene = {
 	...stream,
 	chapters: [
-		stream,
+		logicalFlow(stream),
 		transports,
 		withRoles(closing, {
 			client: "client",

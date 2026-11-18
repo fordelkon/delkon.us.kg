@@ -1,4 +1,4 @@
-import { chain, node, withRoles } from "./diagram-layout.ts";
+import { chain, controlEdge, logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -36,7 +36,7 @@ const forwarding: Scene = {
 			box("destination", 8, 176, 344, ["目的 IP:Port", step.target]),
 			box("boundary", 8, 240, 344, ["本帧的边界", step.state]),
 		],
-		edges: [edge("select", "M164 32 H190", true)],
+		edges: [controlEdge("select", "M164 32 H190", true)],
 	})),
 };
 
@@ -131,10 +131,10 @@ const tun: Scene = {
 			),
 		],
 		edges: [
-			edge("capture", "M164 32 H190", index === 0),
+			controlEdge("capture", "M164 32 H190", index === 0),
 			edge("read", "M274 56 V98", index === 0),
-			edge("outbound", "M196 128 H170", index > 0),
-			edge("loop", "M86 104 V62", Boolean(loop)),
+			controlEdge("outbound", "M196 128 H170", index > 0),
+			controlEdge("loop", "M86 104 V62", Boolean(loop)),
 			...(index === 2 ? [edge("bypass", "M86 152 V194", true)] : []),
 		],
 	})),
@@ -142,7 +142,11 @@ const tun: Scene = {
 
 export const scene: Scene = {
 	...policy,
-	chapters: [policy, withRoles(forwarding, { source: "client", destination: "delivery" }), tun],
+	chapters: [
+		logicalFlow(policy),
+		withRoles(forwarding, { source: "client", destination: "delivery" }),
+		tun,
+	],
 };
 
 const sections = [

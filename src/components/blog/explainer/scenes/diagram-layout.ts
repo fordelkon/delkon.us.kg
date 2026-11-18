@@ -1,4 +1,4 @@
-import { type Box, box, edge, type Frame, type Scene } from "./types.ts";
+import { type Box, box, type Edge, edge, type Frame, type Scene } from "./types.ts";
 
 export function node(
 	id: string,
@@ -73,4 +73,22 @@ export function interaction(
 			node("boundary", 8, 188, 344, boundary, "control"),
 		],
 	};
+}
+
+export function controlEdge(id: string, path: string, active = false): Edge {
+	return { ...edge(id, path, active), dashed: true };
+}
+
+export function logicalFlow(scene: Scene): Scene {
+	return {
+		...scene,
+		frames: scene.frames.map((frame) => ({
+			...frame,
+			edges: (frame.edges ?? []).map((line) => ({ ...line, dashed: true })),
+		})),
+	};
+}
+
+export function connectionEndpoint(item: Box): Box {
+	return { ...item, endpoint: true };
 }

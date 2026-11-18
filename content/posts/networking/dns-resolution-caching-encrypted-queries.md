@@ -9,12 +9,6 @@ tags: ["networking"]
 
 本篇沿着“查什么、谁来查、缓存什么、怎样保护查询”展开。DNS 排障也依赖这四个问题：一个工具查到了地址，并不表示浏览器采用了同一个解析器；一个查询没有地址，也不表示域名不存在。HTTP、TLS 与 QUIC 的连接细节在[下一篇](/posts/networking/http-evolution-tls-handshake-https/)继续解释，这里先明确 DNS 能提供哪些信息。
 
-读完本篇后，你应能：
-
-- 区分 Stub 的递归请求与解析器的迭代查询，解释缓存跳过哪些步骤。
-- 根据记录类型、TTL 与响应状态区分正缓存、否定缓存和失败。
-- 划清 DNSSEC、加密 DNS 与 ECH 配置引导各自提供的保证。
-
 ## 域名空间与常见资源记录
 
 DNS 是按名字分层管理的分布式数据库。一个**完全限定域名**（Fully Qualified Domain Name，FQDN）从右向左逐级细分：最右侧的根 `.` 之下是**顶级域**（Top-Level Domain，TLD，如 `.com`、`.org`），再往下是 `example.com` 与 `www.example.com`。域名的层级不等于每一级都有独立服务器；管理者通过**区域**（zone）与委派划分权威数据的责任[^1]。
@@ -28,9 +22,9 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 | `CNAME` | 指向另一个名字的别名 | 解析器可能继续查询别名目标；不能与同节点 `SOA`、`NS` 等共存，故裸域名（Zone Apex）不能直接配 `CNAME`[^1] |
 | `NS` | 某区域的权威域名服务器 | 用于区域权威声明与逐级委派 |
 | `TXT` | 文本数据 | 常用于域名验证、SPF 和 DKIM 等应用 |
-| `HTTPS` / `SVCB` | **服务绑定记录**（Service Binding Record） | AliasMode 可解决裸域名别名问题，ServiceMode 提供**应用层协议协商**（ALPN）、端口、地址提示与 `ech` 配置[^6][^ech-dns] |
+| `HTTPS` / `SVCB` | **服务绑定记录**（service binding record） | AliasMode 可解决裸域名别名问题，ServiceMode 提供 ALPN、端口、地址提示与 `ech` 配置[^6][^ech-dns] |
 
-对基于 TCP 的 HTTPS，客户端通常在 TLS 握手中通过**应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）协商 HTTP/1.1 或 HTTP/2。**HTTP/3 使用 QUIC**，需要发现可用端点后建立 QUIC 连接，不能把已有 TCP 连接直接协商成 HTTP/3。`HTTPS` 记录可以提前提供 `h3` 等参数[^6]，HTTP 的 `Alt-Svc` 信息也可以用于发现 HTTP/3 服务[^http3]。
+对基于 TCP 的 HTTPS，客户端通常在 TLS 握手中通过**应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）协商 HTTP/1.1 或 HTTP/2。HTTP/3 使用 QUIC，需要发现可用端点后建立 QUIC 连接，不能把已有 TCP 连接直接协商成 HTTP/3。`HTTPS` 记录可以提前提供 `h3` 等参数[^6]，HTTP 的 `Alt-Svc` 信息也可以用于发现 HTTP/3 服务[^http3]。
 
 因此，DNS 不只是返回一个 IP 的通讯录。`HTTPS` 是独立的查询类型，不是每次 `A` / `AAAA` 响应都会自动附送的固定字段；ServiceMode 的参数也是可选组合，不能假定每条记录都同时携带 `alpn`、地址提示和 `ech`。使用 `HTTPS` 记录的客户端还要理解记录参数及失败回退；旧客户端则可能只查询 `A` / `AAAA`。ECH 所需的 `ECHConfigList` 由 RFC 9848 定义的 `ech` 参数分发，实际加密机制属于 RFC 9849，见[下一篇的 ECH 说明](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)。
 
@@ -39,28 +33,31 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 应用通常把查询交给系统服务或浏览器内置解析器，而不直接询问根服务器。先区分三个角色：
 
 - **存根解析器**（Stub Resolver）：把查询交给配置好的递归解析器；系统实现还可能综合静态映射、缓存与不同网络的解析策略。
-- **递归解析器**（Recursive Resolver）：使用缓存并按需要向其他服务器发起迭代查询，最终返回答案或失败状态。运营商 DNS 与公共 DNS 都可以承担这一职责。
-- **权威名称服务器**（Authoritative Name Server）：提供某个区域的权威数据。根区有 13 个命名的服务器标识，实际由分布在多地的许多实例提供服务，不能理解成只有 13 台物理机器。
+- **递归解析器**（Recursive Resolver）：使用缓存并按需要向其他服务器发起迭代查询，最终返回答案或失败状态[^1]。运营商 DNS 与公共 DNS 都可以承担这一职责。
+- **权威名称服务器**（Authoritative Name Server）：提供某个区域的权威数据。根区服务由多个标识及其分布式实例提供；此图把它们抽象为一个角色。
 
 以下是忽略缓存、别名和查询最小化等细节的单次 `A` 查询示意；`192.0.2.80` 是文档地址，不是当前真实解析结果[^1]：
 
-```mermaid title="一次未命中缓存的 DNS 查询" description="中间三步都由递归解析器发起，不是根服务器把请求转发给下一层。根与 .com 返回委派，最终权威服务器返回示例地址 192.0.2.80，再由递归解析器答复 Stub。这里忽略缓存、别名与查询最小化，不代表每次解析都访问全部层级。"
-flowchart TB
- stub["Stub 提交请求<br/>example.com. A"]
- subgraph resolver[递归解析器的迭代查询]
-  root["向根服务器查询<br/>取得 .com 委派"]
-  tld["向 .com 服务器查询<br/>取得 example.com 委派"]
-  auth["向目标区域权威查询<br/>取得 A = 192.0.2.80"]
-  root --> tld
-  tld --> auth
- end
- stub --> root
- auth --> answer["向 Stub 返回答案"]
+```mermaid title="一次未命中缓存的 DNS 查询" description="存根解析器请求递归服务；递归解析器向根、TLD 和目标权威分别发起迭代查询。虚线是查询，实线是应答；委派提示由递归解析器处理。省略查询最小化、别名、失败与地址补查，缓存命中时可跳过相应步骤。"
+sequenceDiagram
+ participant Stub as 存根
+ participant Rec as 递归解析器
+ participant Root as 根
+ participant TLD as .com
+ participant Auth as 目标权威
+ Stub-->>Rec: 递归请求 RD=1
+ Rec-->>Root: 迭代查询
+ Root->>Rec: .com 委派
+ Rec-->>TLD: 迭代查询
+ TLD->>Rec: example.com 委派
+ Rec-->>Auth: 查询 A
+ Auth->>Rec: A = 192.0.2.80
+ Rec->>Stub: 返回答案
 ```
 
 客户端请求递归服务（置位 `RD=1`），意思是让解析器完成后续工作，而不是只返回下一站。解析器对权威服务器通常进行非递归查询，沿委派继续向下。委派响应可能附带服务器地址，其中为打破委派解析依赖而提供的地址称为**胶水记录**（glue）；不能把所有附加段地址都笼统叫作胶水。
 
-传统 DNS over UDP 的报文上限为 512 字节[^1]；现代解析器通过 **DNS 扩展机制**（Extension Mechanisms for DNS，EDNS(0)）携带 OPT 伪记录协商更大的 UDP 载荷（工程上常建议限制在 1232 字节内以避免 IP 分片）。若响应仍超出协商上限，响应头部置 `TC=1`（Truncated），客户端需要改用 TCP/53 获取完整数据。TCP/53 也可以直接用于查询并复用连接；它并非只供截断后的补救。现代通用 DNS 实现需要支持 UDP 与 TCP，网络只放行 UDP/53 可能造成部分查询失败[^dns-tcp]。
+传统 DNS over UDP 未使用 EDNS 时的消息上限为 512 字节。请求方可在 **DNS 扩展机制**（extension mechanisms for DNS，EDNS(0)）的 `OPT` 伪记录中声明可接收的 UDP 载荷大小。声明值反映接收能力，实际请求还应考虑路径 MTU 与分片。若响应不能完整装入可用的 UDP 大小，服务端可用 `TC=1` 表示截断，请求方可通过 TCP 重新取得完整答案。通用 DNS 实现须支持 UDP 与 TCP，TCP 也可直接使用或复用已有连接[^edns][^dns-tcp]。
 
 ## 缓存、TTL 与错误结果
 
@@ -114,7 +111,7 @@ flowchart LR
 
 权威服务器一般能看到向它查询的递归解析器地址。**EDNS 客户端子网**（EDNS Client Subnet，ECS）允许解析器附带客户端地址前缀，可能影响权威端的地域调度；同时也会向更多参与者暴露客户端网络信息。公共解析服务可能使用任播与地域节点，CDN 也可能结合其他信号，不能仅凭公共 DNS 的品牌或注册地断定一定绕路[^ecs]。
 
-DNS 返回多个地址后，怎样选连接是下一阶段的问题。**Happy Eyeballs** 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/)中继续核对。
+DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeballs 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/)中继续核对。
 
 ## DNSSEC 与加密 DNS：数据认证和通道保密
 
@@ -125,6 +122,8 @@ DNS 返回多个地址后，怎样选连接是下一阶段的问题。**Happy Ey
 客户端若把验证交给递归解析器，还需要信任该解析器及与它之间的通信。`dig +dnssec` 只是请求相关 DNSSEC 数据，本身不等于完成独立验证；`AD` 标志的意义也依赖可信的解析器与通道，不能从任意来源的一个标志就推导安全性。
 
 验证者从信任锚出发，利用父区的 DS 与子区的 DNSKEY 建立信任关系，再验证 RRset 的 RRSIG。没有安全委派的区域可能被判为 insecure，不等于签名错误；已有安全链却无法通过验证的 bogus 数据则不能当作正常答案接受。排查 `SERVFAIL` 时应区分签名过期、信任链问题与普通上游超时，不能关闭验证后就宣称域名数据没有问题[^dnssec-validation]。
+
+例如，解析器验证 `www.example.com. A` 时，可以从根信任锚出发，沿安全委派验证 `.com` 和 `example.com` 的 DNSKEY。每一级用已验证父区的 DS 核对匹配的子区 DNSKEY，再用经验证的子区密钥核验目标 RRset 的 RRSIG。这里省略密钥轮换和别名，只示意有安全委派的情况；返回记录仍能被能读取明文 DNS 的观察者看到[^dnssec-validation]。
 
 | 使用方式 | DNS 数据认证与完整性 | 查询通道保密 |
 | --- | --- | --- |
@@ -138,9 +137,9 @@ DoT、DoH、DoQ 在使用正确的服务端认证时，保护客户端到所选�
 
 | 协议 | 传输与默认端口 | 消息组织 | 边界与权衡 |
 | --- | --- | --- | --- |
-| **DoT**（DNS over TLS） | TCP + TLS，853 | 带 2 字节长度前缀的 DNS 消息 | 专用端口便于识别，也可能被网络策略限制 |
-| **DoH**（DNS over HTTPS） | HTTPS，通常 443 | HTTP 请求承载 DNS 消息 | 可使用 HTTP/2 或 HTTP/3；共享端口不保证可用，也不消除 HTTP 元数据关联风险 |
-| **DoQ**（DNS over QUIC） | QUIC / UDP，853 | 每次查询使用独立双向流 | 避免跨流的按序交付阻塞；仍受共享拥塞控制及 UDP 可达性影响 |
+| DoT（DNS over TLS） | TCP + TLS，853 | 带 2 字节长度前缀的 DNS 消息 | 专用端口便于识别，也可能被网络策略限制 |
+| DoH（DNS over HTTPS） | HTTPS，通常 443 | HTTP 请求承载 DNS 消息 | 可使用 HTTP/2 或 HTTP/3；共享端口不保证可用，也不消除 HTTP 元数据关联风险 |
+| DoQ（DNS over QUIC） | QUIC / UDP，853 | 每次查询使用独立双向流 | 避免跨流的按序交付阻塞；仍受共享拥塞控制及 UDP 可达性影响 |
 
 加密 DNS 不能阻止解析器本身看到查询；也不自动保护解析器到权威端的全部后续链路[^5]。它与 DNSSEC 可组合：一项认证 DNS 数据，一项保护所选通道。网站连接若未使用 ECH，旁观者还可能从 TLS SNI 得到域名；即使两者都启用，目标 IP 和流量模式仍然可见，详见[下一篇的可见性边界](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)。
 
@@ -189,6 +188,8 @@ dig +time=2 +tries=1 @1.1.1.1 cloudflare.com TYPE65
 
 前两条比较答案与剩余 TTL；只有命中同一份未刷新缓存时，才适合用“TTL 随时间下降”解释。查询耗时还包含网络往返等因素，不能保证第二次一定更快。第三条使用 `HTTPS` 的数字类型 `TYPE65`，兼容 DiG 9.10.6 等不识别 `HTTPS` 类型名称的旧版本；支持名称的新版也可写 `HTTPS`。旧工具可能只显示通用编码，不能要求一定打印 `alpn="h3,h2"`。
 
+对照别名和服务绑定时，分别执行 `dig www.example.com CNAME`、`dig www.example.com A` 与 `dig www.example.com TYPE65`。若返回 CNAME，沿目标名继续检查所需记录类型。HTTPS 记录中的 AliasMode 与 ServiceMode 应按其优先级和参数区分；未配置这两类记录的名字可只返回空答案，实验不依赖样例域名的实时结果[^1][^6]。
+
 ### 实验四：对照系统解析结果
 
 macOS 可以查询系统名称服务：
@@ -227,34 +228,36 @@ DNS 的输出是带类型、状态与缓存条件的记录，不只是一个 IP�
 - [RFC 9499: DNS Terminology](https://www.rfc-editor.org/rfc/rfc9499.html)——系统核对存根、递归、权威、区域与胶水等术语
 - [BIND 9: dig 手册](https://bind9.readthedocs.io/en/stable/manpages.html#dig-dns-lookup-utility)——按所用版本核对查询选项、显示格式与类型支持
 
-[^1]: [RFC 1034 §3、§4](https://www.rfc-editor.org/rfc/rfc1034.html#section-3)与[RFC 1035 §3.2](https://www.rfc-editor.org/rfc/rfc1035.html#section-3.2)——域名空间、区域委派、递归解析和资源记录格式
+[^1]: 〔RFC〕[RFC 1034 §3、§4](https://www.rfc-editor.org/rfc/rfc1034.html#section-3)与[RFC 1035 §3.2](https://www.rfc-editor.org/rfc/rfc1035.html#section-3.2)——域名空间、区域委派、递归解析和资源记录格式
 
-[^2]: [RFC 7858 §3](https://www.rfc-editor.org/rfc/rfc7858.html#section-3)——DoT 的 TLS 连接、TCP/853 与 DNS 消息长度前缀
+[^2]: 〔RFC〕[RFC 7858 §3](https://www.rfc-editor.org/rfc/rfc7858.html#section-3)——DoT 的 TLS 连接、TCP/853 与 DNS 消息长度前缀
 
-[^3]: [RFC 8484 §4](https://www.rfc-editor.org/rfc/rfc8484.html#section-4)——DNS 消息与 HTTPS 请求、响应的映射
+[^3]: 〔RFC〕[RFC 8484 §4](https://www.rfc-editor.org/rfc/rfc8484.html#section-4)——DNS 消息与 HTTPS 请求、响应的映射
 
-[^4]: [RFC 9250 §4、§5](https://www.rfc-editor.org/rfc/rfc9250.html#section-4)——DoQ 的端口、流映射、连接与恢复边界
+[^4]: 〔RFC〕[RFC 9250 §4、§5](https://www.rfc-editor.org/rfc/rfc9250.html#section-4)——DoQ 的端口、流映射、连接与恢复边界
 
-[^5]: [RFC 9076 §6](https://www.rfc-editor.org/rfc/rfc9076.html#section-6)——加密 DNS 下仍存在的解析器可见性、元数据关联和隐私限制
+[^5]: 〔RFC〕[RFC 9076 §6](https://www.rfc-editor.org/rfc/rfc9076.html#section-6)——加密 DNS 下仍存在的解析器可见性、元数据关联和隐私限制
 
-[^6]: [RFC 9460 §7、§9](https://www.rfc-editor.org/rfc/rfc9460.html#section-7)——HTTPS 记录及 ALPN、端口、地址提示等服务参数
+[^6]: 〔RFC〕[RFC 9460 §7、§9](https://www.rfc-editor.org/rfc/rfc9460.html#section-7)——HTTPS 记录及 ALPN、端口、地址提示等服务参数
 
-[^ech-dns]: [RFC 9848 §3](https://www.rfc-editor.org/rfc/rfc9848.html#section-3)——`ech` 服务参数携带 ECHConfigList；与 RFC 9460 的通用服务绑定框架分工
+[^ech-dns]: 〔RFC〕[RFC 9848 §3](https://www.rfc-editor.org/rfc/rfc9848.html#section-3)——`ech` 服务参数携带 ECHConfigList；与 RFC 9460 的通用服务绑定框架分工
 
-[^http3]: [RFC 9114 §3.1](https://www.rfc-editor.org/rfc/rfc9114.html#section-3.1)——HTTP/3 端点发现、替代服务与后续 QUIC 连接；HTTPS 记录通告 `h3` 的具体示例见[RFC 9460 §10.4.1](https://www.rfc-editor.org/rfc/rfc9460.html#section-10.4.1)
+[^http3]: 〔RFC〕[RFC 9114 §3.1](https://www.rfc-editor.org/rfc/rfc9114.html#section-3.1)——HTTP/3 端点发现、替代服务与后续 QUIC 连接；HTTPS 记录通告 `h3` 的具体示例见[RFC 9460 §10.4.1](https://www.rfc-editor.org/rfc/rfc9460.html#section-10.4.1)
 
-[^dns-tcp]: [RFC 7766 §5、§6](https://www.rfc-editor.org/rfc/rfc7766.html#section-5)——通用 DNS 对 TCP 的支持要求，以及直接使用与复用 TCP 连接
+[^dns-tcp]: 〔RFC〕[RFC 7766 §5、§6](https://www.rfc-editor.org/rfc/rfc7766.html#section-5)——通用 DNS 对 TCP 的支持要求，以及直接使用与复用 TCP 连接
 
-[^stale]: [RFC 8767 §4](https://www.rfc-editor.org/rfc/rfc8767.html#section-4)——在规定条件下使用过期 DNS 数据；TTL 的通常模型不能包办所有缓存行为
+[^stale]: 〔RFC〕[RFC 8767 §4](https://www.rfc-editor.org/rfc/rfc8767.html#section-4)——在规定条件下使用过期 DNS 数据；TTL 的通常模型不能包办所有缓存行为
 
-[^negative]: [RFC 2308 §2、§3、§5](https://www.rfc-editor.org/rfc/rfc2308.html#section-2)——NXDOMAIN、NODATA 与 SOA 负缓存 TTL；[RFC 9520](https://www.rfc-editor.org/rfc/rfc9520.html)另行规定解析失败缓存
+[^negative]: 〔RFC〕[RFC 2308 §2、§3、§5](https://www.rfc-editor.org/rfc/rfc2308.html#section-2)——NXDOMAIN、NODATA 与 SOA 负缓存 TTL；[RFC 9520](https://www.rfc-editor.org/rfc/rfc9520.html)另行规定解析失败缓存
 
-[^ecs]: [RFC 7871 §6、§11](https://www.rfc-editor.org/rfc/rfc7871.html#section-6)——ECS 地址前缀、缓存与隐私权衡
+[^ecs]: 〔RFC〕[RFC 7871 §6、§11](https://www.rfc-editor.org/rfc/rfc7871.html#section-6)——ECS 地址前缀、缓存与隐私权衡
 
-[^happy]: [RFC 8305 §3–§5](https://www.rfc-editor.org/rfc/rfc8305.html#section-3)——双栈解析、地址排序与连接尝试的调度
+[^happy]: 〔RFC〕[RFC 8305 §3–§5](https://www.rfc-editor.org/rfc/rfc8305.html#section-3)——双栈解析、地址排序与连接尝试的调度
 
-[^dnssec]: [RFC 4033 §3、§4、§7](https://www.rfc-editor.org/rfc/rfc4033.html#section-3)——DNSSEC 的数据认证、完整性、不存在证明、非保密性，以及存根对验证解析器的信任
+[^dnssec]: 〔RFC〕[RFC 4033 §3、§4、§7](https://www.rfc-editor.org/rfc/rfc4033.html#section-3)——DNSSEC 的数据认证、完整性、不存在证明、非保密性，以及存根对验证解析器的信任
 
-[^dnssec-validation]: [RFC 4033 §5](https://www.rfc-editor.org/rfc/rfc4033.html#section-5)与[RFC 4035 §5](https://www.rfc-editor.org/rfc/rfc4035.html#section-5)——secure、insecure、bogus 等验证状态，以及 DNSKEY、DS 和 RRSIG 的验证职责。
+[^dnssec-validation]: 〔RFC〕[RFC 4033 §5](https://www.rfc-editor.org/rfc/rfc4033.html#section-5)与[RFC 4035 §5](https://www.rfc-editor.org/rfc/rfc4035.html#section-5)——secure、insecure、bogus 等验证状态，以及 DNSKEY、DS 和 RRSIG 的验证职责。
 
-[^dig-trace]: [ISC: How does dig +trace work?](https://kb.isc.org/docs/aa-00208)——起步向所选解析器发现根 NS、随后跟随委派，以及缺失地址时的补充解析
+[^dig-trace]: 〔工具文档〕[ISC: How does dig +trace work?](https://kb.isc.org/docs/aa-00208)——起步向所选解析器发现根 NS、随后跟随委派，以及缺失地址时的补充解析
+
+[^edns]: 〔RFC〕[RFC 1035 §4.2.1](https://www.rfc-editor.org/rfc/rfc1035.html#section-4.2.1)与[RFC 6891 §6.2.3–§6.2.5](https://www.rfc-editor.org/rfc/rfc6891.html#section-6.2.3)——传统 UDP 上限、OPT 通告的请求方载荷能力及分片边界。

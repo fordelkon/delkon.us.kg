@@ -7,13 +7,7 @@ tags: ["networking", "go"]
 
 前六篇沿客户端访问的主线介绍了寻址、路由、传输、DNS 与 Web 通信。代理把这些机制组合到新的连接路径中：应用先连接谁，域名由谁解析，哪一段由谁加密，都可能发生变化。
 
-本篇以 **Mihomo** 为配置参照，先解释 HTTP CONNECT 与 **SOCKS5**（Socket Secure v5），再把第三篇的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)用于透明接管。代码选用 Go 标准库（`net/http` 与 `net.TCPConn` 原生提供请求解析、`CloseWrite` 半关闭与 `SetDeadline`，无需第三方依赖即可完整演示字节流转发），最后用 `curl` 对照显式代理的实际行为。Mihomo 的可用选项与默认值可能随版本变化，阅读配置时应对照所用内核版本的文档。
-
-读完本篇后，你应能：
-
-- 追踪显式代理、普通 TUN 和 Fake-IP 三种入口到规则引擎的路径。
-- 判断域名映射或嗅探何时可用，何时只能按 IP 等信息处理。
-- 区分入口连接、DIRECT 出站、节点出站的生命周期，并验证半关闭。
+本篇以 Mihomo 为配置参照，先解释 HTTP CONNECT 与 SOCKS5，再把第三篇的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)用于透明接管。代码选用 Go 标准库（`net/http` 与 `net.TCPConn` 原生提供请求解析、`CloseWrite` 半关闭与 `SetDeadline`，无需第三方依赖即可完整演示字节流转发），最后用 `curl` 对照显式代理的实际行为。Mihomo 的可用选项与默认值可能随版本变化，阅读配置时应对照所用内核版本的文档。
 
 ## 显式代理：HTTP CONNECT 与 SOCKS5 的工作边界
 
@@ -32,9 +26,9 @@ tags: ["networking", "go"]
 
 ### Go 示例：保留预读数据与两个方向的结束状态
 
-下面的教学代理只监听回环地址。它先读取 CONNECT 头部，再建立目标 TCP 连接，随后双向复制。这里保留 `bufio.Reader`，因为 HTTP 解析器可能已经从连接预读了后续字节；转发时跳回原始连接会漏掉 reader 中尚未消费的数据。
+下面的教学代理只监听回环地址。它先读取 CONNECT 头部，再建立目标 TCP 连接，随后双向复制。错误响应共用一个格式化函数，状态行之后的字段从行首开始，并以空行结束字段区[^http-wire]。这里保留 `bufio.Reader`，因为 HTTP 解析器可能已经从连接预读了后续字节；转发时跳回原始连接会漏掉 reader 中尚未消费的数据。
 
-两个方向也有独立生命周期：某方向正常读到 EOF 后，对另一连接执行 `CloseWrite`，继续等待反向复制；出错时关闭两端以解除另一个阻塞的复制，再收束两个 goroutine。为使实验有结束边界，头部读取与建连各有 5 秒期限，转发阶段采用 30 秒的绝对期限。`SetDeadline` 不是自动续期的空闲超时[^go-net][^go-http]。
+两个方向也有独立生命周期：某方向正常读到 EOF 后，对另一连接执行 `CloseWrite`，继续等待反向复制；出错时关闭两端以解除另一个阻塞的复制，再收束两个 goroutine。为使实验有结束边界，头部读取与建连各有 5 秒期限。错误响应另有一秒写入期限，以免建连耗尽时间时无法尝试返回 502；转发阶段采用 30 秒的绝对期限。`SetDeadline` 不是自动续期的空闲超时[^go-net][^go-http]。
 
 ```go
 package main
@@ -49,6 +43,15 @@ import (
 	"time"
 )
 
+func writeError(client *net.TCPConn, code int) {
+	if err := client.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(client, "HTTP/1.1 %d %s\r\n"+
+		"Content-Length: 0\r\n"+
+		"Connection: close\r\n\r\n", code, http.StatusText(code))
+}
+
 func handleClient(client *net.TCPConn) {
 	defer client.Close()
 	if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -60,17 +63,17 @@ func handleClient(client *net.TCPConn) {
 		return
 	}
 	if req.Method != http.MethodConnect {
-		_, _ = io.WriteString(client, "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		writeError(client, http.StatusMethodNotAllowed)
 		return
 	}
 	if _, _, err := net.SplitHostPort(req.Host); err != nil {
-		_, _ = io.WriteString(client, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		writeError(client, http.StatusBadRequest)
 		return
 	}
 
 	conn, err := net.DialTimeout("tcp", req.Host, 5*time.Second)
 	if err != nil {
-		_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		writeError(client, http.StatusBadGateway)
 		return
 	}
 	target := conn.(*net.TCPConn)
@@ -129,7 +132,7 @@ func main() {
 
 将上面的程序保存为 `connect_proxy.go`，在该文件所在目录打开本机终端，用 Go 1.22 或更新版本运行 `go run connect_proxy.go`。保持代理运行，再在另一终端执行下面的回环验证。
 
-先做不访问外网的回环验证：在另一终端把下面的完整程序保存为 `connect_local_check.py`，运行 `python3 connect_local_check.py`。这里用 Python 标准库同时创建一次性目标服务和客户端，避免另外部署 Web 服务；目标地址是动态分配的 `127.0.0.1` 端口，CONNECT 也只传这个数字地址，不需要 DNS。
+先做不访问外网的回环验证（Python 3.8 或更新版本）：在另一终端把下面的完整程序保存为 `connect_local_check.py`，运行 `python3 connect_local_check.py`。这里用 Python 标准库同时创建一次性目标服务和客户端，避免另外部署 Web 服务；目标地址是动态分配的 `127.0.0.1` 端口，CONNECT 也只传这个数字地址，不需要 DNS。
 
 ```python
 import socket
@@ -239,7 +242,7 @@ TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP �
 
 ### 1. Fake-IP：在 DNS 阶段建立映射
 
-在匹配的 DNS 请求进入内部解析器后，**伪造 IP 映射**（Fake-IP）可以先返回域名关联的虚拟映射地址，而不必在这个响应阶段取得真实目标 IP。这一思路在原型上可追溯至 RFC 3089 提出的应用层虚拟地址映射机制[^fakeip-rfc]，Mihomo 官方配置示例则借用 RFC 2544 预留的基准测试网段 `198.18.0.0/15`（具体默认配置如 `198.18.0.1/16`）作为地址池；它属于特殊用途地址空间，并不是网站真实的公网地址[^3][^fakeip-rfc]。
+在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回域名关联的虚拟映射地址，而不必在这个响应阶段取得真实目标 IP。这一思路在原型上可追溯至 RFC 3089 提出的应用层虚拟地址映射机制[^fakeip-rfc]，Mihomo 官方配置示例则借用 RFC 2544 预留的基准测试网段 `198.18.0.0/15`（具体默认配置如 `198.18.0.1/16`）作为地址池；它属于特殊用途地址空间，并不是网站真实的公网地址[^3][^fakeip-rfc]。
 
 应用连接映射地址，流量再进入代理时，内核可通过映射关系恢复域名。随后是否需要本地真实解析，仍取决于规则和出站：若二者都不要求本地目标 IP，可以把域名交给远端；若目标 IP 规则、直连或特定出站要求真实 IP，则仍需在相应阶段查询。
 
@@ -247,20 +250,23 @@ TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP �
 sequenceDiagram
  participant App as 应用
  participant DNS as Mihomo DNS
- participant Inbound as Mihomo TUN 侧
+ participant Kernel as 内核
+ participant Inbound as TUN 与代理核心
  participant Node as 远端代理节点
  participant Target as 目标服务
- App->>DNS: 查询 example.com 的地址
- DNS->>Inbound: 登记共享映射<br/>198.18.0.79 ↔ example.com
- DNS->>App: 返回 198.18.0.79
- App->>Inbound: 连接 198.18.0.79:443<br/>内核按路由把 IP 包送进 TUN
- Note over Inbound: 查映射恢复 example.com<br/>DOMAIN-SUFFIX 规则选择远端出站
+ App-->>DNS: 查询 example.com 的 A 记录
+ Note over DNS,Inbound: 写入共享映射<br/>198.18.0.8 ↔ example.com
+ DNS->>App: 返回 198.18.0.8
+ App->>Kernel: 连接 198.18.0.8:443
+ Kernel->>Inbound: 路由选中 TUN，交付 IP 包
+ Note over Inbound: 查映射恢复 example.com，DOMAIN-SUFFIX 规则选择远端出站
  Inbound->>Node: 通过支持域名的出站协议<br/>提交 example.com:443
  Note over Node: 按节点环境解析真实目标地址
  Node->>Target: 建立独立的目标连接
  Target->>Node: 返回响应
  Node->>Inbound: 通过对应代理会话返回
- Inbound->>App: 按应用侧连接状态交付字节
+ Inbound->>Kernel: 按应用侧状态写回 IP 包
+ Kernel->>App: 交付响应字节
 ```
 
 需要分开看三类解析对象[^3]：
@@ -300,9 +306,25 @@ flowchart TB
 
 持久化映射可减少某些重启场景的失配，却不保证应用缓存与代理状态永远同步。`fake-ip-filter` 命中的域名返回真实地址时，本来就应走真实 IP 的分析路径，而不是当作映射故障[^3]。
 
+### 按地址族验证接管与出站
+
+应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。AAAA 只说明这是 IPv6 形式的结果。内核使用实际目标地址选路，IPv4 的覆盖路由对 IPv6 不生效，双栈竞速还可能改变最终使用的地址族。虚拟地址必须由生成映射的核心恢复目标名，真实地址则依赖独立的域名元数据或 IP 规则[^3][^4]。
+
+```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
+flowchart TB
+ dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
+ route -->|TUN| tun["内核交付 IPv6 包"]
+ route -->|物理接口| native["按系统路由出站"]
+ route -.->|无有效路由| stop["本次尝试失败"]
+ tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
+ core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
+```
+
+排查意外绕行时，在同一次请求记录实际目标地址、出接口、核心是否记录了该入站，以及代理自己的出站连接。可以用同一域名的 `curl -4` 和 `curl -6` 对照并记录 `remote_ip`，再用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实。若显式代理在另一端解析目标，curl 的远端地址和地址族选项可能只反映它到代理的连接，两段要分别观察[^curl]。
+
 ### 2. 域名嗅探：读取可见的协议元数据
 
-没有可用 Fake-IP 关联时，**域名嗅探**（Domain Sniffing）可以从部分协议数据取得目标名[^5]：
+没有可用 Fake-IP 关联时，**域名嗅探**（domain sniffing）可以从部分协议数据取得目标名[^5]：
 
 - 明文 HTTP 请求中的 `Host`。
 - TLS ClientHello 中未被 ECH 隐藏的 SNI。
@@ -327,9 +349,10 @@ flowchart TB
  metadata --> rules["按规则顺序匹配<br/>检查出站适用性"]
  rules --> choice["确定最终出站<br/>DIRECT / REJECT / 节点"]
  choice -->|REJECT| reject["拒绝请求<br/>终止处理"]
- choice -->|DIRECT| outbound["建立独立出站<br/>代理直连目标或连接远端节点"]
- choice -->|代理节点| outbound
- outbound --> response["对应出站会话<br/>收到响应"]
+ choice -->|DIRECT| direct["核心建立到目标的出站"]
+ choice -->|代理节点| relay["核心连接节点<br/>节点另建到目标的连接"]
+ direct --> response
+ relay --> response["对应出站会话<br/>收到响应"]
  response --> inbound["入站转发状态"]
  inbound --> original["原应用"]
 ```
@@ -393,30 +416,32 @@ curl --noproxy '' --proxy socks5h://127.0.0.1:7890 \
 - [Mihomo 官方文档](https://wiki.metacubex.one/)——按安装版本对照完整配置，而不是把单段示意当成可直接部署的配置文件
 - [Go `io.Copy`](https://pkg.go.dev/io#Copy)——复制直到 EOF 或错误的返回契约
 
-[^1]: [RFC 9110 §9.3.6, CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——CONNECT 目标、成功响应后的隧道语义与连接关闭要求。
+[^1]: 〔RFC〕[RFC 9110 §9.3.6, CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——CONNECT 目标、成功响应后的隧道语义与连接关闭要求。
 
-[^2]: [RFC 1928 §3–7](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 方法协商、目标地址类型、TCP 连接与 UDP 中继。
+[^2]: 〔RFC〕[RFC 1928 §3–7](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 方法协商、目标地址类型、TCP 连接与 UDP 中继。
 
-[^go-net]: [Go `TCPConn.CloseWrite`](https://pkg.go.dev/net#TCPConn.CloseWrite)、[`Conn.SetDeadline`](https://pkg.go.dev/net#Conn)、[`DialTimeout`](https://pkg.go.dev/net#DialTimeout)——关闭写方向、绝对读写期限及含 DNS 阶段的建连超时。
+[^go-net]: 〔软件实现〕[Go `TCPConn.CloseWrite`](https://pkg.go.dev/net#TCPConn.CloseWrite)、[`Conn.SetDeadline`](https://pkg.go.dev/net#Conn)、[`DialTimeout`](https://pkg.go.dev/net#DialTimeout)——关闭写方向、绝对读写期限及含 DNS 阶段的建连超时。
 
-[^go-http]: [Go `http.ReadRequest`](https://pkg.go.dev/net/http#ReadRequest)与[`bufio.Reader`](https://pkg.go.dev/bufio#Reader)——从缓冲 reader 解析 HTTP 请求及 reader 的预读边界。
+[^go-http]: 〔软件实现〕[Go `http.ReadRequest`](https://pkg.go.dev/net/http#ReadRequest)与[`bufio.Reader`](https://pkg.go.dev/bufio#Reader)——从缓冲 reader 解析 HTTP 请求及 reader 的预读边界。
 
-[^mode]: [Mihomo：运行模式](https://wiki.metacubex.one/config/general/#_4)——`rule`、`global`、`direct` 的出站选择职责。
+[^mode]: 〔软件实现〕[Mihomo：运行模式](https://wiki.metacubex.one/config/general/#_4)——`rule`、`global`、`direct` 的出站选择职责。
 
-[^3]: [Mihomo：DNS 配置](https://wiki.metacubex.one/config/dns/)——Fake-IP、过滤模式、目标解析、直连解析、节点解析与 DNS 服务的引导解析。
+[^3]: 〔软件实现〕[Mihomo：DNS 配置](https://wiki.metacubex.one/config/dns/)——Fake-IP、过滤模式、目标解析、直连解析、节点解析与 DNS 服务的引导解析。
 
-[^fakeip-rfc]: [RFC 3089: A SOCKS-based IPv6/IPv4 Gateway Mechanism](https://www.rfc-editor.org/rfc/rfc3089.html)与[RFC 2544: Benchmarking Methodology for Network Interconnect Devices](https://www.rfc-editor.org/rfc/rfc2544.html)——前者提出用虚拟地址映射域名实现透明接管的原型思路，后者定义了常被代理软件借用作 Fake-IP 地址池的 `198.18.0.0/15` 基准测试网段。
+[^fakeip-rfc]: 〔RFC〕[RFC 3089: A SOCKS-based IPv6/IPv4 Gateway Mechanism](https://www.rfc-editor.org/rfc/rfc3089.html)与[RFC 2544: Benchmarking Methodology for Network Interconnect Devices](https://www.rfc-editor.org/rfc/rfc2544.html)——前者提出用虚拟地址映射域名实现透明接管的原型思路，后者定义了常被代理软件借用作 Fake-IP 地址池的 `198.18.0.0/15` 基准测试网段。
 
-[^4]: [Mihomo：TUN 入站](https://wiki.metacubex.one/config/inbound/tun/)——协议栈选项、自动路由、排除地址及 DNS 劫持的平台边界。
+[^4]: 〔软件实现〕[Mihomo：TUN 入站](https://wiki.metacubex.one/config/inbound/tun/)——协议栈选项、自动路由、排除地址及 DNS 劫持的平台边界。
 
-[^5]: [Mihomo：域名嗅探](https://wiki.metacubex.one/config/sniff/)——HTTP、TLS、QUIC 嗅探与目标覆盖配置。
+[^5]: 〔软件实现〕[Mihomo：域名嗅探](https://wiki.metacubex.one/config/sniff/)——HTTP、TLS、QUIC 嗅探与目标覆盖配置。
 
-[^6]: [Mihomo：路由规则](https://wiki.metacubex.one/config/rules/)——顺序匹配、UDP 出站能力例外及 `no-resolve` 的作用范围。
+[^6]: 〔软件实现〕[Mihomo：路由规则](https://wiki.metacubex.one/config/rules/)——顺序匹配、UDP 出站能力例外及 `no-resolve` 的作用范围。
 
-[^http-outbound]: [Mihomo：HTTP 出站](https://wiki.metacubex.one/config/proxies/http/)——HTTP 代理出站的 TLS 是独立可选配置。
+[^http-outbound]: 〔软件实现〕[Mihomo：HTTP 出站](https://wiki.metacubex.one/config/proxies/http/)——HTTP 代理出站的 TLS 是独立可选配置。
 
-[^curl]: [curl 官方手册](https://curl.se/docs/manpage.html#--proxy)——HTTP 代理、SOCKS5/SOCKS5H 解析位置与 `--noproxy`；实验还需按本机 `curl --version` 确认功能。
+[^curl]: 〔工具文档〕[curl 官方手册](https://curl.se/docs/manpage.html#--proxy)——HTTP 代理、SOCKS5/SOCKS5H 解析位置与 `--noproxy`；实验还需按本机 `curl --version` 确认功能。
 
-[^version]: [Mihomo v1.19.34 发布页](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)与[该版本配置类型](https://pkg.go.dev/github.com/metacubex/mihomo@v1.19.34/config)——固定本文配置字段的版本基线；平台行为另按各项官方文档及本机实际结果核对。
+[^version]: 〔软件实现〕[Mihomo v1.19.34 发布页](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)与[该版本配置类型](https://pkg.go.dev/github.com/metacubex/mihomo@v1.19.34/config)——固定本文配置字段的版本基线；平台行为另按各项官方文档及本机实际结果核对。
 
-[^transparent]: [Linux Kernel: Transparent proxy support](https://docs.kernel.org/networking/tproxy.html)——REDIRECT 的目的地址改写局限、TPROXY 与策略路由及 IP_TRANSPARENT 的配合；Mihomo 的入口字段另见[官方监听器文档](https://wiki.metacubex.one/config/inbound/listeners/)。
+[^transparent]: 〔平台与实现〕[Linux Kernel: Transparent proxy support](https://docs.kernel.org/networking/tproxy.html)——REDIRECT 的目的地址改写局限、TPROXY 与策略路由及 IP_TRANSPARENT 的配合；Mihomo 的入口字段另见[官方监听器文档](https://wiki.metacubex.one/config/inbound/listeners/)。
+
+[^http-wire]: 〔RFC〕[RFC 9112 §2.1、§5](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.1)——HTTP/1.1 起始行、字段行与空行的消息定界。

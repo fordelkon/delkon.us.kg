@@ -340,3 +340,9 @@ html[data-theme="dark"] .explainer-scenes {
 	fill: var(--color-printer-ink-light);
 	font-size: 11px;
 }
+
+.explainer-node[data-endpoint] rect.explainer-endpoint-inset {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1;
+}

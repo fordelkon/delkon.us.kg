@@ -1,4 +1,4 @@
-import { node, withRoles } from "./diagram-layout.ts";
+import { logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const stages = [
@@ -110,7 +110,10 @@ const diagnosis: Scene = {
 
 export const scene: Scene = {
 	...timing,
-	chapters: [withRoles(timing, { dns: "client", tls: "secure", body: "delivery" }), diagnosis],
+	chapters: [
+		logicalFlow(withRoles(timing, { dns: "client", tls: "secure", body: "delivery" })),
+		logicalFlow(diagnosis),
+	],
 };
 
 const sections = ["用-curl-记录请求耗时", "从哪一步开始排查"];

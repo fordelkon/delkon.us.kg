@@ -9,6 +9,7 @@ export interface Box {
 	width: number;
 	lines: string[];
 	active?: boolean;
+	endpoint?: boolean;
 	tone?: "client" | "delivery" | "processing" | "secure" | "actor" | "result" | "control" | "state";
 	muted?: boolean;
 }

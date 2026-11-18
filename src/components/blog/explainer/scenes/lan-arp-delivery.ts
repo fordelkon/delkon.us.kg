@@ -1,4 +1,4 @@
-import { chain, node } from "./diagram-layout.ts";
+import { chain, logicalFlow, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
 const cases: [string, string, string, string, string][] = [
@@ -132,7 +132,7 @@ const ipv6: Scene = {
 	],
 };
 
-export const scene: Scene = { ...ipv4, chapters: [ipv4, ipv6] };
+export const scene: Scene = { ...ipv4, chapters: [logicalFlow(ipv4), logicalFlow(ipv6)] };
 
 const sections = ["ipv4-的地址解析arp", "ipv6-的-raslaac-与-dns-参数"];
 

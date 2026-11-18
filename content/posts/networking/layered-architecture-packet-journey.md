@@ -5,13 +5,7 @@ publishDate: "18 Nov 2026"
 tags: ["networking"]
 ---
 
-输入一个网址以后，浏览器交给操作系统的是什么？路由器转发的又是什么？这是计算机网络系列的第一篇，先用协议分层与一次 HTTPS 请求建立全局地图——它们是后面七篇讨论[本地交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[跨网转发](/posts/networking/routing-forwarding-nat-virtual-interfaces/)、[传输接口](/posts/networking/transport-tcp-udp-socket-quic/)、[名字解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[安全通信](/posts/networking/http-evolution-tls-handshake-https/)、[代理接管](/posts/networking/proxies-tunnels-transparent-interception/)与[排障](/posts/networking/network-diagnostics-performance-troubleshooting/)时共用的坐标系。实验以 macOS 和 Linux 常见工具为主，解释结果时会区分协议保证、软件实现与具体环境条件。
-
-读完本篇后，你应能：
-
-- 区分 HTTP 消息、TLS 记录、TCP 段、IP 包与链路帧的边界。
-- 追踪逐跳转发中 MAC、IP、TTL 的变化，并解释回程与连接复用。
-- 区分 Socket 接口、NAT 转发和代理创建连接的职责。
+在浏览器里打开一个网址，应用交给操作系统的是什么，路由器看到的又是什么？我们跟着一次 HTTPS 请求，看看数据怎样在应用、传输、网络和链路四层之间交付，再顺着一条具体路径追踪哪些字段会变、哪些会留到对端。这是[计算机网络系列](/series/networking/)的第一篇，实验以 macOS 和 Linux 为例。
 
 ## 为什么需要分层模型
 
@@ -46,7 +40,7 @@ tags: ["networking"]
 | --- | --- | --- |
 | 应用层 | 消息（Message）或字节流（Byte Stream） | HTTP 方法、路径、Host、状态码；TLS 记录头与密文载荷 |
 | 传输层 | **报文段**（Segment，TCP）或**数据报**（Datagram，UDP） | 源端口、目的端口、序号、确认号、校验和 |
-| 网络层 | **IP 数据报 / 数据包**（Packet / Datagram） | 源 IP、目的 IP、协议号（Protocol / Next Header）、**生存时间**（Time to Live，TTL）/ **跳数限制**（Hop Limit） |
+| 网络层 | **IP 数据报**（Packet / Datagram） | 源 IP、目的 IP、协议号（Protocol / Next Header）、**生存时间**（Time to Live，TTL）/ **跳数限制**（Hop Limit） |
 | 链路层 | **帧**（Frame） | 源 MAC、目的 MAC、**以太网类型**（EtherType）、**帧校验序列**（Frame Check Sequence，FCS） |
 
 下面是普通 TCP/IP 发送路径的单向封装示意。它只展示头部关系：一条应用消息可能跨越多条 TLS 记录或 TCP 报文段，一个报文段也可能承载不同消息的片段，三者不存在固定的一一对应。
@@ -82,8 +76,8 @@ flowchart LR
 
 接收端之所以知道该把剥出来的载荷交给上层的哪一个协议模块，靠的是每一层头部预留的**复用标识字段**（multiplexing identifier）：
 
-1. 以太网帧头中的 **EtherType** 指明载荷类型，例如 `0x0800` 代表 IPv4、`0x86DD` 代表 IPv6、`0x0806` 代表 ARP[^4]。
-2. IPv4 的 **Protocol** 字段指明后续协议，例如 `6` 为 TCP、`17` 为 UDP、`1` 为 ICMP[^3]。IPv6 的 **Next Header** 可以指向扩展头或上层协议；ICMPv6 使用协议号 `58`，不能直接套用 IPv4 的 `1`[^ipv6]。
+1. 以太网帧头中的 `EtherType` 指明载荷类型，例如 `0x0800` 代表 IPv4、`0x86DD` 代表 IPv6、`0x0806` 代表 ARP[^4]。
+2. IPv4 的 `Protocol` 字段指明后续协议，例如 `6` 为 TCP、`17` 为 UDP、`1` 为 ICMP[^3]。IPv6 的 `Next Header` 可以指向扩展头或上层协议；ICMPv6 使用协议号 `58`，不能直接套用 IPv4 的 `1`[^ipv6]。
 3. TCP/UDP 头部的端口号参与 Socket 的解复用。具体选择还可能结合本地地址、远端地址与端口；已建立的 TCP 连接不能只靠目的端口区分[^2]。
 
 一旦弄清这三步解复用链条，很多入门时容易混淆的问题就能直接分清：**域名**只出现在应用层消息（如 HTTP `Host` 头、DNS 查询载荷或 TLS `Server Name Indication` 扩展）中，内核的 IP 层和 TCP 层并不认识域名；**IP 地址**负责定位网络中的主机接口，**端口**负责定位主机内部的通信端点。
@@ -105,22 +99,31 @@ flowchart LR
 
 ```mermaid mobile-direction="TB" title="交换、路由与 NAPT 各自改动什么" description="限定普通 IPv4/TCP、以太网链路与家庭 NAPT，无应用代理。交换机不重写 MAC 或 IP；路由器在各自出口重新封装二层头并递减 TTL。家庭 NAPT 额外改写源 IP 和源端口，之后普通公网路由不再改写这对地址端口；不是整个 IP/TCP 头逐字节保持不变。箭头表示经过顺序，不按距离或耗时比例绘制。"
 flowchart LR
- client["客户端<br/>L4 传输与 L7 应用"] -->|本链路帧| switch["二层交换机<br/>按目的 MAC 转发"]
- switch -->|原帧交给网关| nat["家庭 NAPT 路由器<br/>查 L3，改 IP 与 L4 端口"]
- nat -->|新链路帧，已转换的包| router["公网路由器<br/>查 L3，TTL 递减"]
- router -->|再次换帧，地址端口保持| server["服务端<br/>L4 分用与 L7 处理"]
+ client["客户端<br/>生成请求并封装"] -->|本链路帧| switch["二层交换机<br/>按目的 MAC 转发"]
+ switch -->|原帧交给网关| nat["家庭 NAPT 路由器<br/>查目的 IP<br/>改写源地址和端口"]
+ nat -->|新链路帧，已转换的包| router["公网路由器<br/>查目的 IP<br/>递减 TTL"]
+ router -->|再次换帧，地址端口保持| server["服务端<br/>按连接交付数据<br/>服务进程处理请求"]
 ```
 
 ## 操作系统边界：Socket 与网络接口
 
-对编写程序的开发者而言，应用代码既看不到以太网帧，也不会直接构造 IP 头部。操作系统内核在应用进程与网络硬件之间划出了一道清晰的接口边界：**套接字**（Socket）[^6]。
+**套接字**（socket）是应用读写网络数据的操作系统接口。Unix-like 系统常用文件描述符访问它，再调用 `connect`、`send` 或 `recv`。常见的 Internet `SOCK_STREAM` 套接字使用 TCP，`SOCK_DGRAM` 套接字使用 UDP，具体仍取决于地址族与协议。Unix 域套接字则不经过 IP 网络[^6]。
 
-**Socket 是操作系统提供的网络编程接口与资源抽象**[^6]。应用通过系统调用创建 Socket，在 Unix-like 系统中通常用文件描述符访问它，再调用 `connect`、`send`/`write`、`recv`/`read`。对于常见的 IPv4/IPv6 Internet Socket，`SOCK_STREAM` 通常配合 TCP，`SOCK_DGRAM` 通常配合 UDP；Socket 类型还需结合地址族与协议理解，例如 Unix 域 Socket 不经过 IP 网络。
+下面用普通主机的物理接口发送路径，把协议职责映射到实现。Linux、macOS 和 Windows 都有套接字、协议栈和接口的抽象，钩子位置与驱动接口各有不同。
 
-这条系统边界把职责切分得很干净：
+```mermaid title="从套接字到物理介质的发送路径" description="普通 TCP/IP 套接字经物理接口发送的概念图。箭头表示数据沿实现边界交付，不描述任何内核的固定钩子顺序。回环接口在本机折返；路由若选择 TUN，则把 IP 包交给对应程序。"
+flowchart TB
+ app["用户态应用"] -->|write / send| socket["套接字和发送缓冲"]
+ socket --> stack["内核传输与 IP 处理"]
+ stack --> route["路由与适用的过滤策略"]
+ route -->|物理接口| device["接口与驱动"]
+ device -->|网卡读取发送数据| nic["网卡与物理层"]
+ nic -->|介质相关的信号| wire["双绞线、光纤或无线链路"]
+ route -->|本机路径| loop["回环接口"]
+ route -->|虚拟出口| tun["TUN：IP 包交给程序"]
+```
 
-- **应用进程**只需读写字节流或消息，不必关心底层是光纤、Wi-Fi 还是双绞线。
-- **内核协议栈**为每个活跃的 Socket 维护控制块与发送/接收缓冲区，负责把字节流切分成符合链路**最大传输单元**（Maximum Transmission Unit，MTU）与**最大报文段长度**（Maximum Segment Size，MSS）限制的 TCP 报文段、封装 IP 头部、查询路由表并交给网卡驱动[^2]。在物理网卡收发路径上，内核通过**环形缓冲区**（Ring Buffer）与**直接内存访问**（Direct Memory Access，DMA）在网卡和主机内存之间传递帧，并利用中断合并机制（如 Linux NAPI）分批交由协议栈处理[^scaling]；而发往本机**环回接口**（loopback interface，macOS 为 `lo0`、Linux 为 `lo`）的流量则在网际层内部直接折返，不经过物理网卡 DMA 与物理链路，但仍可被挂载在环回接口上的**伯克利包过滤器**（Berkeley Packet Filter，BPF）捕获。
+网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。以 Linux 为例，NAPI 是网络事件的轮询处理机制，硬件中断合并则是减少中断频率的另一项机制。驱动、卸载与虚拟接口会改变主机抓包所见，参见[第八篇的捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)[^napi]。
 
 :::important[本地写入成功与远端处理完成]
 普通 TCP Socket 的 `write`/`send` 成功，只说明返回值所计的字节被本地发送路径接受，既不证明已经发出，也不证明远端业务处理完成。一次调用还可能只接受部分数据，详见第四篇的[Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/)。这与并发系列的[消息交付与处理完成](/posts/concurrency/message-passing-workers-backpressure/)是相似的责任边界，具体保证仍由各自接口规定。
@@ -133,19 +136,19 @@ flowchart LR
 
 ## 走通一次 HTTPS 请求的完整路径
 
-下面固定一个便于追踪的模型：本机 IPv4 为 `192.168.1.10`，使用普通局域网、默认网关和家庭 NAT；浏览器访问 `https://example.com/`，需要解析地址并新建 TCP 连接，使用 TLS 1.3 且未启用 ECH，不经过显式代理或 TUN 接管。下文的 `93.184.216.34` 只是远端地址示意，实验必须使用当次解析或连接的实际地址。HTTP/3、缓存命中和连接复用会改变阶段顺序，分别在第五、六篇展开。
+下面固定一个便于追踪的模型：本机 IPv4 为 `192.168.1.10`，使用普通局域网、默认网关和家庭 NAT；浏览器访问 `https://example.com/`，需要解析地址并新建 TCP 连接，使用 TLS 1.3 且未启用 ECH，不经过显式代理或 TUN 接管。下文的 `198.51.100.20` 只是远端地址示意，实验必须使用当次解析或连接的实际地址。HTTP/3、缓存命中和连接复用会改变阶段顺序，分别在第五、六篇展开。
 
 ### 1. 准备目标地址（应用层触发 DNS）
 
-浏览器从**统一资源定位符**（Uniform Resource Locator，URL）中拆出协议 `https`（默认目的端口 `443`）与域名 `example.com`[^7]。因为内核的 Socket `connect` 需要的是 IP 地址而非域名，浏览器先调用系统解析接口或内置解析器，构造一条**域名系统**（Domain Name System，DNS）查询请求（通常封装在 UDP 目的端口 `53` 中，若启用了加密 DNS 则走 TLS 或 HTTPS），经由本地路由到达 DNS 服务器并取回目标 IP（例如 `93.184.216.34`）。
+浏览器从 URL 取得协议、服务名和端口。需要新连接且没有可用地址时，由系统解析服务或应用内置解析器取得目标地址。解析器角色、缓存和加密方式见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/)[^7]。
 
 ### 2. 建立传输连接（TCP 三次握手）
 
-拿到 IP 后，浏览器创建流式 Socket 并向 `93.184.216.34:443` 发起 `connect`。本机内核发送带有 `SYN` 标志的 TCP 报文段；经由 IP 层封装（源 IP `192.168.1.10`，目的 IP `93.184.216.34`）与链路层封装（目的 MAC 填为默认网关路由器）后发往局域网。家用路由器在出口执行 NAT，将源 IP 改写为公网地址再发往互联网；服务器收到后回复 `SYN-ACK`，客户端再回 `ACK`，双方内核各自建立好**传输控制块**（Transmission Control Block，TCB），进入已连接状态[^2]。
+浏览器按目标 IP 和端口建立 TCP 连接。本机按路由和邻居映射把数据送给网关，家庭路由器在本例改写出站源地址与端口。握手建立两端的传输状态，具体报文、序号和关闭状态见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/#建立与关闭三次握手和-time-wait)[^2]。
 
 ### 3. 建立加密信道（TLS 握手）
 
-TCP 提供可靠、有序的字节流，不提供机密性与服务身份认证。浏览器在 TCP 连接之上发起**传输层安全性协议**（Transport Layer Security，TLS）1.3 握手：在本例未启用**加密客户端问候**（Encrypted Client Hello，ECH）的条件下，`ClientHello` 中的**服务器名称指示**（Server Name Indication，SNI）域名为明文，帮助服务端选择配置；客户端验证证书链及目标主机名，双方据此建立加密会话[^5]。SNI、证书信任与身份匹配各自解决什么问题，见第六篇的[TLS 握手与加密边界](/posts/networking/http-evolution-tls-handshake-https/)。
+TCP 提供可靠、有序的字节流。浏览器在其上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。未使用 ECH 时，ClientHello 中的 SNI 通常可被观察到。证书验证、加密起点和 ECH 见[第六篇](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
 
 ### 4. 发送 HTTP 请求与接收响应
 
@@ -165,6 +168,26 @@ TCP 提供可靠、有序的字节流，不提供机密性与服务身份认证�
 | 首次访问且没有可用状态 | 按前面的 DNS、TCP、TLS、HTTP 模型展开 |
 
 连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。HTTP/3 的传输建立方式另见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)。
+
+下面把运行时的选择画成分支。已有连接是否可用由客户端判断，DNS 缓存只提供仍可用的解析结果，TLS 恢复材料则只参与一次新握手。
+
+```mermaid title="一次 HTTPS 请求可能跳过哪些阶段" description="一次访问的决策示意，省略地址族竞速、协议回退与重定向。已建立连接或新建立的连接均须满足本次服务身份与协议的要求。TLS 会话恢复用于建立新的安全连接。"
+flowchart TB
+ start["应用请求"] -.-> cached{"本地 HTTP 缓存可直接满足？"}
+ cached -->|是| local["返回缓存响应"]
+ cached -.->|否| reuse{"有可用于本次来源的连接？"}
+ reuse -->|是| send["发送请求"]
+ reuse -.->|否| dns{"有可用的解析结果？"}
+ dns -.->|有| protocol{"本次使用哪种传输？"}
+ dns -.->|无，先查询| lookup["DNS 解析"]
+ lookup -.-> protocol
+ protocol -->|HTTP/1.1 或 HTTP/2| tcp["新建 TCP，再执行 TLS"]
+ protocol -->|HTTP/3| quic["新建 QUIC，集成 TLS"]
+ tcp --> send
+ quic --> send
+```
+
+本篇逐跳示例采用 IPv4 以太网。IPv6 在以太网上仍可使用源和目的 MAC，下一跳地址通过 ICMPv6 邻居发现解析。点对点和 TUN 等接口的交付方式另计，详见[第二篇的邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)。
 
 ## 观察一次请求：实验能证明什么，不能证明什么
 
@@ -236,32 +259,32 @@ curl -q -4 --noproxy '*' --http1.1 \
 - [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)——通过 C 语言 Socket 接口直观理解应用程序与内核网络边界的交互
 - [Kurose & Ross: Wireshark Labs](https://gaia.cs.umass.edu/kurose_ross/wireshark.php)——配合《计算机网络：自顶向下方法》的配套抓包实验，适合对照观察各层协议字段
 
-[^1]: [RFC 1122: Requirements for Internet Hosts — Communication Layers](https://www.rfc-editor.org/rfc/rfc1122.html)——定义互联网主机的应用层、传输层、网络层与链路层四层通信模型
+[^1]: 〔RFC〕[RFC 1122: Requirements for Internet Hosts — Communication Layers](https://www.rfc-editor.org/rfc/rfc1122.html)——定义互联网主机的应用层、传输层、网络层与链路层四层通信模型
 
-[^2]: [RFC 9293: Transmission Control Protocol (TCP), §2.2 & §3.3](https://www.rfc-editor.org/info/rfc9293/)——区分应用字节流、TCP 报文段与承载它的 IP 数据报，并定义内核维护连接的传输控制块（TCB）与状态机
+[^2]: 〔RFC〕[RFC 9293: Transmission Control Protocol (TCP), §2.2 & §3.3](https://www.rfc-editor.org/info/rfc9293/)——区分应用字节流、TCP 报文段与承载它的 IP 数据报，并定义内核维护连接的传输控制块（TCB）与状态机
 
-[^3]: [RFC 791: Internet Protocol](https://www.rfc-editor.org/info/rfc791/)——定义 IPv4 数据报格式、Protocol 协议号复用字段、TTL 与跨网络转发机制
+[^3]: 〔RFC〕[RFC 791: Internet Protocol](https://www.rfc-editor.org/info/rfc791/)——定义 IPv4 数据报格式、Protocol 协议号复用字段、TTL 与跨网络转发机制
 
-[^4]: [IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
+[^4]: 〔RFC〕[IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
 
-[^5]: [RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
+[^5]: 〔RFC〕[RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
 
-[^reuse]: [RFC 9113 §9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)——HTTP/2 连接复用及不同来源共用连接时的权威性和证书要求；[RFC 9111 §4](https://www.rfc-editor.org/rfc/rfc9111.html#section-4)说明直接使用缓存响应与重新验证的条件。
+[^reuse]: 〔RFC〕[RFC 9113 §9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)——HTTP/2 连接复用及不同来源共用连接时的权威性和证书要求；[RFC 9111 §4](https://www.rfc-editor.org/rfc/rfc9111.html#section-4)说明直接使用缓存响应与重新验证的条件。
 
-[^6]: [Beej's Guide to Network Programming: What is a socket?](https://beej.us/guide/bgnet/html/split/what-is-a-socket.html)——解释 Socket 作为操作系统文件描述符与网络编程接口的抽象定位
+[^6]: 〔教学资料〕[Beej's Guide to Network Programming: What is a socket?](https://beej.us/guide/bgnet/html/split/what-is-a-socket.html)——解释 Socket 作为操作系统文件描述符与网络编程接口的抽象定位
 
-[^7]: [RFC 9110 §4.2: HTTP-Related URI Schemes](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2)——HTTP/HTTPS URI 方案与默认端口
+[^7]: 〔RFC〕[RFC 9110 §4.2: HTTP-Related URI Schemes](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2)——HTTP/HTTPS URI 方案与默认端口
 
-[^ktls]: [Linux Kernel: Kernel TLS](https://docs.kernel.org/networking/tls.html)——用户态握手与内核记录层加解密的职责划分
+[^ktls]: 〔平台与实现〕[Linux Kernel: Kernel TLS](https://docs.kernel.org/networking/tls.html)——用户态握手与内核记录层加解密的职责划分
 
-[^ipv6]: [RFC 8200 §3、§4、§8.1](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 基本头、扩展头、Hop Limit 与 ICMPv6 上层协议号
+[^ipv6]: 〔RFC〕[RFC 8200 §3、§4、§8.1](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 基本头、扩展头、Hop Limit 与 ICMPv6 上层协议号
 
-[^connect]: [RFC 9110 §9.3.6: CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——HTTP CONNECT 的目标 authority 与隧道建立语义
+[^connect]: 〔RFC〕[RFC 9110 §9.3.6: CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——HTTP CONNECT 的目标 authority 与隧道建立语义
 
-[^socks]: [RFC 1928 §3–§5](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 协商、请求地址类型与代理回复
+[^socks]: 〔RFC〕[RFC 1928 §3–§5](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 协商、请求地址类型与代理回复
 
-[^curl]: [curl 官方手册](https://curl.se/docs/manpage.html)——`--disable`、`--ipv4`、`--noproxy`、`--resolve` 与 `--write-out`；禁用 curl 配置文件不影响系统路由
+[^curl]: 〔工具文档〕[curl 官方手册](https://curl.se/docs/manpage.html)——`--disable`、`--ipv4`、`--noproxy`、`--resolve` 与 `--write-out`；禁用 curl 配置文件不影响系统路由
 
-[^osi]: [ISO/IEC 7498-1: Open Systems Interconnection — Basic Reference Model](https://standards.iso.org/ittf/PubliclyAvailableStandards/s020269_ISO_IEC_7498-1_1994(E).zip)——OSI 七层参考模型的标准定义，用于对照互联网四层模型中的会话层与表示层分工
+[^osi]: 〔标准〕[ISO/IEC 7498-1: Open Systems Interconnection — Basic Reference Model](https://standards.iso.org/ittf/PubliclyAvailableStandards/s020269_ISO_IEC_7498-1_1994(E).zip)——OSI 七层参考模型的标准定义，用于对照互联网四层模型中的会话层与表示层分工
 
-[^scaling]: [Linux Kernel Documentation: Scaling in the Linux Networking Stack](https://docs.kernel.org/networking/scaling.html)——网卡环形缓冲区（Ring Buffer）、DMA 与 NAPI 轮询的内核收包路径
+[^napi]: 〔平台与实现〕[Linux 内核文档：NAPI](https://docs.kernel.org/networking/napi.html)——轮询处理及其与硬件中断合并的关系。

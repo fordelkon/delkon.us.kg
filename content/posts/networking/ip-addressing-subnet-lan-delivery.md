@@ -9,15 +9,9 @@ tags: ["networking"]
 
 先理解地址的作用范围，再用普通局域网说明子网与下一跳，最后回到 DHCP 和 IPv6 自动配置。这样的阅读顺序先解释配置的含义，再解释配置从何而来；实际接入网络时，配置获取通常先于普通业务通信。
 
-读完本篇后，你应能：
-
-- 从 CIDR 计算子网范围，再用路由表确定下一跳。
-- 解释 ARP 的广播、应答与缓存，以及它不能跨越的广播域。
-- 区分 IPv6 RA、SLAAC、DHCPv6 和 NDP 的配置与交付职责。
-
 ## IP 地址的作用范围：公网、私网与共享地址
 
-IP 地址标识网络中的通信接口，而不是设备永久不变的身份。一台主机可以有多张接口，一张接口也可以同时拥有多个地址。**IPv4** 使用 32 位地址，通常写作 `192.168.1.10`；**IPv6** 使用 128 位地址，例如文档示例地址 `2001:db8::1`。两者有各自的头部格式、路由和邻居发现机制，排查双栈故障时应分别检查。
+IP 地址标识网络中的通信接口，而不是设备永久不变的身份。一台主机可以有多张接口，一张接口也可以同时拥有多个地址。IPv4 使用 32 位地址，通常写作 `192.168.1.10`；IPv6 使用 128 位地址，例如文档示例地址 `2001:db8::1`。两者有各自的头部格式、路由和邻居发现机制，排查双栈故障时应分别检查。
 
 | 地址类型 | IPv4 示例或范围 | IPv6 对应概念 | 作用范围 |
 | --- | --- | --- | --- |
@@ -64,9 +58,17 @@ IP 地址标识网络中的通信接口，而不是设备永久不变的身份�
 | 常规主机范围 | `192.168.10.33` 至 `192.168.10.62`，共 30 个 |
 | 目标 `.62` / `.64` | `.62` 属于该前缀；`.64` 属于下一个 `/27` |
 
-下面的 Rust 完整程序验证掩码、网络地址、广播地址和前缀归属，不查询或修改系统路由：
+再用同一个主机地址练习不同前缀，先算网络边界，再检查目标是否落在其中。
 
-```rust title="subnet_membership.rs"
+| 本机与前缀 | 网络地址与广播地址 | 可用主机与目标判断 |
+| --- | --- | --- |
+| `192.168.10.37/24` | `.0` 与 `.255` | `.1` 至 `.254`，目标 `.130` 在前缀内 |
+| `192.168.10.37/26` | `.0` 与 `.63` | `.1` 至 `.62`，目标 `.64` 属于下一前缀 |
+| `192.0.2.10/31`（点对点） | 前缀从 `.10` 开始，无定向广播地址 | `.10` 与 `.11` 均可作为端点[^31] |
+
+下面的 Rust 程序计算子网掩码、网络地址和广播地址，并检查目标是否属于同一前缀。
+
+```rust
 use std::net::Ipv4Addr;
 
 fn main() {
@@ -90,7 +92,7 @@ fn main() {
 }
 ```
 
-保存为 `subnet_membership.rs`，在该目录运行 `rustc subnet_membership.rs -o subnet_membership`，再运行 `./subnet_membership`，输出为：
+预期输出如下。
 
 ```text
 mask=255.255.255.224
@@ -100,7 +102,7 @@ target=192.168.10.62 same_prefix=true
 target=192.168.10.64 same_prefix=false
 ```
 
-这段纯计算也适合 [Rust Playground](https://play.rust-lang.org)；输出 `true` 只证明前缀相等，不检查普通主机地址是否合法，实际下一跳仍需查路由。
+`same_prefix=true` 表示目标地址经掩码计算后落在同一前缀。地址能否分配给普通主机取决于子网的地址规则，实际下一跳仍由路由决定。
 
 在常规 IPv4 多址子网中，主机位全 `0` 的地址表示网络本身，全 `1` 的地址用于子网广播，不能分配给普通主机。因此对前缀长度 $n$（$n \le 30$），常见的可用主机地址数是 $2^{32-n}-2$。
 
@@ -140,9 +142,10 @@ flowchart TB
  cache -->|无| family{"下一跳地址族"}
  family -->|IPv4| arp["广播 ARP Request<br/>ff:ff:ff:ff:ff:ff"]
  family -->|IPv6| ns["组播 NS：请求下一跳链路地址<br/>ff02::1:ffXX:XXXX"]
- arp --> reply["收到有效 ARP Reply 或 NA<br/>更新邻居映射"]
- ns --> reply
- reply --> frame
+ arp --> arp_reply["收到有效 ARP Reply"]
+ ns --> na["收到有效 NA"]
+ arp_reply --> frame
+ na --> frame
  frame --> send["发送原 IP 包<br/>目的 IP 仍是最终目标"]
 ```
 
@@ -156,7 +159,7 @@ NDP 也定义路由器发现、前缀发现和邻居不可达检测。地址自�
 
 ### 使用前探测与地址公告
 
-“免费 ARP”在工程讨论中容易混指不同报文。RFC 5227 明确区分使用前的 **ARP Probe** 和探测成功后的 **ARP Announcement**[^acd]：
+“免费 ARP”在工程讨论中容易混指不同报文。RFC 5227 明确区分使用前的 `ARP Probe` 和探测成功后的 `ARP Announcement`[^acd]：
 
 | 报文 | 发送方 IP | 目标 IP | 主要用途 |
 | --- | --- | --- | --- |
@@ -175,7 +178,7 @@ NDP 也定义路由器发现、前缀发现和邻居不可达检测。地址自�
 
 ### DHCPv4 的首次租约获取
 
-首次获取租约通常经历 **DORA**（Discover、Offer、Request、ACK）四步。客户端使用 UDP 端口 `68`，服务器使用 `67`[^6]：
+首次获取租约通常经历 DORA（Discover、Offer、Request、ACK）四步。客户端使用 UDP 端口 `68`，服务器使用 `67`[^6]：
 
 初始客户端尚无可用 IPv4 地址，Discover 通常从 `0.0.0.0:68` 发到 `255.255.255.255:67`，在以太网内使用广播。普通路由器不会把这份局域网广播直接转发到另一子网；DHCP 中继接收后填写 `giaddr` 等信息并转交服务器，服务器据此选择地址池和回复路径。`0.0.0.0` 在这里是尚未配置地址时的协议用法，不是已经租到的主机地址[^6]。
 
@@ -217,7 +220,7 @@ sequenceDiagram
 3. 接受**重复地址检测**（Duplicate Address Detection，DAD）的地址在检测完成前处于 tentative 状态，不能按普通可用地址使用。DAD 发现冲突时不得分配该地址；接口配置也可能按规范关闭 DAD。
 4. 地址通过检测后，还受 preferred lifetime 与 valid lifetime 约束：首选期限到期后进入 deprecated 状态，既有通信可继续使用；有效期限到期后地址失效[^slaac]。
 
-RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）通告递归 DNS 服务器，通过 **DNS 搜索列表**（DNS Search List，DNSSL）通告搜索域；这些选项有自己的有效期，不能与默认路由或地址前缀的有效期混为一谈[^rdnss]。网络也可以使用 DHCPv6 提供地址或其他参数，但 IPv6 默认路由通常仍来自 RA。
+RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）通告递归 DNS 服务器，通过**DNS 搜索列表**（DNS Search List，DNSSL）通告搜索域；这些选项有自己的有效期，不能与默认路由或地址前缀的有效期混为一谈[^rdnss]。网络也可以使用 DHCPv6 提供地址或其他参数，但 IPv6 默认路由通常仍来自 RA。
 
 | 需要的配置 | 主要机制 | 排障时分别检查 |
 | --- | --- | --- |
@@ -230,6 +233,18 @@ RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）�
 主机可以先发送路由器请求 RS（Router Solicitation）促使路由器回复 RA，也可以接收周期性 RA。DHCPv6 的地址分配不能代替 RA 的默认路由发现；因此“一律屏蔽 ICMPv6”可能同时破坏邻居解析、路由发现和路径 MTU 反馈[^ra][^dhcpv6]。
 
 一张接口还可同时持有稳定地址与定期更换的**临时地址**（temporary address）。RFC 8981 的临时地址扩展减少长期使用同一接口标识符造成的关联，但不会隐藏网络前缀，也不等于匿名；具体是否生成、优先选择哪个源地址，要看系统策略。不要假定每个 IPv6 地址都由网卡 MAC 推导，也不要把地址变化直接认作另一台设备上线[^privacy]。
+
+地址、前缀、默认网关与 DNS 服务应分别核对。下图只整理配置来源，获得地址之后，主机仍需根据实际选路完成邻居解析或下一跳交付。
+
+```mermaid title="IPv4 与 IPv6 的配置职责" description="独立的 IPv4 和 IPv6 配置路径。DHCPv4 可同时提供地址、前缀、网关和 DNS 参数；IPv6 的 NDP 提供路由器发现和邻居解析，SLAAC 与 DHCPv6 可共同存在，DHCPv6 不通告默认路由。"
+flowchart TB
+ v4["IPv4 主机"] -.->|请求租约| dhcp4["DHCPv4<br/>地址、掩码、网关、DNS"]
+ v6["IPv6 主机"] -.->|接收 RA| ndp["NDP 路由器发现<br/>默认路由与链路前缀"]
+ ndp -.->|前缀允许自主配置| slaac["SLAAC 生成地址<br/>执行适用的 DAD"]
+ ndp -.->|含 RDNSS 选项| dns["配置递归 DNS"]
+ v6 -.->|依网络和本机策略| dhcp6["DHCPv6<br/>地址或其他参数"]
+ dhcp6 -.->|含 DNS 参数| dns
+```
 
 ## 观察本机寻址与邻居表：实验与边界
 
@@ -296,33 +311,34 @@ sudo tcpdump -i en0 -nn -e arp
 ## 延伸阅读
 
 - [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml)与[IPv6 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)——检查特殊地址的作用范围和全球可达属性
+- 子网计算示例可在 [Rust Playground](https://play.rust-lang.org/) 运行
 
-[^1]: [RFC 1918 §3、§5](https://www.rfc-editor.org/rfc/rfc1918.html#section-3)——IPv4 私网范围及公共互联网路由边界；[RFC 4193 §3、§4.1](https://www.rfc-editor.org/rfc/rfc4193.html#section-3)另行定义 IPv6 ULA 的 `fc00::/7` 范围与外部路由过滤要求。
+[^1]: 〔RFC〕[RFC 1918 §3、§5](https://www.rfc-editor.org/rfc/rfc1918.html#section-3)——IPv4 私网范围及公共互联网路由边界；[RFC 4193 §3、§4.1](https://www.rfc-editor.org/rfc/rfc4193.html#section-3)另行定义 IPv6 ULA 的 `fc00::/7` 范围与外部路由过滤要求。
 
-[^2]: [RFC 6598 §4](https://www.rfc-editor.org/rfc/rfc6598.html#section-4)——运营商共享地址空间 `100.64.0.0/10` 及使用限制。
+[^2]: 〔RFC〕[RFC 6598 §4](https://www.rfc-editor.org/rfc/rfc6598.html#section-4)——运营商共享地址空间 `100.64.0.0/10` 及使用限制。
 
-[^3]: [RFC 4632 §3.1](https://www.rfc-editor.org/rfc/rfc4632.html#section-3.1)——CIDR 前缀长度表示和地址聚合。
+[^3]: 〔RFC〕[RFC 4632 §3.1](https://www.rfc-editor.org/rfc/rfc4632.html#section-3.1)——CIDR 前缀长度表示和地址聚合。
 
-[^4]: [RFC 826: An Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)——以太网上的 ARP 请求、回复及地址映射更新流程。
+[^4]: 〔RFC〕[RFC 826: An Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)——以太网上的 ARP 请求、回复及地址映射更新流程。
 
-[^5]: [RFC 4861 §3.1、§7.2](https://www.rfc-editor.org/rfc/rfc4861.html#section-7.2)——邻居发现的职责、地址解析与邻居通告。
+[^5]: 〔RFC〕[RFC 4861 §3.1、§7.2](https://www.rfc-editor.org/rfc/rfc4861.html#section-7.2)——邻居发现的职责、地址解析与邻居通告。
 
-[^6]: [RFC 2131 §4.1、§4.4.5](https://www.rfc-editor.org/rfc/rfc2131.html#section-4.1)——DORA 消息交付的单播、广播和中继条件，以及续租计时与到期行为。
+[^6]: 〔RFC〕[RFC 2131 §4.1、§4.4.5](https://www.rfc-editor.org/rfc/rfc2131.html#section-4.1)——DORA 消息交付的单播、广播和中继条件，以及续租计时与到期行为。
 
-[^special]: [RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890.html#section-2.2.2)——特殊地址登记属性与 `198.18.0.0/15` 基准测试范围；Fake-IP 是应用对该地址的使用方式，并非这份 RFC 定义的协议。
+[^special]: 〔RFC〕[RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890.html#section-2.2.2)——特殊地址登记属性与 `198.18.0.0/15` 基准测试范围；Fake-IP 是应用对该地址的使用方式，并非这份 RFC 定义的协议。
 
-[^31]: [RFC 3021 §2.1](https://www.rfc-editor.org/rfc/rfc3021.html#section-2.1)——IPv4 `/31` 点对点链路使用两个端点地址的规则。
+[^31]: 〔RFC〕[RFC 3021 §2.1](https://www.rfc-editor.org/rfc/rfc3021.html#section-2.1)——IPv4 `/31` 点对点链路使用两个端点地址的规则。
 
-[^mac]: [RFC 9542 §2.1.1、§2.1.4](https://www.rfc-editor.org/rfc/rfc9542.html#section-2.1.4)——MAC 单播/组地址位与 `00:00:5e:00:53:00` 至 `00:00:5e:00:53:ff` 文档专用范围。
+[^mac]: 〔RFC〕[RFC 9542 §2.1.1、§2.1.4](https://www.rfc-editor.org/rfc/rfc9542.html#section-2.1.4)——MAC 单播/组地址位与 `00:00:5e:00:53:00` 至 `00:00:5e:00:53:ff` 文档专用范围。
 
-[^acd]: [RFC 5227 §2.1.1、§2.3、§2.4](https://www.rfc-editor.org/rfc/rfc5227.html#section-2.1.1)——ARP Probe、Announcement 和地址使用期间的冲突检测与防御。
+[^acd]: 〔RFC〕[RFC 5227 §2.1.1、§2.3、§2.4](https://www.rfc-editor.org/rfc/rfc5227.html#section-2.1.1)——ARP Probe、Announcement 和地址使用期间的冲突检测与防御。
 
-[^slaac]: [RFC 4862 §5.4、§5.5.3、§5.5.4](https://www.rfc-editor.org/rfc/rfc4862.html#section-5.4)——SLAAC 候选地址、DAD 及地址首选/有效期限。
+[^slaac]: 〔RFC〕[RFC 4862 §5.4、§5.5.3、§5.5.4](https://www.rfc-editor.org/rfc/rfc4862.html#section-5.4)——SLAAC 候选地址、DAD 及地址首选/有效期限。
 
-[^rdnss]: [RFC 8106 §5、§6.1](https://www.rfc-editor.org/rfc/rfc8106.html#section-5)——RA 中的 RDNSS/DNSSL 选项及其独立有效期。
+[^rdnss]: 〔RFC〕[RFC 8106 §5、§6.1](https://www.rfc-editor.org/rfc/rfc8106.html#section-5)——RA 中的 RDNSS/DNSSL 选项及其独立有效期。
 
-[^ra]: [RFC 4861 §4.2、§4.6.2、§6](https://www.rfc-editor.org/rfc/rfc4861.html#section-4.2)——RA 的链路本地源地址、Router Lifetime、M/O 标志、前缀 A/L 标志与路由器发现。
+[^ra]: 〔RFC〕[RFC 4861 §4.2、§4.6.2、§6](https://www.rfc-editor.org/rfc/rfc4861.html#section-4.2)——RA 的链路本地源地址、Router Lifetime、M/O 标志、前缀 A/L 标志与路由器发现。
 
-[^dhcpv6]: [RFC 9915 §1、§5、§18](https://www.rfc-editor.org/rfc/rfc9915.html#section-1)——DHCPv6 的地址及其他参数配置、消息类型与交互；2026 年 1 月取代 RFC 8415，默认路由发现仍由 NDP 负责。
+[^dhcpv6]: 〔RFC〕[RFC 9915 §1、§5、§18](https://www.rfc-editor.org/rfc/rfc9915.html#section-1)——DHCPv6 的地址及其他参数配置、消息类型与交互；2026 年 1 月取代 RFC 8415，默认路由发现仍由 NDP 负责。
 
-[^privacy]: [RFC 8981 §3、§4](https://www.rfc-editor.org/rfc/rfc8981.html#section-3)——临时地址的生成、更换、生命周期和隐私限制。
+[^privacy]: 〔RFC〕[RFC 8981 §3、§4](https://www.rfc-editor.org/rfc/rfc8981.html#section-3)——临时地址的生成、更换、生命周期和隐私限制。

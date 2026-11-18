@@ -1,4 +1,4 @@
-import { node } from "./diagram-layout.ts";
+import { connectionEndpoint, controlEdge, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
 type ProxyStep = {
@@ -20,22 +20,16 @@ function proxyScene(title: string, description: string, steps: ProxyStep[]): Sce
 		frames: steps.map((step) => ({
 			note: step.note,
 			boxes: [
-				node("inbound", 8, 8, 344, ["① Inbound · 应用 → 本地入口", step.entry], "client", true),
-				node(
-					"context",
-					8,
-					72,
-					344,
-					["② Context · 映射 / 嗅探 / 原始目标", step.context],
-					"secure",
-					true,
+				connectionEndpoint(
+					node("inbound", 8, 8, 344, ["① 入站 · 应用 → 本地入口", step.entry], "processing", true),
 				),
+				node("context", 8, 72, 344, ["② 目标信息 · 映射 / 嗅探", step.context], "secure", true),
 				node(
 					"rules",
 					8,
 					136,
 					344,
-					["③ Rule Engine · 域名 / IP / 进程", step.rule],
+					["③ 规则引擎 · 域名 / IP / 进程", step.rule],
 					"processing",
 					true,
 				),
@@ -73,13 +67,13 @@ function proxyScene(title: string, description: string, steps: ProxyStep[]): Sce
 					"delivery",
 					step.outbound === "direct" || step.outbound === "proxy",
 				),
-				node("state", 8, 344, 344, ["连接／映射状态", step.state], "processing", true),
+				node("state", 8, 344, 344, ["连接／映射状态", step.state], "secure", true),
 			],
 			edges: [
-				edge("recover", "M180 56 V66", true),
-				edge("match", "M180 120 V130", step.outbound !== "pending"),
-				edge("direct", "M180 184 V200 H86 V210", step.outbound === "direct"),
-				edge("proxy", "M180 200 H274 V210", step.outbound === "proxy"),
+				controlEdge("recover", "M180 56 V66", true),
+				controlEdge("match", "M180 120 V130", step.outbound !== "pending"),
+				controlEdge("direct", "M180 184 V200 H86 V210", step.outbound === "direct"),
+				controlEdge("proxy", "M180 200 H274 V210", step.outbound === "proxy"),
 				edge("direct-origin", "M86 264 V274", step.outbound === "direct"),
 				edge("node-origin", "M274 264 V274", step.outbound === "proxy"),
 			],

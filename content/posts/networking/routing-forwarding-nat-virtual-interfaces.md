@@ -9,12 +9,6 @@ tags: ["networking"]
 
 沿着这个顺序，可以分别理解三种不同动作：路由决定交给哪里，NAT 改写地址与端口，TUN 提供内核与程序之间的 IP 包接口。第七篇再把它们组合成具体的代理接管与出站过程。
 
-读完本篇后，你应能：
-
-- 区分策略选表与同表内的最长前缀匹配。
-- 追踪 NAT 地址端口转换及回程状态，并与防火墙、代理区分。
-- 解释 TUN/TAP 的数据对象，以及代理出站为何需要绕过接管。
-
 ## 路由表与最长前缀匹配
 
 路由表按“目的网络前缀 → 下一跳 / 出接口 / 其他属性”组织条目，而不是为每一个可能的 IP 单独建表。先看一个只讨论 IPv4、固定查找同一张路由表的简化例子：
@@ -28,20 +22,22 @@ tags: ["networking"]
 
 同一张表内多条目的前缀同时匹配时，**最长前缀匹配**（Longest Prefix Match，LPM）优先选择前缀位数最多、范围最具体的条目[^1]。访问 `192.168.1.99` 时，`/32` 比 `/24` 和 `/0` 都更具体，所以本例把包交给 `192.168.1.254`。这也说明“属于本机 `/24`”并不在所有配置下都等于直接交付。
 
-只有当多条候选路由的**前缀长度完全相同**时，才进一步按具体平台的管理距离（Administrative Distance / Preference）、度量值（Metric）或多路径规则（例如**等价多路径路由**，Equal-Cost Multi-Path，ECMP）处理。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（`fwmark`）等匹配规则，决定查询哪张路由表；不能把整套决策都概括为对一张表做一次最长前缀匹配[^policy]。
+只有当多条候选路由的前缀长度相同时，才进一步按具体平台的管理距离（Administrative Distance / Preference）、度量值（Metric）或多路径规则（例如**等价多路径路由**，Equal-Cost Multi-Path，ECMP）处理。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（`fwmark`）等匹配规则，决定查询哪张路由表；不能把整套决策都概括为对一张表做一次最长前缀匹配[^policy]。
 
-查表得到下一跳，并不会把包的目的 IP 改成网关 IP。发往 `93.184.216.34` 的包，在普通转发中仍以它为目的地址；若出口是以太网，内核通过上一篇的 [ARP](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp) 找到网关 MAC，把它填进当前链路的帧头。目的 IP 与下一跳 MAC 分别服务于跨网寻址和本跳交付。
+在 Linux 上，**路由策略数据库**（Routing Policy Database，RPDB）按规则优先级数字从小到大处理。某条规则选择 `lookup` 表时，先在该表内找匹配路由。如果规则不匹配、表内无适用结果，或 `throw` 路由让该次查表结束，查询可继续下一条适用规则。已有终结动作（如 `unreachable`）则直接返回结果，不再尝试后面的表。用 `ip rule show` 查看规则顺序，再用 `ip route get` 或 `ip -6 route get` 对具体目标验证[^policy][^iproute]。
+
+查表得到下一跳，并不会把包的目的 IP 改成网关 IP。发往 `198.51.100.20` 的包，在普通转发中仍以它为目的地址；若出口是以太网，内核通过上一篇的 [ARP](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp) 找到网关 MAC，把它填进当前链路的帧头。目的 IP 与下一跳 MAC 分别服务于跨网寻址和本跳交付。
 
 :::note[两条 /1 路由能覆盖什么]
 `0.0.0.0/1` 与 `128.0.0.0/1` 共同覆盖 IPv4 地址空间，并优先于原有 `/0` 默认路由。因此，把它们指向虚拟接口，可以接管原本依赖默认路由的 IPv4 流量；`/24`、`/32` 等更具体路由仍可能优先命中，策略规则也可能选择其他表。它们不控制 IPv6，删除这两条路由后的行为还取决于剩余配置。
 :::
 
-下面是两个独立配置的查询结果对照，目标均为 `93.184.216.34`，固定同一张 IPv4 路由表且没有更具体的例外：
+下面是两个独立配置的查询结果对照，目标均为 `198.51.100.20`，固定同一张 IPv4 路由表且没有更具体的例外：
 
 | 配置 | 相关候选路由 | 本次命中 |
 | --- | --- | --- |
 | A：未接管 | `/0 → en0` | 经物理出口的默认路由 |
-| B：另有 TUN 路由 | `/0 → en0`、`0.0.0.0/1 → utun`、`128.0.0.0/1 → utun` | 目标首位为 0，命中 `0.0.0.0/1` |
+| B：另有 TUN 路由 | `/0 → en0`、`0.0.0.0/1 → utun`、`128.0.0.0/1 → utun` | 目标首位为 1，命中 `128.0.0.0/1` |
 
 两种配置分别得到不同的出口。IPv6 则使用 `::/0` 及其更具体路由，可能出现 IPv4 进入 TUN、IPv6 仍走物理出口的双栈配置。
 
@@ -90,13 +86,13 @@ SNAT、DNAT 按改写方向命名，NAPT 强调端口参与映射，端口转发
 
 | 内网源地址 | 公网侧源地址 | 目标地址 |
 | --- | --- | --- |
-| `192.168.1.10:50001` | `203.0.113.5:61001` | `93.184.216.34:443` |
-| `192.168.1.11:50001` | `203.0.113.5:61002` | `93.184.216.34:443` |
+| `192.168.1.10:50001` | `203.0.113.5:61001` | `198.51.100.20:443` |
+| `192.168.1.11:50001` | `203.0.113.5:61002` | `198.51.100.20:443` |
 
 ```mermaid mobile-direction="TB" title="同一公网 IP 上两条 NAPT 映射的往返" description="上下两条映射属于同一台 NAPT 路由器，示例地址端口与表格一致。出站时改写源地址端口，返回时在映射仍有效且过滤策略允许的条件下恢复目的地址端口。映射状态不会因为画成节点就成为新的 TCP 端点；每台内网主机与服务端各自维持自己的 TCP 连接。箭头不表示真实时延或固定端口分配算法。"
 flowchart LR
  hosts["两台主机的内网源地址<br/>A：192.168.1.10<br/>B：192.168.1.11<br/>相同源端口：50001"] -->|出站改写源| nat["同台 NAPT 的两条映射<br/>A → 203.0.113.5:61001<br/>B → 203.0.113.5:61002"]
- nat -->|61001 或 61002| server["目标服务：端口 443<br/>93.184.216.34"]
+ nat -->|61001 或 61002| server["目标服务：端口 443<br/>198.51.100.20"]
  server -->|回包查映射| nat
  nat -->|允许后恢复目的| hosts
 ```
@@ -107,9 +103,13 @@ flowchart LR
 
 - **映射**：内网地址端口对应哪个外部地址端口，以及联系不同远端时能否复用映射。
 - **入向过滤**：已存在映射时，允许哪些远端发来的包进入。
-- **连接跟踪**：设备为会话维护什么状态；常见模型使用源/目的地址、源/目的端口和协议组成的五元组，但不能把所有 NAT 映射的键都定义为五元组。
+- **连接跟踪**（connection tracking）：设备为会话维护什么状态；常见模型使用源/目的地址、源/目的端口和协议组成的五元组，但不能把所有 NAT 映射的键都定义为五元组。
 
 RFC 4787 针对 UDP 分别描述映射与过滤行为，并指出旧的 Full Cone、Restricted Cone、Symmetric 等分类不足以准确描述实际实现。它没有把这些旧名称确立为完整的精确分类；其 UDP 行为要求也不能不加区分地套给 TCP[^5]。
+
+在 Linux Netfilter 中，连接跟踪可关联原方向与应答方向。状态防火墙可拿这些状态作放行条件，NAT 可据此沿用映射，二者分别受规则控制。透明代理又在这一层之外增加本地接收和出站责任。例如 Linux TPROXY 可以把包送到透明套接字而保留原目的信息，通常需配合标记与策略路由。相关入口对照见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/#透明接管tun-提供-ip-包域名需要额外关联)[^netfilter]。
+
+一个常见工程例子是 Linux Docker 的 bridge 网络。容器网络命名空间里的接口与宿主机一端的 `veth` 配对，宿主端连到网桥，同一网桥内可以二层交付。访问外部网络时由宿主机路由转发，默认 bridge 配置常用 masquerade 进行源地址转换。发布端口则是另外的入站配置。这个例子特指 Linux bridge 驱动，具体规则还取决于网关模式与防火墙后端[^bridge]。
 
 ### NAT 与应用代理改变了什么
 
@@ -119,7 +119,7 @@ RFC 4787 针对 UDP 分别描述映射与过滤行为，并指出旧的 Full Con
 
 ## 虚拟网络接口：TUN 与 TAP 如何接入协议栈
 
-路由选择得到一个出口接口，这个接口可以由软件提供。**TUN**（三层点对点隧道设备）与 **TAP**（二层以太网模拟设备）把内核网络栈连接到用户态程序，使程序能够收发相应层次的数据单元[^6]。
+路由选择得到一个出口接口，这个接口可以由软件提供。**三层虚拟接口**（TUN）与**二层虚拟接口**（TAP）把内核网络栈连接到用户态程序，使程序能够收发相应层次的数据单元[^6]。
 
 | 接口类型 | 用户态处理的数据单元 | 常见用途 |
 | --- | --- | --- |
@@ -167,6 +167,29 @@ flowchart TB
  outer --> peer["远端解密并去掉外层头<br/>继续转发内层 IP 包"]
 ```
 
+下面沿同一个被接管的 TCP 流补齐回程。应用侧的 SYN、ACK 与 FIN 由本地连接状态处理，远端连接使用独立的序号空间；这两段 TCP 仍可搬运同一条端到端 TLS 字节流。
+
+```mermaid title="TUN 代理的本地终止与独立出站" description="限定终结应用侧 TCP、直连远端且不解密应用 TLS 的代理实现。控制性选路使用虚线，实线表示包或流数据的交付。代理自己的出站需要适用的绕行策略，包进入同一个 TUN 则是失败分支。"
+sequenceDiagram
+ participant App as 应用
+ participant Kernel as 内核
+ participant Tun as TUN
+ participant Proxy as 代理核心
+ participant Peer as 远端
+ App->>Kernel: 写入应用侧 TCP
+ Kernel-->>Kernel: 选路命中 TUN
+ Kernel->>Tun: 送出应用侧 IP 包
+ Tun->>Proxy: 用户态读取
+ Note over Proxy: 处理应用侧连接
+ Proxy-->>Kernel: 查询自身出站路径
+ Note over Kernel,Proxy: 需要选到可用物理出口；再次命中 TUN 则可能回环
+ Proxy->>Peer: 独立 TCP，经物理出口发送
+ Peer->>Proxy: 出站连接返回字节
+ Proxy->>Tun: 生成应用侧回包并写回
+ Tun->>Kernel: 作为虚拟接口入站
+ Kernel->>App: 交付原连接的响应字节
+```
+
 此处只说明接口与连接之间的关系。Mihomo 的接管入口、运行模式、DNS 模式和出站协议如何配合，由[《计算机网络（七）：代理协议、透明接管与分流实现》](/posts/networking/proxies-tunnels-transparent-interception/)进一步展开。
 
 :::important[代理的出站流量需要可用的绕行路径]
@@ -183,14 +206,14 @@ flowchart TB
 
 ```bash frame="code"
 netstat -rn -f inet
-route -n get 93.184.216.34
+route -n get 198.51.100.20
 ```
 
 Linux 对应为：
 
 ```bash frame="code"
 ip route show
-ip route get 93.184.216.34
+ip route get 198.51.100.20
 ip rule show
 ```
 
@@ -209,7 +232,7 @@ macOS 的 `route -n get` 常见字段包括：
 下面限制最多探测 5 跳，每跳一次探测，单次等待最多 1 秒；数字输出避免反向 DNS 查询引入额外等待：
 
 ```bash frame="code"
-traceroute -n -m 5 -q 1 -w 1 93.184.216.34
+traceroute -n -m 5 -q 1 -w 1 example.com
 ```
 
 左侧数字对应探测包的初始 TTL，右侧若有响应则显示响应者地址与测得的往返耗时。最多 5 跳未到目标是这个实验主动设置的范围限制，不能据此判断目标不可达。实际目标可换成已经确认解析出的 IPv4 地址。
@@ -230,22 +253,28 @@ traceroute -n -m 5 -q 1 -w 1 93.184.216.34
 - [RFC 4787 §3—5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——分别理解 UDP NAT 的映射与入向过滤，以及旧 Cone/Symmetric 分类的局限
 - [Linux Kernel: Universal TUN/TAP device driver](https://docs.kernel.org/networking/tuntap.html)——Linux 设备创建、多队列与文件描述符交互细节
 
-[^1]: [RFC 4632 §5.1](https://www.rfc-editor.org/rfc/rfc4632.html#section-5.1)——转发时选择最具体的匹配前缀。
+[^1]: 〔RFC〕[RFC 4632 §5.1](https://www.rfc-editor.org/rfc/rfc4632.html#section-5.1)——转发时选择最具体的匹配前缀。
 
-[^policy]: [Linux ip-rule(8)](https://man7.org/linux/man-pages/man8/ip-rule.8.html)——规则优先级、源地址/fwmark 等匹配条件，以及按规则查询路由表。
+[^policy]: 〔平台与实现〕[Linux ip-rule(8)](https://man7.org/linux/man-pages/man8/ip-rule.8.html)——规则优先级、源地址/fwmark 等匹配条件，以及按规则查询路由表。
 
-[^2]: [RFC 792: Internet Control Message Protocol](https://www.rfc-editor.org/rfc/rfc792.html)——IPv4 Echo、Destination Unreachable 和 Time Exceeded 报文。
+[^2]: 〔RFC〕[RFC 792: Internet Control Message Protocol](https://www.rfc-editor.org/rfc/rfc792.html)——IPv4 Echo、Destination Unreachable 和 Time Exceeded 报文。
 
-[^3]: [RFC 4443 §3](https://www.rfc-editor.org/rfc/rfc4443.html#section-3)——ICMPv6 差错报文，包括 Packet Too Big 与 Time Exceeded。
+[^3]: 〔RFC〕[RFC 4443 §3](https://www.rfc-editor.org/rfc/rfc4443.html#section-3)——ICMPv6 差错报文，包括 Packet Too Big 与 Time Exceeded。
 
-[^4]: [RFC 3022 §2、§4](https://www.rfc-editor.org/rfc/rfc3022.html#section-2)——Basic NAT 与 NAPT、双向地址端口转换及校验和调整。
+[^4]: 〔RFC〕[RFC 3022 §2、§4](https://www.rfc-editor.org/rfc/rfc3022.html#section-2)——Basic NAT 与 NAPT、双向地址端口转换及校验和调整。
 
-[^5]: [RFC 4787 §3、§4.1、§5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——旧 NAT 分类的不足，以及 UDP 地址/端口映射和入向过滤的独立描述。
+[^5]: 〔RFC〕[RFC 4787 §3、§4.1、§5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——旧 NAT 分类的不足，以及 UDP 地址/端口映射和入向过滤的独立描述。
 
-[^6]: [Linux Kernel: Universal TUN/TAP device driver](https://docs.kernel.org/networking/tuntap.html)——TUN 处理 IP 包、TAP 处理以太网帧，以及用户态读写与内核收发之间的关系；其创建 API 示例针对 Linux。
+[^6]: 〔平台与实现〕[Linux Kernel: Universal TUN/TAP device driver](https://docs.kernel.org/networking/tuntap.html)——TUN 处理 IP 包、TAP 处理以太网帧，以及用户态读写与内核收发之间的关系；其创建 API 示例针对 Linux。
 
-[^ttl]: [RFC 1812 §5.3.1](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.3.1)——IPv4 路由器转发时递减 TTL，TTL 耗尽时丢弃并按规则生成 ICMP Time Exceeded；本机交付与转发处理需要区分。
+[^ttl]: 〔RFC〕[RFC 1812 §5.3.1](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.3.1)——IPv4 路由器转发时递减 TTL，TTL 耗尽时丢弃并按规则生成 ICMP Time Exceeded；本机交付与转发处理需要区分。
 
-[^ipv6-hdr]: [RFC 8200 §3、§4.5](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 固定 40 字节基础头部取消头部校验和字段，仅保留 Hop Limit 逐跳递减。
+[^ipv6-hdr]: 〔RFC〕[RFC 8200 §3、§4.5](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 固定 40 字节基础头部取消头部校验和字段，仅保留 Hop Limit 逐跳递减。
 
-[^apple-tunnel]: [Apple: NEPacketTunnelProvider](https://developer.apple.com/documentation/networkextension/nepackettunnelprovider)、[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)与[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)——Packet Tunnel 的包读写及包含、排除路由；不把 Linux TUN API 套用为 macOS 的统一实现。
+[^apple-tunnel]: 〔平台与实现〕[Apple: NEPacketTunnelProvider](https://developer.apple.com/documentation/networkextension/nepackettunnelprovider)、[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)与[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)——Packet Tunnel 的包读写及包含、排除路由；不把 Linux TUN API 套用为 macOS 的统一实现。
+
+[^netfilter]: 〔平台与实现〕[nftables 官方手册：Connection tracking](https://netfilter.org/projects/nftables/manpage.html)与[Linux 内核文档：透明代理](https://docs.kernel.org/networking/tproxy.html)——连接状态匹配、状态 NAT 与 TPROXY 的路由和套接字要求。
+
+[^bridge]: 〔软件与平台实现〕[Docker Engine：Bridge network driver](https://docs.docker.com/engine/network/drivers/bridge/)与 [Linux veth(4)](https://man7.org/linux/man-pages/man4/veth.4.html)——bridge 驱动的连通、转换与端口发布，以及 veth 对在命名空间之间的连接方式。
+
+[^iproute]: 〔平台与实现〕[Linux ip-route(8)](https://man7.org/linux/man-pages/man8/ip-route.8.html)——`throw` 路由与按目标查询实际选路的 `get` 子命令。

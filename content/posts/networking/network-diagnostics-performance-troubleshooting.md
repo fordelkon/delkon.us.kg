@@ -9,12 +9,6 @@ tags: ["networking"]
 
 本篇先解释性能指标及单流吞吐的约束，再分析“大传输失败”与路径 MTU 的关系，最后给出可重复的 curl 实验。排障记录应保留时间、命令版本、连接地址、代理方式、退出码与多次测量结果，让后续比较有共同条件。
 
-读完本篇后，你应能：
-
-- 从 IP 配置、DNS、路由、TCP/QUIC、TLS、HTTP 逐层寻找证据。
-- 在明确前提下解释 curl 累计计时、阶段差值与吞吐限制。
-- 结合 PMTU 线索、Wireshark 过滤和受控实验验证或排除假设。
-
 ## 从哪一步开始排查
 
 排查网页访问，可以沿接口与选路、DNS、传输、TLS、HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始；HTTP/3 的传输分支检查 QUIC。
@@ -133,6 +127,16 @@ sequenceDiagram
 | 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
 | TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
 
+把症状与观察位置配对，最好一次只改变一个条件。下表的“支持”仅适用于本次有效样本。
+
+| 症状 | 观测点与工具 | 能支持的判断 | 下一次对照 |
+| --- | --- | --- | --- |
+| 同一名字在两个程序结果不同 | 实际解析器、系统缓存、应用 DNS 设置，辅以 `dig` | 解析结果或路径不同 | 固定同一名称、类型和解析服务再做对照 |
+| TCP 超时或立即失败 | 实际出口与接收端，用 `tcpdump` 或 Wireshark 看 SYN、回应及 RST | 已返回 RST 时响应路径至少曾可用 | 确认 RST 来源；对照同一目标的地址族、端口和代理视角 |
+| HTTP/3 失败而 HTTP/2 成功 | QUIC Initial、UDP 响应与端点日志 | 该样本中 TCP 路径可用，QUIC 仍待定位 | 在同一支持两种协议的服务上固定 HTTP 版本与地址 |
+| 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与包长 | 包长依赖只是 PMTU 线索 | 降低受控测试的包长，并检查反馈是否抵达发送端 |
+| 建连与握手快，首字节或正文慢 | curl 时间戳、应用日志、RTT 与 TCP 窗口 | 延迟落在可定位的阶段 | 固定连接配置，只改变应用等待或传输大小 |
+
 ### 平台命令对照
 
 下面是功能上的近似对应，不代表解析策略、字段或底层实现相同。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
@@ -182,7 +186,7 @@ flowchart LR
 | `time_namelookup` | 名称解析完成前 | 本地解析与缓存等路径，不只远端 DNS 往返 |
 | `time_connect - time_namelookup` | 解析后到 TCP 建连完成 | 连接尝试、重传；显式代理下是到代理的 TCP 连接 |
 | `time_appconnect - time_connect` | TCP 建连后到 TLS 握手完成 | 网络等待、证书处理；显式代理还可能包含 CONNECT 建隧道等待 |
-| `time_starttransfer - time_appconnect` | TLS 完成后到**首字节时间**（TTFB） | 请求发送、往返、排队、丢包恢复和应用处理 |
+| `time_starttransfer - time_appconnect` | TLS 完成后到首字节 | 请求发送、往返、排队、丢包恢复和应用处理 |
 | `time_total - time_starttransfer` | 首字节后到传输结束 | 正文传输与停顿，不能单独区分限速、拥塞和接收方影响 |
 
 `time_starttransfer - time_appconnect` 包含请求传输与首个响应字节返回的等待，不能当作纯粹的服务端业务处理时间。首字节等待偏大，只能把关注范围缩到请求发送至首字节返回之间；区分网络等待和服务端处理，还需日志、服务端指标或抓包。使用 HTTP/3、连接复用、并行传输或 `-L` 跟随重定向时，应重新按对应语义解释，不能机械套用这张表。
@@ -259,7 +263,7 @@ curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
 
 1. 启动前面的 Python HTTP 服务，在 Wireshark 选择回环接口，设置**捕获过滤器** `tcp port 18080` 后开始捕获。
 2. 在另一终端交替执行前面的 `/fast` 与 `/slow` curl 命令，各运行三次。它们每次新建连接，便于分别观察握手和响应前等待。
-3. 停止捕获，选择本次连接的一个包，读取其 `tcp.stream` 编号。通过 **Follow → TCP Stream** 查看重组后的明文 HTTP；不要把列表中一个包当作完整消息。
+3. 停止捕获，选择本次连接的一个包，读取其 `tcp.stream` 编号。通过 `Follow → TCP Stream` 查看重组后的明文 HTTP；不要把列表中一个包当作完整消息。
 4. 以该编号设置显示过滤器，例如 `tcp.stream == 0`；`0` 必须替换为实际编号。在同一流内比较请求与响应时间，再与 curl 的 TTFB 对照。
 
 也可用下面的 macOS 命令保存原始捕获，再在 Wireshark 中打开；Linux 把 `lo0` 换成 `lo`。`sudo` 用于捕获权限，文件写入当前目录，结束时按 Ctrl+C：
@@ -292,6 +296,15 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 
 若 TUN 代理终结本地 TCP，应分别捕获或记录应用侧与出站侧，两段连接的序号、ACK 和时间不能直接拼成同一条 TCP。若是真正承载完整 IP 包的隧道，则另按内外层观察。主机上的分段、聚合和校验和卸载还可能让捕获中的大段或校验和状态不同于物理线路，先核对捕获位置与卸载条件，不能直接认定线路发了坏包[^offload]。
 
+对自己的测试连接，如果客户端 TLS 库或应用能导出会话密钥，可用它支持的密钥日志方式（例如部分客户端支持 `SSLKEYLOGFILE`），再在 Wireshark 的 TLS 协议首选项中指定同一份 key log 文件。捕获须覆盖对应连接和必要的握手数据。TLS 1.3 的临时密钥交换不能仅靠服务器证书私钥解密；密钥日志能解密相应会话，应与捕获文件一起控制访问，完成调试后移除[^tls-keylog]。
+
+| 捕获位置 | 本位置通常说明什么 |
+| --- | --- |
+| 应用侧回环或本地代理入口 | 应用到本机服务或代理的连接，不能证明远端已经建连 |
+| TUN 接口 | 被实际路由选中的内层 IP 流量，可能含 Fake-IP |
+| 物理接口 | 发往实际下一跳的外层网络流量，可能是 UDP 隧道或代理连接 |
+| 代理出站侧 | 核心到目标或节点的独立连接；有复用时需结合会话或连接日志关联 |
+
 ## 把排障结果写成可复查的判断
 
 一个有用的结论包含三部分：已经观察到什么、它排除了什么、还需要什么证据。例如：“连续三次成功建连，但 TLS 完成前超时；当前选路经过 TUN，尚未取得远端节点握手日志。”它比“网不好”或“肯定是服务器慢”更便于下一步验证。
@@ -303,32 +316,34 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 - [Everything curl: Write out](https://everything.curl.dev/usingcurl/verbose/writeout.html)——继续查阅 write-out 的版本差异与输出方式
 - [Wireshark User's Guide](https://www.wireshark.org/docs/wsug_html_chunked/)——对照捕获位置、显示过滤和 TCP 分析字段；工具标记仍需结合协议上下文解释
 
-[^bufferbloat]: [ACM Queue: Bufferbloat: Dark Buffers in the Internet](https://queue.acm.org/detail.cfm?id=2071893)——瓶颈链路过大缓冲区导致排队延迟激增与抖动恶化的成因分析
+[^bufferbloat]: 〔研究资料〕[ACM Queue: Bufferbloat: Dark Buffers in the Internet](https://queue.acm.org/detail.cfm?id=2071893)——瓶颈链路过大缓冲区导致排队延迟激增与抖动恶化的成因分析
 
-[^throughput]: [RFC 6349 §3–§4](https://www.rfc-editor.org/rfc/rfc6349.html#section-3)——BDP、带宽、RTT、TCP 窗口与吞吐测试条件
+[^throughput]: 〔RFC〕[RFC 6349 §3–§4](https://www.rfc-editor.org/rfc/rfc6349.html#section-3)——BDP、带宽、RTT、TCP 窗口与吞吐测试条件
 
-[^window]: [RFC 7323 §2: TCP Window Scale Option](https://www.rfc-editor.org/rfc/rfc7323.html#section-2)——窗口字段的 16 位限制与建连时的窗口缩放协商
+[^window]: 〔RFC〕[RFC 7323 §2: TCP Window Scale Option](https://www.rfc-editor.org/rfc/rfc7323.html#section-2)——窗口字段的 16 位限制与建连时的窗口缩放协商
 
-[^mss]: [RFC 9293 §3.7.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.7.1)及 [RFC 6691 §2](https://www.rfc-editor.org/rfc/rfc6691.html#section-2)——MSS 的含义、基本头部扣除与选项对实际发送长度的影响
+[^mss]: 〔RFC〕[RFC 9293 §3.7.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.7.1)及 [RFC 6691 §2](https://www.rfc-editor.org/rfc/rfc6691.html#section-2)——MSS 的含义、基本头部扣除与选项对实际发送长度的影响
 
-[^fragmentation]: [RFC 8900: IP Fragmentation Considered Fragile](https://www.rfc-editor.org/rfc/rfc8900.html)——分片在中间设备等环境中的可靠性与运维问题
+[^fragmentation]: 〔RFC〕[RFC 8900: IP Fragmentation Considered Fragile](https://www.rfc-editor.org/rfc/rfc8900.html)——分片在中间设备等环境中的可靠性与运维问题
 
-[^pmtu4]: [RFC 1191 §2–§4](https://www.rfc-editor.org/rfc/rfc1191.html#section-2)——IPv4 DF、ICMP Fragmentation Needed 与下一跳 MTU
+[^pmtu4]: 〔RFC〕[RFC 1191 §2–§4](https://www.rfc-editor.org/rfc/rfc1191.html#section-2)——IPv4 DF、ICMP Fragmentation Needed 与下一跳 MTU
 
-[^pmtu6]: [RFC 8201 §3](https://www.rfc-editor.org/rfc/rfc8201.html#section-3)——IPv6 的 Packet Too Big 反馈与路径 MTU 更新
+[^pmtu6]: 〔RFC〕[RFC 8201 §3](https://www.rfc-editor.org/rfc/rfc8201.html#section-3)——IPv6 的 Packet Too Big 反馈与路径 MTU 更新
 
-[^plpmtu]: [RFC 4821 §3–§4](https://www.rfc-editor.org/rfc/rfc4821.html#section-3)——分组层路径 MTU 探测与黑洞恢复框架
+[^plpmtu]: 〔RFC〕[RFC 4821 §3–§4](https://www.rfc-editor.org/rfc/rfc4821.html#section-3)——分组层路径 MTU 探测与黑洞恢复框架
 
-[^dplpmtu]: [RFC 8899 §4–§5](https://www.rfc-editor.org/rfc/rfc8899.html#section-4)——面向数据报传输的 DPLPMTUD 探测状态与确认机制
+[^dplpmtu]: 〔RFC〕[RFC 8899 §4–§5](https://www.rfc-editor.org/rfc/rfc8899.html#section-4)——面向数据报传输的 DPLPMTUD 探测状态与确认机制
 
-[^curl]: [curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——里程碑计时、连接端点、重定向与连接复用的解释边界；本文命令以 curl 8.7.1 核对
+[^curl]: 〔工具文档〕[curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——里程碑计时、连接端点、重定向与连接复用的解释边界；本文命令以 curl 8.7.1 核对
 
-[^windows]: Microsoft Learn：[Find-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/find-netroute)、[Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection)、[Resolve-DnsName](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname)与[ipconfig](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig)——Windows 选路、连接、DNS 查询及本地缓存视图。
+[^windows]: 〔平台与实现〕Microsoft Learn：[Find-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/find-netroute)、[Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection)、[Resolve-DnsName](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname)与[ipconfig](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig)——Windows 选路、连接、DNS 查询及本地缓存视图。
 
-[^capture]: [Wireshark User's Guide: Capturing Live Network Data](https://www.wireshark.org/docs/wsug_html_chunked/ChapterCapture.html)与[Npcap: Loopback Packet Capture](https://npcap.com/guide/npcap-users-guide.html#npcap-feature-loopback)——接口选择、捕获权限和 Windows 回环支持。
+[^capture]: 〔工具文档〕[Wireshark User's Guide: Capturing Live Network Data](https://www.wireshark.org/docs/wsug_html_chunked/ChapterCapture.html)与[Npcap: Loopback Packet Capture](https://npcap.com/guide/npcap-users-guide.html#npcap-feature-loopback)——接口选择、捕获权限和 Windows 回环支持。
 
-[^wireshark-filter]: [Wireshark User's Guide: Filtering Packets While Viewing](https://www.wireshark.org/docs/wsug_html_chunked/ChWorkDisplayFilterSection.html)——显示过滤与捕获过滤的区别；[Follow Protocol Streams](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvFollowStreamSection.html)说明流重组视图。
+[^wireshark-filter]: 〔工具文档〕[Wireshark User's Guide: Filtering Packets While Viewing](https://www.wireshark.org/docs/wsug_html_chunked/ChWorkDisplayFilterSection.html)——显示过滤与捕获过滤的区别；[Follow Protocol Streams](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvFollowStreamSection.html)说明流重组视图。
 
-[^wireshark-fields]: Wireshark 官方字段参考：[TCP](https://www.wireshark.org/docs/dfref/t/tcp.html)、[TLS](https://www.wireshark.org/docs/dfref/t/tls.html)、[ICMP](https://www.wireshark.org/docs/dfref/i/icmp.html)与[ICMPv6](https://www.wireshark.org/docs/dfref/i/icmpv6.html)——本节显示过滤器的字段名称与版本范围；TCP 分析器的推断机制见[TCP Analysis](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvTCPAnalysis.html)。
+[^wireshark-fields]: 〔工具文档〕Wireshark 官方字段参考：[TCP](https://www.wireshark.org/docs/dfref/t/tcp.html)、[TLS](https://www.wireshark.org/docs/dfref/t/tls.html)、[ICMP](https://www.wireshark.org/docs/dfref/i/icmp.html)与[ICMPv6](https://www.wireshark.org/docs/dfref/i/icmpv6.html)——本节显示过滤器的字段名称与版本范围；TCP 分析器的推断机制见[TCP Analysis](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvTCPAnalysis.html)。
 
-[^offload]: [Wireshark Wiki: CaptureSetup/Offloading](https://wiki.wireshark.org/CaptureSetup/Offloading)——校验和、分段与接收聚合卸载对主机抓包视图的影响。
+[^offload]: 〔工具文档〕[Wireshark Wiki: CaptureSetup/Offloading](https://wiki.wireshark.org/CaptureSetup/Offloading)——校验和、分段与接收聚合卸载对主机抓包视图的影响。
+
+[^tls-keylog]: 〔工具文档〕[Wireshark 官方 Wiki：TLS Decryption](https://wiki.wireshark.org/TLS#tls-decryption)——会话密钥日志、TLS 协议首选项和仅使用 RSA 私钥解密的局限。

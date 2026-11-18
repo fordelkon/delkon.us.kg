@@ -1,4 +1,4 @@
-import { node, withRoles } from "./diagram-layout.ts";
+import { logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -180,7 +180,11 @@ const security: Scene = {
 
 export const scene: Scene = {
 	...caching,
-	chapters: [withRoles(caching, { stub: "client", authority: "delivery" }), delegation, security],
+	chapters: [
+		logicalFlow(withRoles(caching, { stub: "client", authority: "delivery" })),
+		logicalFlow(delegation),
+		logicalFlow(security),
+	],
 };
 
 const sections = [

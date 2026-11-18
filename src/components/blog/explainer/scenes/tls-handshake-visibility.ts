@@ -1,4 +1,4 @@
-import { node, withRoles } from "./diagram-layout.ts";
+import { connectionEndpoint, controlEdge, logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -47,14 +47,16 @@ const steps = [
 const handshake: Scene = {
 	title: "TLS 1.3 握手",
 	caption:
-		"实线表示明文，虚线表示密钥保护的消息。ServerHello 后的证书与握手扩展已经加密。谁能看见 HTTPS 内容，取决于谁终止并验证了这段 TLS 连接。",
+		"虚线表示握手控制消息，实线表示应用数据；消息标签标明保护状态。ServerHello 后的证书与握手扩展已经加密。谁能看见 HTTPS 内容，取决于谁终止并验证了这段 TLS 连接。",
 	description:
 		"上方是 TLS 客户端与当前终止端，下方分别显示消息和旁观者可见信息。本图假设：普通 TLS 1.3 证书握手，无 0-RTT、无 HelloRetryRequest。未启用 ECH 时 SNI 可见，HTTP 内容仍加密；不推导真实耗时。",
 	frames: steps.map((step, index) => ({
 		note: step.note,
 		boxes: [
 			box("client", 8, 8, 156, ["TLS 客户端", step.client], step.direction === "outbound"),
-			box("server", 196, 8, 156, ["TLS 终止端", step.server], step.direction === "inbound"),
+			connectionEndpoint(
+				box("server", 196, 8, 156, ["TLS 终止端", step.server], step.direction === "inbound"),
+			),
 			node(
 				"message",
 				8,
@@ -76,7 +78,7 @@ const handshake: Scene = {
 		edges: [
 			{
 				...edge("message", step.direction === "outbound" ? "M164 32 H190" : "M196 32 H170", true),
-				dashed: index >= 2,
+				dashed: index < 4,
 			},
 		],
 	})),
@@ -174,14 +176,14 @@ const visibility: Scene = {
 			node("boundary", 8, 168, 344, ["TLS 边界", boundary], "secure", true),
 			node("content", 8, 248, 344, ["HTTP 可见性", content], "secure", true),
 		],
-		edges: [edge("connection", "M164 32 H190"), edge("observe", "M180 32 V82", true)],
+		edges: [edge("connection", "M164 32 H190"), controlEdge("observe", "M180 32 V82", true)],
 	})),
 };
 
 export const scene: Scene = {
 	...architecture,
 	chapters: [
-		architecture,
+		logicalFlow(architecture),
 		withRoles(handshake, { client: "client", server: "delivery", message: "secure" }),
 		visibility,
 	],

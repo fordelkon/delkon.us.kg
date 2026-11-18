@@ -1,4 +1,4 @@
-import { chain, node, withRoles } from "./diagram-layout.ts";
+import { chain, logicalFlow, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -70,11 +70,12 @@ const layers: [string, string][] = [
 	["TCP Segment", "有序字节流 → 报文段"],
 	["IP Packet", "源 / 目的 IP、TTL"],
 	["Ethernet Frame", "本跳 Src / Dst MAC"],
+	["物理介质", "比特编码为介质相关的信号"],
 ];
 
 const encapsulation: Scene = {
 	title: "分层与封装",
-	diagramHeight: 312,
+	diagramHeight: 376,
 	description:
 		"本图假设：HTTPS over TCP、IPv4、以太网，省略分片与网卡卸载。层次箭头表示承载关系，不表示一条消息恰好对应一个记录、段或帧。",
 	caption: "协议层次决定谁解释哪种头部；HTTP 消息、TLS 记录与 TCP 分段边界不一一对应。",
@@ -83,9 +84,17 @@ const encapsulation: Scene = {
 		"一条 HTTP 消息可拆成多条 TLS 记录，记录也可承载不同消息的片段。TLS 记录边界独立于应用消息边界。",
 		"TCP 按字节编号，发送时可以拆分或合并写入的数据。一条 TLS 记录可跨多个 TCP 段，一个段也可包含多条记录的片段。",
 		"TCP 段由 IP 承载；网络层按目的 IP 选下一跳。下一场景将显示 TTL 改变，但在无 NAT 时源、目的 IP 保持不变。",
-		"链路层为当前下一跳加帧头。到路由器后拆掉旧帧、处理 IP 再重新成帧；物理层将比特编码成信号，MAC 语义并不适用于所有接口。",
+		"链路层为当前下一跳加帧头。到路由器后拆掉旧帧、处理 IP 再重新成帧。",
+		"物理层按介质传输信号。这里的 MAC 属于以太网链路，点对点接口或 TUN 有不同的交付方式。",
 	].map((note, index) =>
-		chain(layers, index, note, ["client", "secure", "processing", "processing", "delivery"]),
+		chain(layers, index, note, [
+			"client",
+			"secure",
+			"processing",
+			"processing",
+			"processing",
+			"delivery",
+		]),
 	),
 };
 
@@ -136,7 +145,11 @@ const returning: Scene = {
 
 export const scene: Scene = {
 	...encapsulation,
-	chapters: [encapsulation, withRoles(journey, { host: "client", server: "delivery" }), returning],
+	chapters: [
+		logicalFlow(encapsulation),
+		withRoles(journey, { host: "client", server: "delivery" }),
+		logicalFlow(returning),
+	],
 };
 
 const sections = [

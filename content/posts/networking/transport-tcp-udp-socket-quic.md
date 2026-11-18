@@ -9,12 +9,6 @@ tags: ["networking", "rust"]
 
 本篇先比较**传输控制协议**（Transmission Control Protocol，TCP）字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，再解释 TCP 怎样管理连接与在途数据，最后回到应用实际使用的 Socket 接口。两条线需要同时理解：网络协议提供什么服务，某次 API 调用又完成了哪一步。代码选用 Rust 标准库（无需第三方依赖即可直接展示 `TcpStream` 半关闭、短读与短写边界），连接状态观察以 macOS 与 Linux 为例。
 
-读完本篇后，你应能：
-
-- 区分 TCP 字节流、UDP 数据报与 QUIC 多路复用流。
-- 解释写入、ACK、应用读取、半关闭和 TIME_WAIT 的不同保证。
-- 用回环程序验证 EOF，并说明拥塞控制与 QUIC 连接迁移的边界。
-
 ## 端口复用与两条传输抽象：字节流 vs 数据报
 
 传输层通过 16 位的**端口号**（Port，范围 `0–65535`）区分通信端点。同一个监听端口可以接受多条连接；在通常的 TCP/IP 讨论中，连接可用五元组 `(协议, 源 IP, 源端口, 目的 IP, 目的端口)` 区分，其中 TCP 自身使用两端地址与端口组成的四元组识别连接[^1]。
@@ -39,9 +33,45 @@ TCP 在两端维护序号、窗口、计时器与连接状态等记录，通常�
 
 通常的主动建连过程是：客户端发送 `SYN`，**初始序列号**（Initial Sequence Number，ISN）为 $x$；服务端回复 `SYN-ACK`，携带自身初始序号 $y$ 并确认 $x+1$；客户端再确认 $y+1$。这个交换使双方同步初始序号，并确认对方能够接收自己的序号信息；连接状态机还必须处理旧报文与重复报文，避免把滞留的连接请求误认为新的有效连接[^1]。
 
-TCP 的两个方向可以分别结束。调用 `shutdown(Write)` 表示不再发送；FIN 在该方向先前排队的字节之后占据序号，按序结束字节流，对端须先读完此前的字节，非空缓冲区的读取才会返回**文件结束符**（End of File，EOF）[^shutdown][^1]。本端仍可以接收对方的响应，这称为**半关闭**（half-close）。正常关闭常画成四段报文，但 ACK 与 FIN 可以合并，也存在同时关闭，不能要求每次抓包都恰好出现四个包。
+TCP 的两个方向可以分别结束。调用 `shutdown(Write)` 表示不再发送；FIN 在该方向先前排队的字节之后占据序号，按序结束字节流，对端须先读完此前的字节，非空缓冲区的读取才会返回**文件结束**（end of file，EOF）[^shutdown][^1]。本端仍可以接收对方的响应，这称为**半关闭**（half-close）。正常关闭常画成四段报文，但 ACK 与 FIN 可以合并，也存在同时关闭，不能要求每次抓包都恰好出现四个包。
 
-在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 **`TIME-WAIT`**。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待长度为 `2 MSL`（**最大报文段生存时间**，Maximum Segment Lifetime，MSL），用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。
+在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 `TIME-WAIT`。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待长度为 `2 MSL`（**最大报文段生存时间**，Maximum Segment Lifetime，MSL），用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。
+
+下面用两张状态机图分别跟踪建连与关闭。被动开启的一侧以接受本次连接的状态为准，监听套接字仍可继续接收其他连接。
+
+```mermaid title="TCP 主动与被动建连状态" description="普通三次握手。左、右两条链分别是主动端和被动端的本地状态转换。SYN 和 ACK 的发送、接收分别发生在两端，省略同时打开、重传、超时与拒绝。"
+stateDiagram-v2
+ state "主动端 CLOSED" as Ac
+ state "主动端 SYN-SENT" as As
+ state "主动端 ESTABLISHED" as Ae
+ state "被动端 LISTEN" as Bl
+ state "被动端 SYN-RECEIVED" as Bs
+ state "被动端 ESTABLISHED" as Be
+ Ac --> As: 发 SYN
+ As --> Ae: 收 SYN+ACK，回 ACK
+ Bl --> Bs: 收 SYN，回 SYN+ACK
+ Bs --> Be: 收最终 ACK
+```
+
+```mermaid title="TCP 半关闭、主动关闭与被动关闭" description="从同一条已建立连接的两端分别观察，A 先发 FIN，B 先确认再关闭自身写方向。B 在 CLOSE-WAIT 仍能发送。若两端同时关闭，FIN-WAIT-1 收到尚未确认本端 FIN 的对端 FIN 时可进 CLOSING，待本端 FIN 获确认再进入 TIME-WAIT。省略复位和超时异常。"
+stateDiagram-v2
+ state "A ESTABLISHED" as Ae
+ state "A FIN-WAIT-1" as A1
+ state "A FIN-WAIT-2" as A2
+ state "A TIME-WAIT" as At
+ state "A CLOSED" as Ac
+ state "B ESTABLISHED" as Be
+ state "B CLOSE-WAIT" as Bw
+ state "B LAST-ACK" as Ba
+ state "B CLOSED" as Bc
+ Ae --> A1: 应用关闭写方向，发 FIN
+ A1 --> A2: 本端 FIN 被确认
+ A2 --> At: 收对端 FIN，回 ACK
+ At --> Ac: 2 MSL 后
+ Be --> Bw: 收 FIN，回 ACK
+ Bw --> Ba: 应用关闭写方向，发 FIN
+ Ba --> Bc: 本端 FIN 被确认
+```
 
 用状态表区分正常关闭与异常终止。以下正常路径假定 A 先关闭写方向、B 稍后关闭，且 FIN 与 ACK 不合并[^1]：
 
@@ -59,7 +89,7 @@ FIN 按序关闭一个方向，RST 则复位连接。即使收到 RST，此前�
 
 TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
-- **累计确认**（Cumulative ACK）：ACK 序号表示下一个期望的字节序号，其前面的字节已经按序收到。确认由 TCP 接收端产生，不代表接收应用已经处理数据。
+- **累计确认**（Cumulative ACK）：ACK 序号表示下一个期望的字节序号，其前面的字节已经连续收到。确认由 TCP 接收端产生，不代表接收应用已经处理数据[^1]。
 - **选择性确认**（Selective Acknowledgment，SACK）：接收方还可报告已收到的非连续字节块，帮助发送方选择需要重传的部分[^sack]。
 - **重传超时**（Retransmission Timeout，RTO）：发送端根据**往返时延**（Round-Trip Time，RTT）测量估算超时阈值，超时后重传并按规范退避；并不是每个报文段都有一个彼此独立的简单闹钟[^rto]。
 - **快速重传**（Fast Retransmit）：RFC 5681 描述的经典算法在收到三个重复 ACK 后重传疑似丢失的段。重复 ACK 是推断线索，并非丢包的绝对证明，现代实现也可能采用其他丢失检测机制[^3]。
@@ -70,7 +100,7 @@ TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
 **拥塞控制**（congestion control）约束发送端给网络施加的负载。发送端维护**拥塞窗口**（congestion window，`cwnd`），通过 ACK、丢包、**显式拥塞通知**（Explicit Congestion Notification，ECN）等反馈估计可用的发送空间。RFC 5681 描述慢启动、拥塞避免、快速重传与快速恢复；它是经典机制的依据，不代表所有实现都只运行这一套算法[^3]。
 
-在简化的窗口模型中，允许存在的未确认在途数据量受 $\min(\text{cwnd}, \text{rwnd})$ 约束；已有在途数据会占用额度，并不是每收到一个 ACK 都能重新发送一个完整窗口。这里限制的是传输中的序号范围，不规定应用每次 `read` 的缓冲区大小或返回多少字节。应用供数、发送缓冲与发送节奏还会进一步影响吞吐。[第八篇的带宽时延积](/posts/networking/network-diagnostics-performance-troubleshooting/)会用这条关系解释“带宽充足但单连接跑不满”。
+在简化的窗口模型中，允许存在的未确认在途数据量受 $\min(\text{cwnd}, \text{rwnd})$ 约束；已有在途数据会占用额度，并不是每收到一个 ACK 都能重新发送一个完整窗口。这里限制的是传输中的序号范围，不规定应用每次 `read` 的缓冲区大小或返回多少字节。应用供数、发送缓冲与发送节奏还会进一步影响吞吐。[第八篇的带宽时延积](/posts/networking/network-diagnostics-performance-troubleshooting/#bdp-与单条-tcp-连接的吞吐边界)会用这条关系解释“带宽充足但单连接跑不满”。
 
 :::note[BBR 改变拥塞估计，不取消其他限制]
 丢包型算法在某些大缓冲路径上可能形成较长排队。BBR 以带宽与往返传播时延的估计指导发送，具体效果取决于算法版本、竞争流量与路径条件，不能据此承诺开启后必然更快。即使拥塞控制更适合当前路径，也不能突破接收窗口不足或应用供数过慢的限制[^bbr]。
@@ -201,8 +231,8 @@ UDP 提供端口和数据报承载，使 QUIC 可以在现有 UDP 路径上部�
 
 它主要改变了两项边界：
 
-1. **跨流的按序等待**：HTTP/2 多条应用流共享 TCP 字节流，缺失字节会阻止后续字节按序交付，即使后续字节属于其他请求（即传输层**队头阻塞**，Head-of-Line Blocking）。QUIC 的流各自维护偏移量；某条流等待重传时，其他已具备数据的流可以继续交付。但流之间仍共享连接的拥塞控制与部分资源，不能说彼此完全没有影响。
-2. **连接与地址组合的关系**：普通 TCP 连接依赖固定地址与端口组合；网络切换导致它们改变时，通常需要重新连接。QUIC 的**连接标识**（Connection ID，CID）将连接识别与固定 IP/端口组合解耦，为在条件允许时保留已有连接提供支持。
+1. 跨流的按序等待：HTTP/2 多条应用流共享 TCP 字节流，缺失字节会阻止后续字节按序交付，即使后续字节属于其他请求（即传输层**队头阻塞**，Head-of-Line Blocking）。QUIC 的流各自维护偏移量；某条流等待重传时，其他已具备数据的流可以继续交付。但流之间仍共享连接的拥塞控制与部分资源，不能说彼此完全没有影响。
+2. 连接与地址组合的关系：普通 TCP 连接依赖固定地址与端口组合；网络切换导致它们改变时，通常需要重新连接。QUIC 的**连接标识**（Connection ID，CID）将连接识别与固定 IP/端口组合解耦，为在条件允许时保留已有连接提供支持。
 
 ```mermaid title="TCP 字节缺口与 QUIC 流内缺口" description="上下比较相同丢包条件下的传输层交付，不按时间或字节比例绘制。HTTP/2 的后续字节受同一 TCP 字节流的缺口阻塞；QUIC 中只有已收到连续偏移、且应用依赖也已就绪的其他流才能继续交付。QUIC 的 ACK 确认包号，流数据按各自偏移重组，并非每条流都有独立的包确认空间；拥塞控制和连接级资源仍可能相互影响。"
 flowchart TB
@@ -220,7 +250,7 @@ flowchart TB
 
 连接迁移仍需遵循路径验证、迁移参数与 CID 使用规则。主动改变本地地址与 NAT 重绑定并不相同；RFC 9000 §9.5 还规定主动从不同本地地址发送时不能复用同一 CID，不能概括成“带着相同 CID 就能无缝迁移”[^4]。
 
-QUIC 使用 TLS 1.3 完成密钥协商与身份认证，但不使用 TCP 上的 TLS 记录层。新连接通常可以在一次往返后开始发送应用数据；**零往返时间连接建立**（Zero Round-Trip Time，0-RTT）则是满足会话恢复条件时提前发送早期数据，不表示完整握手和身份认证在零往返内结束。早期数据可能被拒绝，还存在重放风险，应用必须限制适用操作[^quic-tls]。
+QUIC 使用 TLS 1.3 完成密钥协商与身份认证，但不使用 TCP 上的 TLS 记录层。新连接通常可以在一次往返后开始发送应用数据；**早期数据**（early data，0-RTT）则是满足会话恢复条件时提前发送早期数据，不表示完整握手和身份认证在零往返内结束。早期数据可能被拒绝，还存在重放风险，应用必须限制适用操作[^quic-tls]。
 
 QUIC 也有部署代价：UDP 可能受路径策略影响，高吞吐实现需要控制用户态处理和系统调用开销。浏览器能否回退到 TCP，还取决于是否存在可用的 HTTP/2 或 HTTP/1.1 服务以及客户端策略。[第六篇](/posts/networking/http-evolution-tls-handshake-https/)会继续比较这些 HTTP 传输方式。
 
@@ -270,38 +300,38 @@ Linux 可用 `ss -tan state time-wait`。短连接与状态保留时间受实现
 - [RFC 9293: Transmission Control Protocol (TCP)](https://www.rfc-editor.org/rfc/rfc9293.html)——系统查阅 TCP 状态机与传输服务
 - [RFC 9000: QUIC](https://www.rfc-editor.org/rfc/rfc9000.html)——查阅 QUIC 流、帧与连接状态
 
-[^1]: [RFC 9293 §2.2、§3.3、§3.4、§3.8](https://www.rfc-editor.org/rfc/rfc9293.html#section-2.2)——TCP 字节流、序号、连接状态、关闭与接收窗口；TCB 描述见 §3.10.1。
+[^1]: 〔RFC〕[RFC 9293 §2.2、§3.3、§3.4、§3.8](https://www.rfc-editor.org/rfc/rfc9293.html#section-2.2)——TCP 字节流、序号、连接状态、关闭与接收窗口；TCB 描述见 §3.10.1。
 
-[^2]: [RFC 768: User Datagram Protocol](https://www.rfc-editor.org/rfc/rfc768.html)——UDP 头部与不保证交付、重复保护或顺序的服务。
+[^2]: 〔RFC〕[RFC 768: User Datagram Protocol](https://www.rfc-editor.org/rfc/rfc768.html)——UDP 头部与不保证交付、重复保护或顺序的服务。
 
-[^udp-api]: [Rust `UdpSocket::recv_from`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.recv_from)——单次接收一个数据报，缓冲区不足时超出字节可能被丢弃。
+[^udp-api]: 〔软件实现〕[Rust `UdpSocket::recv_from`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.recv_from)——单次接收一个数据报，缓冲区不足时超出字节可能被丢弃。
 
-[^3]: [RFC 5681 §3](https://www.rfc-editor.org/rfc/rfc5681.html#section-3)——经典 TCP 拥塞控制与快速重传算法。
+[^3]: 〔RFC〕[RFC 5681 §3](https://www.rfc-editor.org/rfc/rfc5681.html#section-3)——经典 TCP 拥塞控制与快速重传算法。
 
-[^sack]: [RFC 2018 §3–4](https://www.rfc-editor.org/rfc/rfc2018.html#section-3)——SACK 选项与非连续已收字节块。
+[^sack]: 〔RFC〕[RFC 2018 §3–4](https://www.rfc-editor.org/rfc/rfc2018.html#section-3)——SACK 选项与非连续已收字节块。
 
-[^rto]: [RFC 6298 §2、§5](https://www.rfc-editor.org/rfc/rfc6298.html#section-2)——RTO 计算、计时器管理与超时退避。
+[^rto]: 〔RFC〕[RFC 6298 §2、§5](https://www.rfc-editor.org/rfc/rfc6298.html#section-2)——RTO 计算、计时器管理与超时退避。
 
-[^bbr]: [ACM Queue: BBR — Congestion-Based Congestion Control](https://queue.acm.org/detail.cfm?id=3022184)——原始设计论文；另见 [BBR Congestion Control, draft-ietf-ccwg-bbr-07](https://datatracker.ietf.org/doc/html/draft-ietf-ccwg-bbr-07)中 BBRv3 依据带宽与最小 RTT 模型控制 pacing 和窗口的说明。后者仍是 Internet-Draft，并非正式 RFC，也不构成特定网络上的性能保证。
+[^bbr]: 〔研究资料与草案〕[ACM Queue: BBR — Congestion-Based Congestion Control](https://queue.acm.org/detail.cfm?id=3022184)——原始设计论文；另见 [BBR Congestion Control, draft-ietf-ccwg-bbr-07](https://datatracker.ietf.org/doc/html/draft-ietf-ccwg-bbr-07)中 BBRv3 依据带宽与最小 RTT 模型控制 pacing 和窗口的说明。后者仍是 Internet-Draft，并非正式 RFC，也不构成特定网络上的性能保证。
 
-[^4]: [RFC 9000 §2、§5.1、§9、§9.5](https://www.rfc-editor.org/rfc/rfc9000.html#section-9)——QUIC 流、Connection ID、路径验证、连接迁移与地址变化时的 CID 规则。
+[^4]: 〔RFC〕[RFC 9000 §2、§5.1、§9、§9.5](https://www.rfc-editor.org/rfc/rfc9000.html#section-9)——QUIC 流、Connection ID、路径验证、连接迁移与地址变化时的 CID 规则。
 
-[^quic-tls]: [RFC 9001 §4.6、§9.2](https://www.rfc-editor.org/rfc/rfc9001.html#section-4.6)——QUIC 中 TLS 的集成、0-RTT 条件、拒绝与重放风险。
+[^quic-tls]: 〔RFC〕[RFC 9001 §4.6、§9.2](https://www.rfc-editor.org/rfc/rfc9001.html#section-4.6)——QUIC 中 TLS 的集成、0-RTT 条件、拒绝与重放风险。
 
-[^quic-recovery]: [RFC 9002 §4–§7](https://www.rfc-editor.org/rfc/rfc9002.html#section-4)——QUIC 的丢失检测、探测超时与拥塞控制；流数据重发与新包号见 [RFC 9000 §13.3](https://www.rfc-editor.org/rfc/rfc9000.html#section-13.3)。
+[^quic-recovery]: 〔RFC〕[RFC 9002 §4–§7](https://www.rfc-editor.org/rfc/rfc9002.html#section-4)——QUIC 的丢失检测、探测超时与拥塞控制；流数据重发与新包号见 [RFC 9000 §13.3](https://www.rfc-editor.org/rfc/rfc9000.html#section-13.3)。
 
-[^cubic]: [RFC 9438 §4](https://www.rfc-editor.org/rfc/rfc9438.html#section-4)——CUBIC 的窗口增长函数、拥塞响应及与经典 TCP 算法的关系。
+[^cubic]: 〔RFC〕[RFC 9438 §4](https://www.rfc-editor.org/rfc/rfc9438.html#section-4)——CUBIC 的窗口增长函数、拥塞响应及与经典 TCP 算法的关系。
 
-[^5]: [Rust `TcpStream`](https://doc.rust-lang.org/std/net/struct.TcpStream.html)——半关闭、建连与读写超时、非阻塞操作及平台错误差异。
+[^5]: 〔软件实现〕[Rust `TcpStream`](https://doc.rust-lang.org/std/net/struct.TcpStream.html)——半关闭、建连与读写超时、非阻塞操作及平台错误差异。
 
-[^read]: [Rust `Read`](https://doc.rust-lang.org/std/io/trait.Read.html)——短读、非空缓冲的零返回值与 `read_exact` 的部分进度。
+[^read]: 〔软件实现〕[Rust `Read`](https://doc.rust-lang.org/std/io/trait.Read.html)——短读、非空缓冲的零返回值与 `read_exact` 的部分进度。
 
-[^write]: [Rust `Write`](https://doc.rust-lang.org/std/io/trait.Write.html)——短写、`write_all` 的循环与错误边界。
+[^write]: 〔软件实现〕[Rust `Write`](https://doc.rust-lang.org/std/io/trait.Write.html)——短写、`write_all` 的循环与错误边界。
 
-[^tokio]: [Tokio `AsyncReadExt::read_exact`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.read_exact)与[`AsyncWriteExt::write_all`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWriteExt.html#method.write_all)——这两个异步组合操作在 `select!` 中的取消安全限制。
+[^tokio]: 〔软件实现〕[Tokio `AsyncReadExt::read_exact`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.read_exact)与[`AsyncWriteExt::write_all`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWriteExt.html#method.write_all)——这两个异步组合操作在 `select!` 中的取消安全限制。
 
-[^apple-netstat]: Apple `netstat` 的[连接表 `inet.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/inet.c)与[统计输出 `main.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/main.c)——队列使用 socket 缓冲的 `sb_cc`，`rxbytes` / `txbytes` 来自独立的收发统计字段。
+[^apple-netstat]: 〔平台与实现〕Apple `netstat` 的[连接表 `inet.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/inet.c)与[统计输出 `main.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/main.c)——队列使用 socket 缓冲的 `sb_cc`，`rxbytes` / `txbytes` 来自独立的收发统计字段。
 
-[^send-man]: [Linux Programmer's Manual: send(2)](https://man7.org/linux/man-pages/man2/send.2.html)——`send`/`write` 成功返回仅表示数据已写入内核发送缓冲区，不代表对端已接收或处理。
+[^send-man]: 〔平台与实现〕[Linux Programmer's Manual: send(2)](https://man7.org/linux/man-pages/man2/send.2.html)——`send`/`write` 成功返回仅表示数据已写入内核发送缓冲区，不代表对端已接收或处理。
 
-[^shutdown]: [Linux Programmer's Manual: shutdown(2)](https://man7.org/linux/man-pages/man2/shutdown.2.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。
+[^shutdown]: 〔平台与实现〕[Linux Programmer's Manual: shutdown(2)](https://man7.org/linux/man-pages/man2/shutdown.2.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。

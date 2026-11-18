@@ -20,7 +20,7 @@ const scene = getScene(sceneId);
                 </button>
             ))}
         </nav>
-        <p class="explainer-legend">{scene.legend ?? "蓝：客户端 · 橙：中间处理 · 紫：加密／代理 · 绿：交付"}<br/>粗边框标出当前状态；步骤停留时间不代表实际耗时。</p>
+        <p class="explainer-legend">{scene.legend ?? "蓝：发起方 · 橙：转发／处理 · 紫：协议／会话状态 · 绿：接收／结果"}{!scene.legend && <><br/>实线：数据交付 · 虚线：控制、查询或逻辑关系 · 双线框：连接端点</>}<br/>粗边框标出当前状态；步骤停留时间不代表实际耗时。</p>
         {scene.chapters.map((chapter, index) => (
             <section id={`${sceneId}-panel-${index}`} aria-label={chapter.title}>
                 <h2 class="explainer-chapter-title">{chapter.title}</h2>

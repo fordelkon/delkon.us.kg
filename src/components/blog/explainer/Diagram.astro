@@ -36,8 +36,9 @@ const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
         <text class="explainer-edge-label" x={line.label?.x} y={line.label?.y} text-anchor="middle">{line.label?.text}</text>
     ))}
 	{frame.boxes.map((node) => (
-		<g data-tone={node.tone} class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
+		<g data-tone={node.tone} data-endpoint={node.endpoint || undefined} class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
 			<rect x={node.x} y={node.y} width={node.width} height={NODE_HEIGHT} rx="3" />
+			{node.endpoint && <rect class="explainer-endpoint-inset" x={node.x + 4} y={node.y + 4} width={node.width - 8} height={NODE_HEIGHT - 8} rx="2" />}
 			{node.lines.map((line, index) => (
 				<text
 					x={node.x + node.width / 2}
