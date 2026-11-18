@@ -9,7 +9,7 @@ export interface Box {
 	width: number;
 	lines: string[];
 	active?: boolean;
-	tone?: "client" | "delivery" | "processing" | "secure";
+	tone?: "client" | "delivery" | "processing" | "secure" | "actor" | "result" | "control" | "state";
 	muted?: boolean;
 }
 
@@ -32,6 +32,7 @@ export interface Frame {
 
 export interface Scene {
 	chapters?: Scene[];
+	legend?: string;
 	section?: string | undefined;
 	title: string;
 	diagram?: string;

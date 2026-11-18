@@ -1,4 +1,4 @@
-import { chain, node } from "./network-layout.ts";
+import { chain, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
 const cases: [string, string, string, string, string][] = [

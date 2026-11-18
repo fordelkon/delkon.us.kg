@@ -1,4 +1,4 @@
-import { node } from "./network-layout.ts";
+import { node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
 type ProxyStep = {

@@ -224,16 +224,16 @@
 .explainer-scenes {
 	display: block;
 	margin-block-end: var(--receipt-section-gap);
-	--network-client: #245e92;
-	--network-delivery: #28704c;
-	--network-processing: #985019;
-	--network-secure: #79529b;
+	--explainer-client: #245e92;
+	--explainer-delivery: #28704c;
+	--explainer-processing: #985019;
+	--explainer-secure: #79529b;
 }
 html[data-theme="dark"] .explainer-scenes {
-	--network-client: #8dbfe8;
-	--network-delivery: #91cba7;
-	--network-processing: #eab284;
-	--network-secure: #c4a8e1;
+	--explainer-client: #8dbfe8;
+	--explainer-delivery: #91cba7;
+	--explainer-processing: #eab284;
+	--explainer-secure: #c4a8e1;
 }
 .explainer-scenes nav {
 	display: flex;
@@ -279,31 +279,35 @@ html[data-theme="dark"] .explainer-scenes {
 	color: var(--color-printer-ink-light);
 	margin-block: 0.75rem;
 }
-.network-explainer {
+.study-explainer {
 	--diagram-node-font-size: 15px;
 }
-.network-explainer .explainer-node[data-tone="client"] {
-	--node-tone: var(--network-client);
+.study-explainer .explainer-node[data-tone="actor"],
+.study-explainer .explainer-node[data-tone="client"] {
+	--node-tone: var(--explainer-client);
 }
-.network-explainer .explainer-node[data-tone="delivery"] {
-	--node-tone: var(--network-delivery);
+.study-explainer .explainer-node[data-tone="result"],
+.study-explainer .explainer-node[data-tone="delivery"] {
+	--node-tone: var(--explainer-delivery);
 }
-.network-explainer .explainer-node[data-tone="processing"] {
-	--node-tone: var(--network-processing);
+.study-explainer .explainer-node[data-tone="control"],
+.study-explainer .explainer-node[data-tone="processing"] {
+	--node-tone: var(--explainer-processing);
 }
-.network-explainer .explainer-node[data-tone="secure"] {
-	--node-tone: var(--network-secure);
+.study-explainer .explainer-node[data-tone="state"],
+.study-explainer .explainer-node[data-tone="secure"] {
+	--node-tone: var(--explainer-secure);
 }
-.network-explainer .explainer-node[data-tone] {
+.study-explainer .explainer-node[data-tone] {
 	color: var(--node-tone);
 }
-.network-explainer .explainer-node[data-tone] rect {
+.study-explainer .explainer-node[data-tone] rect {
 	stroke: var(--node-tone);
 }
-.network-explainer .explainer-node.is-active rect {
+.study-explainer .explainer-node.is-active rect {
 	stroke-width: 3;
 }
-.network-explainer .step-explainer-transcript li {
+.study-explainer .step-explainer-transcript li {
 	margin-block: 1.5rem;
 }
 .explainer-step {

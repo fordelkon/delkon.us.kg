@@ -1,4 +1,4 @@
-import { chain, node, withRoles } from "./network-layout.ts";
+import { chain, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [

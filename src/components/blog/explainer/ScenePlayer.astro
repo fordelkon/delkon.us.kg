@@ -12,6 +12,7 @@ interface Props {
 const { scene, sceneId, study = false } = Astro.props;
 const { caption, description } = scene;
 const svgs = scene.diagram ? renderScene(sceneId, scene) : undefined;
+const staticSvgs = study && scene.diagram ? renderScene(`${sceneId}-static`, scene) : undefined;
 let elapsedMs = 0;
 
 const frames = scene.frames.map((frame) => {
@@ -24,7 +25,7 @@ const frames = scene.frames.map((frame) => {
 ---
 
 <figure
-	class:list={["step-explainer not-prose", { "network-explainer": study }]}
+	class:list={["step-explainer not-prose", { "study-explainer": study }]}
 	data-scene={sceneId}
 	aria-label={scene.title}
 	data-pagefind-ignore
@@ -83,7 +84,7 @@ const frames = scene.frames.map((frame) => {
 			<summary>{study ? "查看全部静态图与步骤" : "查看文字步骤"}</summary>
 			<ol>
 				{frames.map((frame, index) => <li>
-                    {study && <Diagram frame={frame} marker={`${sceneId}-static-${index}`} height={scene.diagramHeight} />}
+                    {study && (staticSvgs ? <div class="explainer-mermaid mermaid-diagram" aria-hidden="true" set:html={staticSvgs[index]} /> : <Diagram frame={frame} marker={`${sceneId}-static-${index}`} height={scene.diagramHeight} />)}
                     <p>{frame.note}</p>
                 </li>)}
 			</ol>

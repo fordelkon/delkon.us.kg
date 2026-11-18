@@ -52,3 +52,25 @@ export function withRoles(scene: Scene, roles: Record<string, NonNullable<Box["t
 		})),
 	};
 }
+
+export const EXECUTION_LEGEND = "蓝：执行者 · 橙：资源／等待 · 紫：状态／同步 · 绿：结果";
+
+// Two participants share a state card; arrows are supplied by scenes when causal.
+export function interaction(
+	note: string,
+	left: [string, string],
+	right: [string, string],
+	state: [string, string],
+	boundary: [string, string],
+	active: "left" | "right" | "both" = "both",
+): Frame {
+	return {
+		note,
+		boxes: [
+			node("left", 8, 8, 156, left, "actor", active !== "right"),
+			node("right", 196, 8, 156, right, "actor", active !== "left"),
+			node("state", 8, 100, 344, state, "state", true),
+			node("boundary", 8, 188, 344, boundary, "control"),
+		],
+	};
+}
