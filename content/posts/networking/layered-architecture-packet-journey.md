@@ -65,14 +65,40 @@ flowchart LR
  linkStyle default stroke:none
 ```
 
-以 HTTPS over TCP 为例，逻辑栈是 HTTP → TLS → TCP → IP → 当前链路。TLS 记录有自己的定界，TCP 再把这些记录编码后的字节放进字节流。下面用字节编号说明两套边界可以怎样错开；实际长度由实现与协议限制决定[^5]：
+### TLS 记录与 TCP 报文段：两套独立的边界
 
-| TCP 字节流中的示例范围 | TLS 记录边界 | 一种可能的 TCP 分段 |
-| --- | --- | --- |
-| `0…999` | 记录 A 的编码字节 | 段 1 载 `0…599`；段 2 载 `600…1399` |
-| `1000…1799` | 记录 B 的编码字节 | 段 2 同时载 A 的尾部与 B 的开头；段 3 载 `1400…1799` |
+以 HTTPS over TCP 为例，逻辑栈是 HTTP → TLS → TCP → IP → 当前链路。HTTP 生成消息或 HTTP/2 帧，TLS 将应用数据封装成**记录**（TLS Record），再把编码后的字节交给 TCP。TLS 如何协商密钥、验证身份并保护数据，见[第六篇的 TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)。这里关注封装边界：TCP 不解释 TLS 记录格式，也不保证分段时保留记录边界[^2][^tls-record]。
 
-这里的编号包含 TLS 记录头及受保护载荷，不是 HTTP 正文的编号。HTTP 消息也可以跨记录，TLS 记录也可容纳多个 HTTP 消息或帧的字节。接收方先由 TCP 重组有序字节，再由 TLS 恢复记录，最后由 HTTP 解释消息。
+**TLS 记录边界与 TCP 报文段边界相互独立**：一条记录可以跨多个段，一个段也可以同时承载不同记录的字节。
+
+假设 TLS 连续生成两条记录：A 编码后共 1000 字节，B 编码后共 800 字节。把这段连续的 1800 字节从 `0` 开始编号，则 A 占 `0…999`，B 占 `1000…1799`。这里使用的是示例字节偏移，包含 TLS 记录头和受保护载荷，不是 HTTP 正文编号，也不是连接实际使用的 TCP 初始序号。
+
+下面把同一批字节按两套边界分别画出。箭头上的范围表示：上方记录的哪些字节被放进了下方报文段的载荷。
+
+```mermaid title="两条 TLS 记录怎样装进三个 TCP 报文段" description="上排按 TLS 记录分组，下排按一种可能的 TCP 分段分组。A 分到段 1 和段 2，B 分到段 2 和段 3；段 2 同时包含 A 的尾部与 B 的开头。箭头表示字节归属，不表示多发了一份数据；框的宽度不代表字节长度，TCP 头部未画出。"
+flowchart TB
+ a["TLS 记录 A<br/>0…999 · 共 1000 字节"]
+ b["TLS 记录 B<br/>1000…1799 · 共 800 字节"]
+ s1["TCP 段 1<br/>0…599 · 600 字节<br/>仅含 A 的开头"]
+ s2["TCP 段 2<br/>600…1399 · 800 字节<br/>A 的尾部 + B 的开头"]
+ s3["TCP 段 3<br/>1400…1799 · 400 字节<br/>仅含 B 的尾部"]
+ a -->|0…599：600 字节| s1
+ a -->|600…999：400 字节| s2
+ b -->|1000…1399：400 字节| s2
+ b -->|1400…1799：400 字节| s3
+ class a,b resource
+ class s1,s2,s3 state
+```
+
+顺着记录 A 的两条箭头看，它的 1000 字节分成了 600 和 400 字节，分别进入段 1、段 2。再看段 2 的两条入箭头，它装着 A 的最后 400 字节和 B 的最初 400 字节，TLS 的记录边界恰好落在这个段的载荷内部。TCP 无须知道这里换了一条记录。
+
+这只是用于说明边界独立的一种切分，实际分段还受 MSS、发送时机及可用发送窗口等因素影响[^2]。HTTP 的边界也独立于它们：一条 HTTP 消息可以跨多个 TLS 记录，一条 TLS 记录也可以容纳多个 HTTP 消息或 HTTP/2 帧的字节[^tls-record]。
+
+### 接收方怎样恢复 TLS 记录
+
+TCP 向上交付有序字节流，TLS 则依据记录头中的 `length` 字段收齐一条记录，再认证、解密并把应用数据交给 HTTP；字节不足时就等待更多数据[^tls-record]。在上图中，段 1、段 2 的字节按序交付后才能收齐 A，B 还要等待段 3。因此，**并非每收到一个 TCP 段就能解密一条 TLS 记录**，HTTP 也仍需按自身格式识别消息或帧。
+
+### 接收端怎样选择上层协议
 
 接收端之所以知道该把剥出来的载荷交给上层的哪一个协议模块，靠的是每一层头部预留的**复用标识字段**（multiplexing identifier）：
 
@@ -93,7 +119,9 @@ flowchart LR
 因此，一次跨网通信中存在两条边界截然不同的生命周期：
 
 1. **链路层帧头是逐跳重写的**（hop-by-hop）：同一份 IP 数据报从你的电脑到家用路由器、再到运营商接入设备，每经过一次三层路由转发，外层的源/目的 MAC 地址都会被替换成当前这段链路的收发双方。
-2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。常见家庭 NAPT 会在转发时改写 IP 包的源 IP 与源端口，而代理服务器干脆在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
+2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。NAT 按配置转换地址，而代理服务器在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
+
+家庭路由器常用的是 NAT 中的**网络地址端口转换**（Network Address Port Translation，NAPT）：除转换 IP 地址外，还维护 TCP/UDP 端口的映射，让多台内网设备共用一个公网 IP 地址[^napt]。具体的地址端口映射与回包转换，见[第三篇的 NAT 与 NAPT 示例](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)。
 
 下面把这些职责放回同一条路径。为方便比较，图中每段链路都按以太网表示；节点标注的是本例的处理职责，不是设备能力的上限。
 
@@ -123,7 +151,7 @@ flowchart TB
  route -->|虚拟出口| tun["TUN：IP 包交给程序"]
 ```
 
-网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。以 Linux 为例，NAPI 是网络事件的轮询处理机制，硬件中断合并则是减少中断频率的另一项机制。驱动、卸载与虚拟接口会改变主机抓包所见，参见[第八篇的捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)[^napi]。
+网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。Linux 的**网络事件处理机制**（NAPI，早期称 New API，即“新接口”）通常在设备中断通知后调度轮询，批量处理收发事件；硬件中断合并则是减少中断频率的另一项机制[^napi]。驱动、卸载与虚拟接口会改变主机抓包所见，参见[第八篇的捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)。
 
 :::important[本地写入成功与远端处理完成]
 普通 TCP Socket 的 `write`/`send` 成功，只说明返回值所计的字节被本地发送路径接受，既不证明已经发出，也不证明远端业务处理完成。一次调用还可能只接受部分数据，详见第四篇的[Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/)。这与并发系列的[消息交付与处理完成](/posts/concurrency/message-passing-workers-backpressure/)是相似的责任边界，具体保证仍由各自接口规定。
@@ -256,6 +284,7 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 ## 延伸阅读
 
+- [System Design：一个请求的旅程](https://designed-to-scale.vercel.app/#/request-lifecycle/1)——交互式图解，逐步串起 DNS、建连、请求、服务端查询与响应，适合从整体路径和耗时角度回顾一次页面加载
 - [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)——通过 C 语言 Socket 接口直观理解应用程序与内核网络边界的交互
 - [Kurose & Ross: Wireshark Labs](https://gaia.cs.umass.edu/kurose_ross/wireshark.php)——配合《计算机网络：自顶向下方法》的配套抓包实验，适合对照观察各层协议字段
 
@@ -268,6 +297,8 @@ curl -q -4 --noproxy '*' --http1.1 \
 [^4]: 〔RFC〕[IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
 
 [^5]: 〔RFC〕[RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
+
+[^tls-record]: 〔RFC〕[RFC 8446 §5、§5.2](https://www.rfc-editor.org/rfc/rfc8446.html#section-5)——TLS 1.3 应用数据可跨记录拆分或在记录内合并；受保护记录的外层头部字段与密文长度定义。
 
 [^reuse]: 〔RFC〕[RFC 9113 §9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)——HTTP/2 连接复用及不同来源共用连接时的权威性和证书要求；[RFC 9111 §4](https://www.rfc-editor.org/rfc/rfc9111.html#section-4)说明直接使用缓存响应与重新验证的条件。
 
@@ -287,4 +318,6 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 [^osi]: 〔标准〕[ISO/IEC 7498-1: Open Systems Interconnection — Basic Reference Model](https://standards.iso.org/ittf/PubliclyAvailableStandards/s020269_ISO_IEC_7498-1_1994(E).zip)——OSI 七层参考模型的标准定义，用于对照互联网四层模型中的会话层与表示层分工
 
-[^napi]: 〔平台与实现〕[Linux 内核文档：NAPI](https://docs.kernel.org/networking/napi.html)——轮询处理及其与硬件中断合并的关系。
+[^napt]: 〔RFC〕[RFC 3022 §2.2、§4.1](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.2)——NAPT 的全称、地址与端口映射，以及多台内网设备共用外部地址的机制。
+
+[^napi]: 〔平台与实现〕[Linux 内核文档：NAPI](https://docs.kernel.org/networking/napi.html)——中断通知与轮询处理的关系；名称在 Linux 2.4 时称 New API，现已不再对应特定全称。
