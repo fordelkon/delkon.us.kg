@@ -239,7 +239,7 @@ RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）�
 
 macOS 可先用 `route -n get default` 查看 IPv4 默认路由的接口，再检查对应接口；`en0` 只是常见示例，不能保证是你的出口。Linux 对应使用 `ip route show default` 和 `ip addr show`。
 
-```bash
+```bash frame="code"
 route -n get default
 ifconfig en0
 ```
@@ -256,7 +256,7 @@ ifconfig en0
 
 macOS 可用以下命令；Linux 对应 `ip neigh show`：
 
-```bash
+```bash frame="code"
 arp -a
 ndp -a
 ```
@@ -271,7 +271,7 @@ ndp -a
 
 把接口和网关替换为前面查到的值，再针对该链路抓取 ARP 报文。抓包通常需要管理员权限：
 
-```bash
+```bash frame="code"
 sudo tcpdump -i en0 -nn -e arp
 ```
 

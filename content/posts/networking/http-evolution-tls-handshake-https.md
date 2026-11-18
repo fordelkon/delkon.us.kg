@@ -182,7 +182,7 @@ MitM 调试代理需要让客户端接受它提供的证书和信任链。常见
 
 先记录版本，再显式设置服务名和失败处理。以下参数按 OpenSSL 3.6 文档核对：
 
-```bash
+```bash frame="code"
 openssl version
 openssl s_client \
   -connect example.com:443 \
@@ -198,7 +198,7 @@ openssl s_client \
 
 若要明确测试不发送 SNI，使用独立命令：
 
-```bash
+```bash frame="code"
 openssl s_client \
   -connect example.com:443 \
   -noservername \
@@ -215,7 +215,7 @@ OpenSSL 可能在没有收到对端证书、握手失败退出时，仍打印 `V
 
 ### 实验二：用 curl 观察 HTTP 协商与响应
 
-```bash
+```bash frame="code"
 curl --version
 curl --noproxy '*' -v --http1.1 https://example.com/ -o /dev/null
 curl --noproxy '*' -v --http2 https://example.com/ -o /dev/null

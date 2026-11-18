@@ -172,7 +172,7 @@ TCP 提供可靠、有序的字节流，不提供机密性与服务身份认证�
 
 ### 实验一：观察应用连接、TLS 与 HTTP 阶段
 
-```bash
+```bash frame="code"
 curl -q -4 --noproxy '*' --http1.1 \
   --connect-timeout 5 --max-time 15 \
   -v https://example.com/ -o /dev/null
@@ -188,7 +188,7 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 先取得一次成功请求的连接地址，再查询本机对该地址的选路。以下变量和命令放在同一终端运行；如果第一条请求失败，先处理错误，不要拿空变量继续：
 
-```bash
+```bash frame="code"
 target_ip=$(curl -q -4 --noproxy '*' --http1.1 \
   --connect-timeout 5 --max-time 15 -sS -o /dev/null \
   -w '%{remote_ip}' https://example.com/)
@@ -199,14 +199,14 @@ route -n get "$target_ip"
 
 从选路输出找到接口名，例如普通 Wi-Fi 环境的 `en0` 或透明接管环境的 `utun4`。把下面变量改为这次输出中的值，不能直接假定物理网卡就是出口：
 
-```bash
+```bash frame="code"
 interface=utun4
 sudo tcpdump -i "$interface" -nn -c 10 "host $target_ip and tcp port 443"
 ```
 
 保持捕获运行，在另一终端把刚才的地址赋给 `target_ip`，用 `--resolve` 固定下一次请求连接这个地址，同时保留 URL 的主机名以供 HTTP、SNI 和证书验证使用[^curl]：
 
-```bash
+```bash frame="code"
 # Replace with the remote_ip recorded in the first terminal.
 target_ip=198.18.0.79
 curl -q -4 --noproxy '*' --http1.1 \

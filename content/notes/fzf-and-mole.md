@@ -12,7 +12,7 @@ fzf 是一个通用模糊搜索器：任何列表从管道里进来，它都能�
 
 启用 fzf 的 shell 集成后，按 `Ctrl-R` 搜索历史命令，按 `Ctrl-T` 把选中的文件路径插入当前命令。管道也能提供候选项：
 
-```bash
+```bash frame="code"
 git branch --format='%(refname:short)' | fzf  # Filter local branches
 branch=$(git branch --format='%(refname:short)' | fzf)
 [ -z "$branch" ] || git switch "$branch"      # Skip switch when selection is canceled
@@ -25,19 +25,19 @@ pid=$(ps -e -o pid= -o comm= | fzf | awk '{print $1}')
 
 mole 是 tw93 的开源 macOS 清理工具，命令就叫 `mo`：缓存和日志、卸载应用后的残留、项目构建产物（`purge`）都能处理，还带一个交互式的磁盘空间分析。最喜欢的一点是清理前可以先预览：
 
-```bash
+```bash frame="code"
 mo clean --dry-run   # Preview cleanup candidates without deleting them
 ```
 
 `mo clean` 会永久删除文件，而不是把文件移到废纸篓；默认还会清空 `~/.Trash`。若要保留废纸篓内容，先运行 `mo clean --whitelist` 并选中 Trash。预览并核对要删除的内容后，再执行清理[^mole-clean]：
 
-```bash
+```bash frame="code"
 mo clean             # Permanently delete selected cleanup items
 ```
 
 只想查看空间分布，可以打开交互式分析：
 
-```bash
+```bash frame="code"
 mo analyze           # Interactively inspect disk space usage
 ```
 

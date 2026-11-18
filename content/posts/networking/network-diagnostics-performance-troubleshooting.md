@@ -157,7 +157,7 @@ Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不�
 
 以下命令访问真实网络，需要在本机终端运行；后面的回环对照实验则不需要外网。每次启动新的 curl 进程，强制 IPv4 与 HTTP/1.1，请求一个 HTTPS URL，不跟随重定向、不复用上一次进程的连接，便于解释 TCP/TLS 阶段。`--noproxy '*'` 只排除 curl 显式代理；系统中的 TUN 和透明处理仍可能存在。
 
-```bash
+```bash frame="code"
 curl -q -4 --noproxy '*' --http1.1 \
   --connect-timeout 5 --max-time 15 -sS -o /dev/null \
   -w 'remote=%{remote_ip} status=%{http_code} http=%{http_version}\ndns=%{time_namelookup} connect=%{time_connect} tls=%{time_appconnect} first=%{time_starttransfer} total=%{time_total}\n' \
@@ -206,7 +206,7 @@ dns=0.023610 connect=0.026270 tls=0.256468 first=0.386691 total=0.386850
 
 公网测量同时受缓存、路径、负载等因素影响。先在回环接口做一个能够解释的对照：下面 Python 标准库服务仅监听 `127.0.0.1:18080`，两个路径返回相同正文，`/slow` 只在发送响应头之前多等 200 ms。此处选 Python 是为了把服务端完整放在一个终端里，不需要额外依赖；另一个终端运行 curl。程序需要本机 TCP 监听与两个终端，应在本机运行，不依赖外网，也不假定在线 Playground 能提供这些条件。
 
-```bash
+```bash frame="code"
 python3 -u - <<'PY'
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import time
@@ -234,7 +234,7 @@ PY
 
 在另一个终端交替运行两条命令数次，比较分布，避免把一次调度波动当成规律。每次均是新的 curl 进程，且排除回环地址上的显式代理：
 
-```bash
+```bash frame="code"
 curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
   -w 'status=%{http_code} tcp=%{time_connect} first=%{time_starttransfer} total=%{time_total}\n' \
   http://127.0.0.1:18080/fast
@@ -264,7 +264,7 @@ curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
 
 也可用下面的 macOS 命令保存原始捕获，再在 Wireshark 中打开；Linux 把 `lo0` 换成 `lo`。`sudo` 用于捕获权限，文件写入当前目录，结束时按 Ctrl+C：
 
-```bash
+```bash frame="code"
 sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 ```
 

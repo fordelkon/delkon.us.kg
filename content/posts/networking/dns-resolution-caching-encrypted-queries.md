@@ -158,7 +158,7 @@ DoT、DoH、DoQ 在使用正确的服务端认证时，保护客户端到所选�
 
 以下命令分别询问默认 DNS 服务器、指定递归服务器，以及自行跟随委派。先比较前两条完整响应中的 `SERVER`、状态码和答案，再运行第三条；`dig` 的默认服务器选择也不等于操作系统完整的名称服务策略。
 
-```bash
+```bash frame="code"
 dig +time=2 +tries=1 example.com A
 dig +time=2 +tries=1 @1.1.1.1 example.com A
 dig +time=2 +tries=1 +trace example.com A
@@ -170,7 +170,7 @@ dig +time=2 +tries=1 +trace example.com A
 
 先记录工具版本，再执行有界等待的查询：
 
-```bash
+```bash frame="code"
 dig -v
 dig +time=2 +tries=1 +trace example.com A
 ```
@@ -181,7 +181,7 @@ dig +time=2 +tries=1 +trace example.com A
 
 ### 实验三：对照记录类型与 TTL
 
-```bash
+```bash frame="code"
 dig +time=2 +tries=1 @1.1.1.1 example.com A
 dig +time=2 +tries=1 @1.1.1.1 example.com A
 dig +time=2 +tries=1 @1.1.1.1 cloudflare.com TYPE65
@@ -193,7 +193,7 @@ dig +time=2 +tries=1 @1.1.1.1 cloudflare.com TYPE65
 
 macOS 可以查询系统名称服务：
 
-```bash
+```bash frame="code"
 dscacheutil -q host -a name example.com
 ```
 

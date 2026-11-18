@@ -181,14 +181,14 @@ flowchart TB
 
 在 macOS 上查看 IPv4 路由表，再查询一个具体目标。这里的地址只是用于选路对照，不代表它一定提供可用的网站服务：
 
-```bash
+```bash frame="code"
 netstat -rn -f inet
 route -n get 93.184.216.34
 ```
 
 Linux 对应为：
 
-```bash
+```bash frame="code"
 ip route show
 ip route get 93.184.216.34
 ip rule show
@@ -208,7 +208,7 @@ macOS 的 `route -n get` 常见字段包括：
 
 下面限制最多探测 5 跳，每跳一次探测，单次等待最多 1 秒；数字输出避免反向 DNS 查询引入额外等待：
 
-```bash
+```bash frame="code"
 traceroute -n -m 5 -q 1 -w 1 93.184.216.34
 ```
 
