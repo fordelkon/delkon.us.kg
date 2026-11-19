@@ -2,24 +2,27 @@
 import { render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import { getAllPosts } from "@/data/post";
+import { getPostNeighborhoods } from "@/data/post-links";
 import PostLayout from "@/layouts/BlogPost.astro";
 
 // if you're using an adaptor in SSR mode, getStaticPaths wont work -> https://docs.astro.build/en/guides/routing/#modifying-the-slug-example-for-ssr
 export const getStaticPaths = (async () => {
 	const blogEntries = await getAllPosts();
+	const neighborhoods = await getPostNeighborhoods(blogEntries);
 
 	return blogEntries.map((post) => ({
 		params: { slug: post.id },
-		props: { post },
+		props: { post, neighborhood: neighborhoods.get(post.id) },
 	}));
 }) satisfies GetStaticPaths;
 
 type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
-const { post } = Astro.props;
-const { Content } = await render(post);
+const { post, neighborhood } = Astro.props;
+const { Content, headings, remarkPluginFrontmatter } = await render(post);
+const readingTime: string = remarkPluginFrontmatter.readingTime;
 ---
 
-<PostLayout post={post}>
+<PostLayout post={post} neighborhood={neighborhood} headings={headings} readingTime={readingTime}>
 	<Content />
 </PostLayout>

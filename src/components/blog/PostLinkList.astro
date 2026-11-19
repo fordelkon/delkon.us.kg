@@ -1,0 +1,29 @@
+---
+import type { PostNeighborhood } from "@/data/post-links";
+import PostDisclosure from "./PostDisclosure.astro";
+
+interface Props {
+	neighbors: PostNeighborhood["neighbors"];
+}
+
+const { neighbors } = Astro.props;
+
+const directionLabels = {
+	incoming: "Links here",
+	outgoing: "Linked from here",
+	reciprocal: "Links both ways",
+};
+---
+
+<PostDisclosure title={`${neighbors.length} linked ${neighbors.length === 1 ? "post" : "posts"}`}>
+	<ul class="post-disclosure-list">
+		{neighbors.map(({ title, href, direction }) => (
+			<li>
+				<a class="post-disclosure-link block [overflow-wrap:anywhere]" href={href}>
+					{title}
+				</a>
+				<span class="block text-xs text-printer-ink-light">{directionLabels[direction]}</span>
+			</li>
+		))}
+	</ul>
+</PostDisclosure>

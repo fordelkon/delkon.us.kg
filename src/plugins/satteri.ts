@@ -67,6 +67,26 @@ export function satteriReadingTimePlugin(): () => MdastPluginDefinition {
 	};
 }
 
+export function satteriPostLinksPlugin(): HastPluginDefinition {
+	const destinations: string[] = [];
+
+	return {
+		name: "cactus-post-links",
+		element: {
+			filter: ["a"],
+			visit(node, ctx) {
+				const astro = ctx.data.astro;
+				const href = linkValueSchema.safeParse(node.properties?.href);
+
+				if (!astro || !href.success) return;
+
+				destinations.push(href.data);
+				astro.frontmatter.postLinkDestinations = destinations;
+			},
+		},
+	};
+}
+
 export function satteriUnwrapImagesPlugin(): MdastPluginDefinition {
 	return {
 		name: "cactus-unwrap-images",

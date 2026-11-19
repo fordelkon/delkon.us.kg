@@ -1,0 +1,125 @@
+---
+import type { PostNeighborhood } from "@/data/post-links";
+import PostLinkList from "./PostLinkList.astro";
+import { layoutPostGraph } from "./post-graph-layout";
+
+interface Props {
+	postId: string;
+	title: string;
+	neighborhood: PostNeighborhood;
+}
+
+const { postId, title, neighborhood } = Astro.props;
+const { neighbors, edges } = neighborhood;
+const points = layoutPostGraph(postId, neighborhood);
+---
+
+<aside aria-label="Article links" class="flex min-h-0 flex-1 flex-col">
+	<h2 class="print-label-wide shrink-0 text-printer-ink-light">Link graph</h2>
+	<post-link-graph class="pointer-events-auto block shrink-0">
+		<svg class="mt-2 block w-full" viewBox="0 0 160 160" role="group" aria-label="Linked articles">
+			<g aria-hidden="true">
+				{edges.map(({ source, target }) => {
+					const from = points.get(source);
+					const to = points.get(target);
+					return from && to && (
+						<line
+							class:list={["edge", { secondary: source !== postId }]}
+							data-source={source}
+							data-target={target}
+							x1={from.x}
+							y1={from.y}
+							x2={to.x}
+							y2={to.y}
+						/>
+					);
+				})}
+			</g>
+			<g class="node current" data-node={postId} data-x={80} data-y={80} transform="translate(80 80)">
+				<title>{title}</title>
+				<circle class="hit-area" r="9" />
+				<circle class="current-ring" r="7" />
+				<circle class="dot" r="4" />
+			</g>
+			{neighbors.map((neighbor) => {
+				const point = points.get(neighbor.id);
+				return point && (
+					<g
+						class="node"
+						data-node={neighbor.id}
+						data-x={point.x}
+						data-y={point.y}
+						transform={`translate(${point.x} ${point.y})`}
+					>
+						<a aria-label={neighbor.title} href={neighbor.href}>
+							<title>{neighbor.title}</title>
+							<circle class="hit-area" r="8" />
+							<circle class="dot" r="3" />
+						</a>
+					</g>
+				);
+			})}
+		</svg>
+		<p class="graph-label mb-3 line-clamp-2 text-xs text-printer-ink-light" data-graph-label>
+			{title}
+		</p>
+	</post-link-graph>
+	<PostLinkList neighbors={neighbors} />
+</aside>
+
+<script>
+	import "./post-graph-drag";
+</script>
+
+<style>
+	.edge {
+		stroke: var(--color-printer-ink-light);
+		stroke-opacity: 0.45;
+	}
+
+	.edge.secondary {
+		stroke-opacity: 0.18;
+	}
+
+	.edge.highlighted {
+		stroke: var(--color-printer-ink);
+		stroke-opacity: 0.8;
+	}
+
+	.node {
+		cursor: grab;
+	}
+
+	.node.dragging {
+		cursor: grabbing;
+	}
+
+	.hit-area {
+		fill: transparent;
+	}
+
+	.dot {
+		fill: var(--color-printer-ink);
+	}
+
+	.current .dot,
+	.node:hover .dot,
+	.node a:focus-visible .dot {
+		fill: var(--color-printer-accent);
+	}
+
+	.current-ring,
+	.node a:focus-visible .hit-area {
+		fill: none;
+		stroke: var(--color-printer-ink);
+	}
+
+	.node a:focus-visible .hit-area {
+		pointer-events: all;
+	}
+
+	.graph-label {
+		min-height: 2lh;
+		overflow-wrap: anywhere;
+	}
+</style>

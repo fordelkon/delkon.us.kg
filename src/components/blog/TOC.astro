@@ -1,6 +1,7 @@
 ---
 import type { MarkdownHeading } from "astro";
 import { generateToc } from "@/utils/generateToc";
+import PostDisclosure from "./PostDisclosure.astro";
 import TOCHeading from "./TOCHeading.astro";
 
 interface Props {
@@ -11,36 +12,20 @@ const { headings } = Astro.props;
 const toc = generateToc(headings);
 ---
 
-<!-- Base positions this outside the paper; TOC owns its bounded scroll region. -->
-<details open class="min-w-0" data-toc-details>
-	<summary class="print-label-wide cursor-pointer text-printer-ink-light hover:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink">
-		Contents
-	</summary>
-	<div class="toc-scroll mt-3 max-h-[calc(100dvh-18rem)] overflow-y-auto" data-toc-scroll>
-		<nav aria-label="Table of contents" class="relative w-full pb-1 ps-1" data-toc>
-			<div
-				aria-hidden="true"
-				class="pointer-events-none absolute top-0 start-1 h-2 w-0.5 origin-top bg-printer-accent opacity-0 transition-[transform,opacity] duration-300 motion-reduce:transition-none"
-				data-toc-marker
-			></div>
-			<ol class="border-s border-dashed border-printer-ink/20 ps-3">
-				{toc.map((heading) => (
-					<TOCHeading heading={heading} />
-				))}
-			</ol>
-		</nav>
-	</div>
-</details>
-
-<style>
-	.toc-scroll {
-		scrollbar-width: none;
-	}
-
-	.toc-scroll::-webkit-scrollbar {
-		display: none;
-	}
-</style>
+<PostDisclosure title="Contents" open>
+	<nav aria-label="Table of contents" class="relative w-full" data-toc>
+		<div
+			aria-hidden="true"
+			class="pointer-events-none absolute top-0 start-0 h-2 w-0.5 origin-top bg-printer-accent opacity-0 transition-[transform,opacity] duration-300 motion-reduce:transition-none"
+			data-toc-marker
+		></div>
+		<ol class="post-disclosure-list">
+			{toc.map((heading) => (
+				<TOCHeading heading={heading} />
+			))}
+		</ol>
+	</nav>
+</PostDisclosure>
 
 <script>
 	// Section observation follows Starlight's MIT-licensed TOC implementation:
@@ -57,8 +42,8 @@ const toc = generateToc(headings);
 		stop();
 
 		const nav = document.querySelector<HTMLElement>("nav[data-toc]");
-		const scrollRegion = nav?.closest<HTMLElement>("[data-toc-scroll]");
-		const details = nav?.closest<HTMLDetailsElement>("details[data-toc-details]");
+		const scrollRegion = nav?.closest<HTMLElement>("[data-post-disclosure-scroll]");
+		const details = nav?.closest("details");
 
 		if (!nav || !scrollRegion || !details) return;
 
@@ -112,27 +97,11 @@ const toc = generateToc(headings);
 		};
 
 		const activate = (link: HTMLAnchorElement): void => {
-			if (link !== current) {
-				current?.removeAttribute("aria-current");
-				link.setAttribute("aria-current", "true");
-				current = link;
+			if (link === current) return;
 
-				// Reveal the next level, plus ancestors for direct jumps to deep headings.
-				const children = link.parentElement?.querySelector<HTMLElement>(
-					":scope > [data-toc-branch]",
-				);
-
-				if (children) children.dataset.open = "true";
-
-				let scope = link.parentElement;
-
-				while (scope && scope !== nav) {
-					if (scope.matches("[data-toc-branch]")) scope.dataset.open = "true";
-					scope = scope.parentElement;
-				}
-			}
-
-			// Geometry can change even when the active heading stays the same.
+			current?.removeAttribute("aria-current");
+			link.setAttribute("aria-current", "true");
+			current = link;
 			scheduleMeasure();
 		};
 

@@ -17,8 +17,7 @@ const {
 	meta: { articleDate, description = siteConfig.description, ogImage, title },
 } = Astro.props;
 
-// Rendered only when a page fills the gutter slot (currently the blog post
-// layout's table of contents).
+const hasStartGutter = Astro.slots.has("start-gutter");
 const hasGutter = Astro.slots.has("gutter");
 ---
 
@@ -54,12 +53,21 @@ const hasGutter = Astro.slots.has("gutter");
 					<slot />
 				</PaperViewport>
 				{
+					hasStartGutter && (
+						<div class="pointer-events-none absolute inset-y-0 end-full hidden xl:block">
+							<div class="article-gutter flex w-48 flex-col pe-8">
+								<slot name="start-gutter" />
+							</div>
+						</div>
+					)
+				}
+				{
 					/* Page-margin gutter: sticky content anchored outside the paper's
 					   end edge on wide screens, so it never squeezes the printed page.
 					   The slot owner handles its own scrolling within the viewport. */
 					hasGutter && (
 						<div class="pointer-events-none absolute inset-y-0 start-full hidden xl:block">
-							<div class="pointer-events-auto sticky top-48 w-48 ps-8">
+							<div class="article-gutter flex w-48 flex-col ps-8">
 								<slot name="gutter" />
 							</div>
 						</div>
@@ -71,3 +79,12 @@ const hasGutter = Astro.slots.has("gutter");
 		<slot name="floating-controls" />
 	</body>
 </html>
+
+<style>
+	.article-gutter {
+		--gutter-top: clamp(1rem, calc(100dvh - 24rem), 12rem);
+		position: sticky;
+		inset-block-start: var(--gutter-top);
+		block-size: calc(100dvh - var(--gutter-top) - 4rem);
+	}
+</style>

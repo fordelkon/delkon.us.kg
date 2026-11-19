@@ -1,11 +1,15 @@
 ---
-import { type CollectionEntry, render } from "astro:content";
+import type { CollectionEntry } from "astro:content";
+import type { MarkdownHeading } from "astro";
 import Explainer from "@/components/blog/explainer/Explainer.astro";
 import Masthead from "@/components/blog/Masthead.astro";
+import PostGraph from "@/components/blog/PostGraph.astro";
+import PostLinkList from "@/components/blog/PostLinkList.astro";
 import TOC from "@/components/blog/TOC.astro";
 import WebMentions from "@/components/blog/webmentions/index.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
 import { getPostExplainer } from "@/data/post-explainers";
+import type { PostNeighborhood } from "@/data/post-links";
 import { ogImageUrl } from "@/data/routes";
 import { getSeriesContext } from "@/data/series";
 
@@ -13,14 +17,15 @@ import BaseLayout from "./Base.astro";
 
 interface Props {
 	post: CollectionEntry<"post">;
+	neighborhood: PostNeighborhood | undefined;
+	headings: MarkdownHeading[];
+	readingTime: string;
 }
 
-const { post } = Astro.props;
+const { post, neighborhood, headings, readingTime } = Astro.props;
 const { ogImage, title, description, updatedDate, publishDate } = post.data;
 const socialImage = ogImage ?? ogImageUrl(post.id);
 const articleDate = updatedDate?.toISOString() ?? publishDate.toISOString();
-const { headings, remarkPluginFrontmatter } = await render(post);
-const readingTime: string = remarkPluginFrontmatter.readingTime;
 const series = await getSeriesContext(post);
 const explainer = getPostExplainer(post.id);
 ---
@@ -44,6 +49,16 @@ const explainer = getPostExplainer(post.id);
 			<WebMentions />
 		</div>
 	</article>
+	{!!neighborhood?.neighbors.length && (
+		<div class="mt-8 xl:hidden">
+			<PostLinkList neighbors={neighborhood.neighbors} />
+		</div>
+	)}
+	{!!neighborhood?.neighbors.length && (
+		<Fragment slot="start-gutter">
+			<PostGraph postId={post.id} title={title} neighborhood={neighborhood} />
+		</Fragment>
+	)}
 	{!!headings.length && (
 		<Fragment slot="gutter">
 			<TOC headings={headings} />

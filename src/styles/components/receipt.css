@@ -25,6 +25,14 @@
 	@apply font-mono text-[10px] tracking-[0.3em] uppercase;
 }
 
+.post-disclosure-list {
+	@apply flex flex-col gap-2.5 border-s border-dashed border-printer-ink/20 pb-1 ps-3;
+}
+
+.post-disclosure-link {
+	@apply rounded-xs font-mono text-xs leading-relaxed text-printer-ink-light transition-colors hover:text-printer-ink hover:underline focus-visible:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink aria-[current=true]:text-printer-ink motion-reduce:transition-none;
+}
+
 /* Receipt link: thin ink underline that thickens on hover, for standalone
    elements tagged .printer-link (tag chips, GitHub cards). Prose anchors are
    styled by the typography plugin's `a` entry in tailwind.config.ts instead:

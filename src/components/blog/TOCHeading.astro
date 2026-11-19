@@ -3,32 +3,34 @@ import type { TocItem } from "@/utils/generateToc";
 
 interface Props {
 	heading: TocItem;
+	nested?: boolean;
 }
 
 const {
 	heading: { children, depth, slug, text },
+	nested = false,
 } = Astro.props;
 ---
 
 <li class={`${depth > 2 ? "ms-2" : ""}`}>
 	<a
-		class={`line-clamp-2 rounded-xs font-mono text-xs leading-relaxed text-printer-ink-light transition-colors hover:text-printer-ink hover:underline focus-visible:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink aria-[current=true]:text-printer-ink motion-reduce:transition-none ${depth <= 2 ? "mt-2.5" : "mt-2"}`}
+		class:list={["post-disclosure-link relative line-clamp-2 ps-3", { "mt-2": depth > 2 }]}
 		href={`#${slug}`}
 	>
-		<span aria-hidden="true" class="me-0.5">
-			#
-		</span>
+		<span
+			aria-hidden="true"
+			class:list={[
+				"absolute start-0 top-[0.55em] size-1.5 rounded-full border border-printer-ink",
+				{ "bg-printer-ink": !nested },
+			]}
+		></span>
 		{text}
 	</a>
 	{!!children.length && (
-		/* Reveal only the next level when its parent becomes active. Immediate
-			   disclosure keeps marker geometry stable and hidden links out of focus. */
-		<div class="hidden data-[open=true]:block" data-toc-branch>
-			<ol>
-				{children.map((subheading) => (
-					<Astro.self heading={subheading} />
-				))}
-			</ol>
-		</div>
+		<ol>
+			{children.map((subheading) => (
+				<Astro.self heading={subheading} nested />
+			))}
+		</ol>
 	)}
 </li>

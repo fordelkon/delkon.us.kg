@@ -1,0 +1,33 @@
+---
+interface Props {
+	title: string;
+	open?: boolean;
+}
+
+const { title, open = false } = Astro.props;
+---
+
+<details class="min-w-0 xl:open:flex xl:open:min-h-0 xl:open:flex-1 xl:open:flex-col" open={open}>
+	<summary class="print-label-wide pointer-events-auto shrink-0 cursor-pointer text-printer-ink-light hover:text-printer-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-ink">
+		{title}
+	</summary>
+	<div
+		class="disclosure-scroll pointer-events-auto mt-3 ps-1 xl:flex-1 xl:overflow-y-auto"
+		data-post-disclosure-scroll
+	>
+		<slot />
+	</div>
+</details>
+
+<style>
+	details[open]::details-content {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-block-size: 0;
+	}
+
+	.disclosure-scroll {
+		scrollbar-width: none;
+	}
+</style>
