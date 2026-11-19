@@ -1,4 +1,4 @@
-import { EXECUTION_LEGEND, interaction, node, withRoles } from "./diagram-layout.ts";
+import { EXECUTION_LEGEND, node, withRoles } from "./diagram-layout.ts";
 import { box, type Scene } from "./types.ts";
 
 const trace = ["A", "B", "B", "A"];
@@ -142,43 +142,11 @@ const execution: Scene = {
 	})),
 };
 
-const boundaries: Scene = {
-	title: "并行成本与共享状态",
-	section: "并行任务的划分与成本",
-	description:
-		"本图是假设对照：固定工作量，20% 串行、80% 可理想并行；其余帧讨论共享状态的访问规则。不是性能实测，也不将未定义行为模拟成合法时间线。",
-	caption: "更多执行单元不自动带来同比加速；任务划分、协调成本与共享状态的正确性须一起考虑。",
-	frames: [
-		interaction(
-			"四个执行单元理想分摊 80% 的部分：总耗时为 20% + 80% / 4 = 40%，加速 2.5 倍。创建、同步与汇总的额外成本尚未计入。",
-			["串行部分", "20% 不可分摊"],
-			["四路并行部分", "80% / 4 = 20%"],
-			["理想总耗时", "40% · 加速 2.5 倍"],
-			["实际测量", "还需计入派发、争用与汇总"],
-		),
-		interaction(
-			"大任务块可能分配不均，小任务块增加管理与同步开销。应比较同一输入和结果要求，吞吐提升也不保证单个请求或尾延迟下降。",
-			["粗粒度", "开销少，可能不均衡"],
-			["细粒度", "均衡好，调度更频繁"],
-			["需要测量的结果", "完成耗时 / 吞吐 / 尾延迟"],
-			["先明确工作契约", "再决定任务粒度和执行资源"],
-		),
-		interaction(
-			"共享资源意味着需要访问协议。Rust/C++ 中未同步的冲突非原子访问可能构成数据竞争与未定义行为；即使都使用原子访问，拆开的检查和更新也仍可能违反业务要求。",
-			["线程 A", "访问共享状态"],
-			["线程 B", "访问共享状态"],
-			["内存安全与逻辑正确性", "数据竞争 ≠ 所有竞态条件"],
-			["后续主线", "锁 / 原子 / 不变量 / 生命周期"],
-		),
-	],
-};
-
 export const scene: Scene = {
 	...timeline,
 	legend: EXECUTION_LEGEND,
 	chapters: [
 		withRoles(timeline, { single: "control", "parallel-a": "control", "parallel-b": "control" }),
 		execution,
-		boundaries,
 	],
 };
