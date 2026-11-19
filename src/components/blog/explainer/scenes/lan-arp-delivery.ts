@@ -1,141 +1,99 @@
-import { chain, logicalFlow, node } from "./diagram-layout.ts";
-import { edge, type Scene } from "./types.ts";
+import type { Scene } from "./types.ts";
 
-const cases: [string, string, string, string, string][] = [
-	[
-		"192.168.1.50",
-		"直连 /24 → 192.168.1.50",
-		"先查缓存",
-		"未开始 ARP",
-		"本机 192.168.1.10/24 查询路由表，目标 192.168.1.50 匹配直连 /24；它比默认 /0 更具体。下一跳是目标自身，然后才查看邻居缓存。",
-	],
-	[
-		"192.168.1.50",
-		"下一跳 192.168.1.50",
-		"ARP Request · 广播",
-		"Dst MAC = ff:ff:ff:ff:ff:ff",
-		"缓存未命中，ARP Request 广播询问谁拥有下一跳地址。广播停留在当前广播域，不穿越路由器去寻找远端 MAC。",
-	],
-	[
-		"192.168.1.50",
-		"下一跳 192.168.1.50",
-		"ARP Reply · 通常单播",
-		"保存 IP → MAC 邻居记录",
-		"拥有该 IPv4 地址的邻居通常单播回复请求者，主机据此更新邻居表。这一步独立于后续数据帧的发送。",
-	],
-	[
-		"192.168.1.50",
-		"下一跳 192.168.1.50",
-		"缓存命中 → 直接成帧",
-		"不再发送本次 ARP Request",
-		"再一次发送时，若邻居缓存可用，就直接使用 MAC。缓存状态、过期与可达性维护影响是否重新解析，不能期待每次访问都有 ARP 广播。",
-	],
-	[
-		"198.51.100.20",
-		"默认 /0 → 192.168.1.1",
-		"解析网关 MAC",
-		"Request 广播 → Reply 通常单播",
-		"切换到跨网段发送：目标不匹配直连 /24，默认路由选网关。若缓存未命中，ARP 查询 192.168.1.1，而不是远端 IP。",
-	],
-	[
-		"198.51.100.20",
-		"下一跳 192.168.1.1",
-		"Dst MAC = 网关 MAC",
-		"Dst IP = 198.51.100.20",
-		"发给网关的帧承载发给远端的 IP 包。二层目的与三层目的并不相同：路由先决定下一跳，邻居解析只负责本地链路交付。",
-	],
-];
-
-const ipv4: Scene = {
-	title: "路由表与 ARP",
-	diagramHeight: 312,
+const subnet: Scene = {
+	title: "子网边界决定哪种下一跳",
+	section: "算清一个-27-子网",
 	description:
-		"本图假设：IPv4 以太网，本机 192.168.1.10/24，只有直连 /24 与默认 /0 两条路由。各帧对比同网段、跨网段与缓存命中。",
-	caption: "目标 IP → 路由匹配 → 下一跳 → 邻居缓存／ARP → 成帧；ARP 广播不会跨过路由器。",
-	frames: cases.map(([destination, next, action, state, note], index) => ({
-		note: note,
-		boxes: [
-			node("destination", 8, 8, 344, ["目标 IP", destination], "client", true),
-			node(
-				"on-link",
-				8,
-				72,
-				344,
-				["192.168.1.0/24 → On-link", index < 4 ? next : "未选中"],
-				"processing",
-				index < 4,
-			),
-			node(
-				"default",
-				8,
-				136,
-				344,
-				["0.0.0.0/0 → 192.168.1.1", index >= 4 ? next : "未选中"],
-				"processing",
-				index >= 4,
-			),
-			node("arp", 8, 200, 344, [action, state], "delivery", true),
-			node("boundary", 8, 264, 344, ["本地广播域边界", "路由器不转发此 ARP 广播"], "processing"),
-		],
-		edges: [
-			edge("lookup", "M180 56 V66", true),
-			edge("route-neighbor", index < 4 ? "M352 96 H358 V224 H352" : "M180 184 V194", true),
-		],
-	})),
-};
-
-const ipv6: Scene = {
-	title: "IPv6 自动配置与 NDP",
-	diagramHeight: 312,
-	description:
-		"本图假设：支持 SLAAC 的 IPv6 以太网，RA 提供适用前缀。邻居解析演示缓存未命中情形；RA、DAD、NS/NA 均属于 ICMPv6 相关流程，IPv6 不使用 ARP 广播。",
-	caption: "RA 提供路由器与前缀信息；SLAAC 生成地址，NDP 还承担地址检查、邻居解析和可达性维护。",
+		"本机 192.168.10.37/27，默认网关 .33；只有直连与默认路由，地址均为 192.168.10.x。两条分支比较不同目标，不是连续发送的两个阶段，也不保证目标 .64 可达。",
+	caption: "先固定本机的网络前缀，再判断目标是否匹配直连路由；不能只看 IP 数字是否接近。",
+	diagram: `flowchart TB
+ local["本机 .37/27<br/>37 AND 224 = 32"]
+ local --> range["本机网络 .32/27<br/>地址范围 .32…63"]
+ range -->|目标 .62 在范围内| direct["直连路由<br/>下一跳是目标 .62"]
+ range -->|目标 .64 在范围外| gateway["默认路由<br/>下一跳是网关 .33"]
+ class local actor
+ class range state
+ class direct result
+ class gateway resource`,
 	frames: [
-		chain(
-			[
-				["Router Advertisement", "路由器 → 主机：前缀与路由信息"],
-				["SLAAC", "按适用前缀生成地址并执行 DAD"],
-				["默认路由", "通过有效的 RA 学习路由器"],
-				["DHCPv6（可选）", "地址或其他配置；不替代 RA 默认路由"],
-				["隐私地址", "临时地址可轮换，策略依实现"],
-			],
-			0,
-			"主机可发送 RS 请求 RA，也可收到周期性 RA。RA 的前缀、标志和路由器生存期有不同职责；SLAAC 地址还需检查重复，不能把收到前缀当成地址已可用。",
-			["processing", "client", "processing", "processing", "client"],
-			false,
-		),
-		chain(
-			[
-				["目标 IPv6 地址", "先查询路由与下一跳"],
-				["邻居缓存未命中", "解析本链路下一跳的链路层地址"],
-				["Neighbor Solicitation", "通常发往 solicited-node 组播"],
-				["Neighbor Advertisement", "正常解析应答通常单播返回"],
-				["链路层交付", "保存映射并发送 IPv6 包"],
-			],
-			2,
-			"普通地址解析中 NS 通常发往被请求节点组播地址，NA 通常单播回复；DAD、主动通告和邻居可达性探测的地址与标志规则不同。NDP 不只是换名的 ARP。",
-			["client", "processing", "processing", "delivery", "delivery"],
-		),
-		chain(
-			[
-				["路由选下一跳", "IPv4 与 IPv6 都先确定交付对象"],
-				["IPv4", "ARP Request / Reply → MAC"],
-				["IPv6", "ICMPv6 NS / NA → 链路层地址"],
-				["缓存命中", "两者均可能省去本次解析"],
-				["职责差异", "NDP 还含路由器发现、DAD、NUD"],
-			],
-			4,
-			"对照的是邻居解析职责，图中的 IPv4 与 IPv6 行不是串行操作。NDP 还支持路由器发现、重复地址检测与邻居不可达检测，DHCPv6 则解决另一些配置问题。",
-			["client", "processing", "processing", "delivery", "delivery"],
-			false,
-		),
+		{
+			boxes: [],
+			activeNodes: ["local", "range"],
+			activeEdges: [0],
+			durationMs: 5000,
+			note: "/27 固定 27 个网络位，剩 5 个主机位，共 32 个地址。子网从 .32 开始，不是从本机 .37 开始数；常规主机范围是 .33 至 .62。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["range", "direct"],
+			activeEdges: [1],
+			durationMs: 5000,
+			note: "只看目标 .62：它匹配本机直连前缀，下一跳就是目标自身。后续要取得目标 MAC，才能在以太网上直接交付。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["range", "gateway"],
+			activeEdges: [2],
+			durationMs: 5000,
+			note: "换成目标 .64：它进入下一个 /27，本例交给默认网关 .33。这里说明选路，不代表 .64 是可用主机地址；它在下一个 /27 中是网络地址。",
+		},
 	],
 };
 
-export const scene: Scene = { ...ipv4, chapters: [logicalFlow(ipv4), logicalFlow(ipv6)] };
+const neighbor: Scene = {
+	title: "最终目标 IP 与下一跳 MAC",
+	section: "ipv4-的地址解析arp",
+	description:
+		"独立的跨网段 IPv4 单播示例：目标 198.51.100.20，下一跳网关 192.168.1.1；普通以太网，无代理 ARP。实线是数据交付，虚线是缓存查询或 ARP 解析的控制路径，两条缓存分支不会先后全部执行。",
+	caption: "ARP 找到的是本跳网关 MAC；最终目的 IP 留在原 IP 包里。",
+	diagram: `flowchart TB
+ ip["IP 包的最终目标<br/>198.51.100.20"]
+ next["路由选出网关<br/>下一跳 192.168.1.1"]
+ arp["缓存未命中：ARP 请求 / 回复<br/>只解析网关 .1 的 MAC"]
+ frame["发送数据帧<br/>目的 MAC = 网关 MAC<br/>目的 IP = 198.51.100.20"]
+ ip --> next
+ next -->|已有映射，直接成帧| frame
+ next -.->|没有映射| arp
+ arp -.->|取得映射后成帧| frame
+ class ip actor
+ class next resource
+ class arp state
+ class frame result`,
+	frames: [
+		{
+			boxes: [],
+			activeNodes: ["ip", "next"],
+			activeEdges: [0],
+			durationMs: 5000,
+			note: "先按最终目的 IP 查路由，结果选出本链路上的网关。下一跳不同于最终目标，这正是三层选路与二层交付的衔接点。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["next", "frame"],
+			activeEdges: [1],
+			durationMs: 5000,
+			note: "若邻居缓存已有可用网关映射，就直接成帧，不必每次广播 ARP。主机邻居表保存 IP 到 MAC，交换机 MAC 表保存 MAC 到端口。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["next", "arp"],
+			activeEdges: [2],
+			durationMs: 5000,
+			note: "若没有映射，ARP 用二层广播 MAC ff:ff:ff:ff:ff:ff 询问网关，收到通常为单播的回复后更新缓存。ARP 自身不封装在 IPv4 包里。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["arp", "frame"],
+			activeEdges: [3],
+			durationMs: 5000,
+			note: "最终发出的帧以网关 MAC 为目的，里面的 IP 包仍发给远端。交换机按帧的目的 MAC 交付；这次 ARP 广播不会跨路由器寻找远端 MAC。",
+		},
+	],
+};
 
-const sections = ["ipv4-的地址解析arp", "ipv6-的-raslaac-与-dns-参数"];
-
-for (const [index, chapter] of (scene.chapters ?? []).entries()) {
-	chapter.section = sections[index];
-}
+export const scene: Scene = {
+	...subnet,
+	legend:
+		"紫：前缀／邻居解析状态 · 橙：下一跳 · 绿：交付结果；高亮箭头聚焦当前解释的关系，分支代表不同条件。",
+	chapters: [subnet, neighbor],
+};

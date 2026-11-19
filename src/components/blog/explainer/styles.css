@@ -196,6 +196,41 @@
 	margin-inline: auto;
 }
 
+/* Mermaid keeps its label size; wide scenes scroll instead of shrinking. */
+.step-explainer.has-mermaid {
+	--explainer-width: 100%;
+	--diagram-node-font-size: 13px;
+}
+.has-mermaid .step-explainer-visual {
+	grid-template-columns: minmax(0, 1fr);
+	overflow-x: auto;
+	padding-block: 0.5rem;
+}
+.explainer-mermaid-notes {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	justify-items: center;
+}
+.has-mermaid .explainer-mermaid {
+	width: max-content;
+	min-width: 100%;
+	max-width: none;
+}
+.has-mermaid .explainer-mermaid svg {
+	max-width: none;
+	max-height: none;
+}
+.explainer-static-viewport {
+	max-width: 100%;
+	overflow-x: auto;
+	padding-block: 0.5rem;
+}
+.has-mermaid .step-explainer-visual:focus-visible,
+.explainer-static-viewport:focus-visible {
+	outline: 2px solid var(--color-printer-accent);
+	outline-offset: 2px;
+}
+
 .step-explainer-transcript {
 	margin: var(--receipt-heading-gap) 0 0;
 	text-align: start;
