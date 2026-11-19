@@ -6,44 +6,28 @@ import BrowseNav from "@/components/BrowseNav.astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
 import PrintedSection from "@/components/printed/PrintedSection.astro";
-import SeriesArchive from "@/components/SeriesArchive.astro";
-import TopicLinks from "@/components/TopicLinks.astro";
 import { getPublishedPosts } from "@/data/entries";
 import { getPinnedPosts, groupPostsByYear, MAX_POSTS_PER_PAGE } from "@/data/post";
-import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const publishedPosts = await getPublishedPosts();
 
-	// Folders scoped to posts: only series with post members become folders.
-	const seriesGroups = await getSeriesGroups("post");
-
-	const seriesPostIds = new Set(
-		seriesGroups.flatMap((group) => group.entries.map((entry) => entry.id)),
-	);
-
-	const standalonePosts = publishedPosts.filter((post) => !seriesPostIds.has(post.id));
-
-	return paginate(standalonePosts, {
+	return paginate(publishedPosts, {
 		pageSize: MAX_POSTS_PER_PAGE,
-		props: {
-			pinnedPosts: getPinnedPosts(standalonePosts),
-			seriesGroups,
-		},
+		props: { pinnedPosts: getPinnedPosts(publishedPosts) },
 	});
 }) satisfies GetStaticPaths;
 
 interface Props {
 	page: Page<CollectionEntry<"post">>;
 	pinnedPosts: CollectionEntry<"post">[];
-	seriesGroups: SeriesGroup[];
 }
 
-const { page, pinnedPosts, seriesGroups } = Astro.props;
+const { page, pinnedPosts } = Astro.props;
 
 const meta = {
-	description: "Read my collection of posts and the things that interest me",
+	description: "Browse all posts by publication date.",
 	title: "Posts",
 };
 
@@ -51,7 +35,7 @@ const groupedByYear = groupPostsByYear(page.data);
 ---
 
 <PageLayout meta={meta}>
-	<header class="mb-(--receipt-page-heading-gap) flex items-center gap-3">
+	<header class="flex items-center gap-3">
 		<h1 class="receipt-title">Posts</h1>
 		<a class="text-printer-accent hover:text-printer-ink" href="/rss.xml" target="_blank">
 			<span class="sr-only">RSS feed</span>
@@ -59,7 +43,6 @@ const groupedByYear = groupPostsByYear(page.data);
 		</a>
 	</header>
 	<BrowseNav current="posts" />
-	<TopicLinks />
 	{page.currentPage === 1 && pinnedPosts.length > 0 && (
 		<section class="mb-(--receipt-section-gap)" aria-label="Pinned posts">
 			<PrintedSection label="Pinned" />
@@ -72,7 +55,6 @@ const groupedByYear = groupPostsByYear(page.data);
 			</ul>
 		</section>
 	)}
-	{page.currentPage === 1 && <section aria-label="Series"><PrintedSection label="Series" /><SeriesArchive groups={seriesGroups} /></section>}
 	{groupedByYear.map(([yearKey, posts]) => (
 		<section class="mb-(--receipt-section-gap)" aria-labelledby={`year-${yearKey}`}>
 			<h2 id={`year-${yearKey}`} class="mb-(--receipt-heading-gap) print-label-wide text-printer-ink-light">

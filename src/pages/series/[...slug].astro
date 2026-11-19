@@ -1,6 +1,7 @@
 ---
 import { getEntry, render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
+import BrowseNav from "@/components/BrowseNav.astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Note from "@/components/note/Note.astro";
 import TagLinks from "@/components/TagLinks.astro";
@@ -41,6 +42,7 @@ const Content = definition ? (await render(definition)).Content : null;
 		<h1 class="font-serif text-3xl leading-tight font-bold tracking-tight text-printer-ink sm:text-4xl">
 			{group.title}
 		</h1>
+		<BrowseNav current="series" />
 		{group.description && (
 			<p class="mt-4 max-w-prose font-serif text-sm leading-relaxed text-printer-ink/80">
 				{group.description}

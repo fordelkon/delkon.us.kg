@@ -18,6 +18,7 @@ A tag is a reusable category that aggregates posts and notes for retrieval, not 
 - Choose reusable topic or language tags that help retrieval; do not add tags to meet a quota. Use singular names and lowercase ASCII slugs with hyphens; see the [post template](../content/TEMPLATE-post.md) for examples.
 - Reuse an existing tag whenever the overlap is real; a synonym tag (`js` beside `javascript`, `并发` beside `concurrency`) splits one topic's retrieval across two pages.
 - Put a post's unique angle in its title or description instead of the tags: a one-off tag that no future post would reuse cannot aggregate anything.
+- Tag definitions may declare `group` (`topic`, `concept`, or `language`). Within each group, the tag directory lists featured tags by ascending `featured` rank, then the remaining tags by usage count. Use English technical terms for tag titles (for example, `binary-tree` and `dynamic-programming`) and canonical language names (`C++`, `Python`, `Rust`, `Go`). Display names come from tag titles, while URLs and Pagefind filters retain the slugs. Unknown tags appear under concepts using their slug.
 - Retire a tag by removing it from every post and note and deleting its definition file; a tag left with no published entry generates no page in production.
 
 ## Series
@@ -27,7 +28,6 @@ A tag is a reusable category that aggregates posts and notes for retrieval, not 
 - Definitions may declare `tags` for links to topic pages and an `order` of qualified member keys (`post/concurrency/example` or `note/concurrency/example`). Listed members come first; unlisted members use oldest-first publication order. Duplicate or unknown order keys fail the build, including references to absent local files. Do not reference unpublished local-only files in committed definitions.
 - Topic collections may declare `sections` with a `tag` and `title`. Entries belong to the first matching section, appear once, and unmatched entries remain in a final section. Previous/next navigation stays within the current section. Tutorials without sections navigate the complete sequence.
 - Follow the [series setup instructions](../content/TEMPLATE-post.md#series). Membership and ordering are owned by [series selection](../src/data/series.ts). Preserve existing file locations and URLs when changing the reading order.
-- Tag definitions may declare `group` (`topic`, `concept`, or `language`) and an optional numeric `featured` rank for the compact archive topic navigation. Use English technical terms for tag titles (for example, `binary-tree` and `dynamic-programming`) and canonical language names (`C++`, `Python`, `Rust`, `Go`). Display names come from tag titles; URLs and Pagefind filter values retain their slugs. Unknown tags still appear under concepts using their slug.
 
 ## Titles, Descriptions, and Slugs
 

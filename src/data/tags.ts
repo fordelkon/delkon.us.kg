@@ -20,5 +20,10 @@ export async function getTagDirectory() {
 			group: metadata.get(id)?.group ?? "concept",
 			featured: metadata.get(id)?.featured,
 		}))
-		.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+		.sort(
+			(a, b) =>
+				(a.featured ?? Number.MAX_VALUE) - (b.featured ?? Number.MAX_VALUE) ||
+				b.count - a.count ||
+				a.id.localeCompare(b.id),
+		);
 }

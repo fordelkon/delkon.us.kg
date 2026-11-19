@@ -7,17 +7,27 @@ import PageLayout from "@/layouts/Base.astro";
 const tags = await getTagDirectory();
 ---
 <PageLayout meta={{ title: "Tags", description: "按主题、方法与语言查找文章和笔记。" }}>
- <h1 class="receipt-title">Tags</h1>
- <BrowseNav current="tags" />
- <p class="mb-8 font-serif text-sm text-printer-ink-light">按主题查阅文章与笔记，或从系列目录开始系统阅读。</p>
- {tagGroups.map((group) => {
- const members = tags.filter((tag) => tag.group === group.id);
- return members.length > 0 && <section class="mb-8" aria-labelledby={`group-${group.id}`}>
- <h2 id={`group-${group.id}`} class="mb-3 print-label-wide text-printer-ink-light">{group.title}</h2>
- <ul role="list">{members.map((tag) => <li class="flex items-baseline justify-between gap-4 border-b border-dotted border-printer-ink/10 py-3">
- <a class="printer-link font-serif text-base" href={tagUrl(tag.id)}>{tag.title}</a>
- <span class="shrink-0 print-label text-printer-ink-light">{tag.count} 篇</span>
- </li>)}</ul>
- </section>;
- })}
+	<h1 class="receipt-title">Tags</h1>
+	<BrowseNav current="tags" />
+	{tagGroups.map((group) => {
+		const members = tags.filter((tag) => tag.group === group.id);
+
+		return members.length > 0 && (
+			<section class="mb-(--receipt-section-gap)" aria-labelledby={`group-${group.id}`}>
+				<h2 id={`group-${group.id}`} class="mb-3 print-label-wide text-printer-ink-light">
+					{group.title}
+				</h2>
+				<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
+					{members.map((tag) => (
+						<li>
+							<a class="receipt-row receipt-row-link min-h-11 flex-row items-center justify-between gap-4" href={tagUrl(tag.id)}>
+								<span class="font-serif text-base"><span aria-hidden="true">#</span>{tag.title}</span>
+								<span class="shrink-0 print-label text-printer-ink-light">{tag.count} 篇</span>
+							</a>
+						</li>
+					))}
+				</ul>
+			</section>
+		);
+	})}
 </PageLayout>

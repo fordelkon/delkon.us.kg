@@ -1,12 +1,13 @@
 ---
 import { render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
+import BrowseNav from "@/components/BrowseNav.astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Note from "@/components/note/Note.astro";
 import Pagination from "@/components/Paginator.astro";
-import SeriesArchive from "@/components/SeriesArchive.astro";
 import { getPublishedEntries } from "@/data/entries";
 import { getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
+import { seriesUrl } from "@/data/routes";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
@@ -33,10 +34,11 @@ const tagMeta = await getTagMeta(tag);
 
 const relatedSeries = (await getSeriesGroups()).filter((group) => group.tags.includes(tag));
 const TagContent = tagMeta ? (await render(tagMeta)).Content : null;
+const tagTitle = tagMeta?.data.title ?? tag;
 
 const meta = {
 	description: tagMeta?.data.description ?? `View all entries with the tag - ${tag}`,
-	title: tagMeta?.data.title ?? `Posts about ${tag}`,
+	title: tagTitle,
 };
 ---
 
@@ -51,13 +53,14 @@ const meta = {
 			<li aria-hidden="true" class="text-printer-ink-light">/</li>
 			<li aria-current="page" class="text-printer-ink">
 				<span aria-hidden="true">#</span>
-				{tagMeta?.data.title ?? tag}
+				{tagTitle}
 			</li>
 		</ul>
 	</nav>
-	<h1 class="receipt-title capitalize">
-		{tagMeta?.data.title ?? `Posts about ${tag}`}
+	<h1 class="receipt-title">
+		<span aria-hidden="true">#</span>{tagTitle}
 	</h1>
+	<BrowseNav current="tags" />
 	{
 		tagMeta?.data.description && (
 			<p class="mt-2 max-w-prose font-serif text-sm leading-relaxed text-printer-ink/80">
@@ -66,15 +69,31 @@ const meta = {
 		)
 	}
 	{TagContent && <div class="prose prose-sm mt-4 max-w-none font-serif"><TagContent /></div>}
-	{relatedSeries.length > 0 && <section aria-label="Related series" class="mt-6"><p class="mb-3 font-serif text-sm text-printer-ink-light">按系列阅读</p><SeriesArchive groups={relatedSeries} /></section>}
 	<ul class="mt-8 divide-y divide-dotted divide-printer-ink/10" role="list">
 		{
 			page.data.map((p) => (
-				<li class="py-2">
+				<li>
 					{p.collection === "post" ? <PostPreview showSeries as="h2" post={p} /> : <Note as="h2" note={p} isPreview compact />}
 				</li>
 			))
 		}
 	</ul>
 	<Pagination page={page} labels={{ next: "下一页 →", prev: "← 上一页" }} />
+	{relatedSeries.length > 0 && (
+		<section class="mt-8 border-t border-dashed border-printer-ink/15 pt-4">
+			<h2 class="print-label-wide text-printer-ink-light">按系列顺序阅读</h2>
+			<ul class="mt-2 flex flex-wrap gap-x-5" role="list">
+				{relatedSeries.map((group) => (
+					<li>
+						<a
+							class="printer-link inline-flex min-h-8 items-center text-sm hover:text-printer-accent focus-visible:text-printer-accent"
+							href={seriesUrl(group.id)}
+						>
+							{group.title}
+						</a>
+					</li>
+				))}
+			</ul>
+		</section>
+	)}
 </PageLayout>

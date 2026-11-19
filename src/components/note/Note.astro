@@ -18,25 +18,28 @@ type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 
 const { as: Tag = "div", note, isPreview = false, compact = false, series } = Astro.props;
 const { Content } = await render(note);
+const isLinkedRow = isPreview && compact;
+const Container = isLinkedRow ? "a" : "article";
 ---
 
-<article
+<Container
 	class:list={[
-		isPreview &&
-			"receipt-row group hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
+		isPreview && "receipt-row",
+		isLinkedRow && "receipt-row-link",
+		isPreview && !compact && "group hover:bg-printer-ink/3 focus-within:bg-printer-ink/3",
 	]}
 	data-pagefind-body={isPreview ? undefined : true}
+	href={isLinkedRow ? entryUrl(note) : undefined}
 >
 	<Tag
 		class:list={[
-			"font-serif leading-snug tracking-tight text-printer-ink transition-colors",
-			isPreview
-				? "text-base group-hover:text-printer-accent sm:text-lg"
-				: "text-2xl font-bold sm:text-3xl",
+			"font-serif leading-snug tracking-tight",
+			isPreview ? "text-base sm:text-lg" : "text-2xl font-bold text-printer-ink sm:text-3xl",
+			isPreview && !compact && "text-printer-ink transition-colors group-hover:text-printer-accent",
 		]}
 	>
 		{
-			isPreview ? (
+			isPreview && !compact ? (
 				<a
 					class="rounded-xs outline-hidden focus-visible:ring-2 focus-visible:ring-printer-accent/40"
 					href={entryUrl(note)}
@@ -73,4 +76,4 @@ const { Content } = await render(note);
 			<Content />
 		</div>
 	)}
-</article>
+</Container>

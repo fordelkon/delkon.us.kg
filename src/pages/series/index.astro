@@ -1,31 +1,14 @@
 ---
 import BrowseNav from "@/components/BrowseNav.astro";
-import { seriesUrl } from "@/data/routes";
+import SeriesArchive from "@/components/SeriesArchive.astro";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
 
 const groups = await getSeriesGroups();
 ---
 
-<PageLayout meta={{ title: "Series", description: "按主题阅读文章与笔记。" }}>
+<PageLayout meta={{ title: "Series", description: "顺序阅读教程，或按专题查阅合集。" }}>
 	<h1 class="receipt-title">Series</h1>
- <BrowseNav />
- <p class="font-serif text-sm text-printer-ink-light">顺序阅读教程，或按专题查阅合集。</p>
-	<ul class="mt-8 divide-y divide-dotted divide-printer-ink/15" role="list">
-		{groups.map((group) => (
-			<li class="py-6">
-				<div class="flex flex-wrap items-baseline justify-between gap-3">
-					<h2 class="font-serif text-lg">
-						<a class="printer-link text-printer-accent" href={seriesUrl(group.id)}>
-							{group.title}
-						</a>
-					</h2>
-					<span class="print-label text-printer-ink-light">{group.entries.length} 篇 →</span>
-				</div>
-				{group.description && (
-					<p class="mt-2 font-serif text-sm text-printer-ink-light">{group.description}</p>
-				)}
-			</li>
-		))}
-	</ul>
+	<BrowseNav current="series" />
+	<SeriesArchive groups={groups} />
 </PageLayout>

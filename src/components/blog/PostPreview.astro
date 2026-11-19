@@ -15,30 +15,28 @@ const { as: Tag = "div", post, withDesc = false, showSeries = false } = Astro.pr
 const series = showSeries ? await getSeriesContext(post) : undefined;
 ---
 
-<div
-	class="receipt-row group hover:bg-printer-ink/3 focus-within:bg-printer-ink/3"
->
-	<FormattedDate
-		class="print-label text-printer-ink-light tabular-nums"
-		date={post.data.publishDate}
-	/>
-	<Tag
-		class="font-serif text-base leading-snug tracking-tight text-printer-ink transition-colors group-hover:text-printer-accent sm:text-lg"
-	>
-		{post.data.draft && <span class="text-red-500">(Draft) </span>}
-		<a
-			class="rounded-xs outline-hidden focus-visible:ring-2 focus-visible:ring-printer-accent/40"
-			href={entryUrl(post)}
-		>
+<div>
+	<a class="receipt-row receipt-row-link" href={entryUrl(post)}>
+		<FormattedDate
+			class="print-label text-printer-ink-light tabular-nums"
+			date={post.data.publishDate}
+		/>
+		<Tag class="font-serif text-base leading-snug tracking-tight sm:text-lg">
+			{post.data.draft && <span class="text-red-500">(Draft) </span>}
 			{post.data.title}
-		</a>
-	</Tag>
-	{series && <a class="w-fit print-label text-printer-ink-light hover:text-printer-accent" href={seriesUrl(series.group.id)}>{series.group.title}</a>}
-	{
-		withDesc && (
+		</Tag>
+		{withDesc && (
 			<q class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">
 				{post.data.description}
 			</q>
-		)
-	}
+		)}
+	</a>
+	{series && (
+		<a
+			class="printer-link -mt-1 mb-1 inline-flex min-h-8 items-center rounded-xs px-1 text-xs text-printer-ink-light hover:text-printer-accent focus-visible:text-printer-accent focus-visible:outline-2 focus-visible:outline-printer-accent"
+			href={seriesUrl(series.group.id)}
+		>
+			系列 · {series.group.title}
+		</a>
+	)}
 </div>

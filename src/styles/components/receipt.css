@@ -8,6 +8,10 @@
 	padding-block: var(--receipt-row-padding);
 }
 
+.receipt-row-link {
+	@apply text-printer-ink hover:bg-printer-ink/3 hover:text-printer-accent focus-visible:bg-printer-ink/3 focus-visible:text-printer-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-accent motion-reduce:transition-none;
+}
+
 /* Index and utility-page titles share a scale; article mastheads remain larger. */
 .receipt-title {
 	@apply font-serif text-2xl font-bold tracking-tight sm:text-3xl;
