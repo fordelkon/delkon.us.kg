@@ -1,4 +1,4 @@
-import { EXECUTION_LEGEND, interaction, node } from "./diagram-layout.ts";
+import { EXECUTION_LEGEND, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
 const polling: Scene = {
@@ -105,85 +105,48 @@ const polling: Scene = {
 };
 
 const cancellation: Scene = {
-	title: "取消与值的归属",
+	title: "取消时 value 归谁",
 	section: "取消安全中断后能否重来",
 	description:
-		"本图假设：Tokio 有界 mpsc 容量已满，select 的取消分支先完成。先比较拥有 value 的 send Future，再从新值开始比较外层持有 value 的 reserve 方案。",
-	caption:
-		"取消安全需要检查谁拥有值、哪些进度已发生；停止等待、保留消息和撤销外部副作用是不同保证。",
+		"Tokio 有界 mpsc 队列已满，取消分支先完成。两条分支是独立方案：直接 send(value)，或先 reserve 并把 value 留在外层；箭头表示所有权与取消结果，不是连续执行两种发送。",
+	caption: "取消安全先看值由谁拥有；消息尚未入队，不代表调用者还能拿回它。",
+	diagram: `flowchart TB
+ value["外层持有 value"]
+ value -->|send(value)：移入| send["发送 Future 拥有 value<br/>等待队列空位"]
+ send -->|取消分支胜出，丢弃 Future| lost["value 随 Future 析构<br/>外层不能重试这份值"]
+ value -.->|reserve：仅等待许可| reserve["value 仍由外层持有"]
+ reserve -->|取消容量等待| retained["保留 value<br/>可返回或按策略重试"]
+ class value actor
+ class send,reserve state
+ class lost risk
+ class retained result`,
 	frames: [
-		interaction(
-			"send(value) 已把 value 移入发送 Future。队列满时等待空位，外层不再拥有这份值；如果这时取消分支胜出，消息尚未入队。",
-			["外层调用者", "value 已移出"],
-			["send Future", "持有 value 并等待"],
-			["队列已满", "未完成发送"],
-			["此时取消", "会丢弃拥有 value 的 Future"],
-		),
-		interaction(
-			"send 分支被丢弃时，尚未发送的 value 随 Future 析构。消息没发出去不等于调用者拿回了 value；不能在下一轮直接重试那份已丢弃的值。",
-			["外层调用者", "没有取回 value"],
-			["send Future", "被丢弃"],
-			["队列未收到该消息", "value 的生命周期已经结束"],
-			["取消的范围", "停止这个等待，不回滚外部效果"],
-		),
-		interaction(
-			"独立方案：把新 value 保留在外层，select 分支只等待 reserve()。取消时失去容量等待队列中的位置，但 value 仍在外层，可按策略重试或返回。",
-			["外层调用者", "仍持有 value"],
-			["reserve Future", "取消，失去排队位置"],
-			["队列未收到该消息", "外层保留待发送值"],
-			["保留数据 ≠ 保留公平位置", "重试需重新排队"],
-		),
-		interaction(
-			"另一条成功分支取得 Permit 后，调用 permit.send(value) 才把 value 交给通道。部分网络读写等操作可能已经产生进度，不能照搬这个未入队模型。",
-			["外层调用者", "取得许可后移交值"],
-			["通道", "接纳 value"],
-			["责任完成移交", "有许可 → send(value)"],
-			["按具体 API 核对", "部分写入不能视为从未发生"],
-		),
-	],
-};
-
-const lifecycle: Scene = {
-	title: "超时与任务收束",
-	section: "结构化并发与任务收束",
-	description:
-		"本图假设：Tokio spawn 创建独立异步任务，运行时保持存活。三个独立路径对比丢弃句柄、请求 abort、等待结束；不把异步取消视为同步代码的强制中断。",
-	caption:
-		"请求期限限制等待，任务所有者还要管理终止和清理；释放本地资源不等于撤回远端已经执行的工作。",
-	frames: [
-		interaction(
-			"把拥有所有权的 JoinHandle 交给 timeout，超时后可能丢弃句柄。它只放弃等待，spawn 出的任务仍可在运行时存活期间继续，父任务返回也不自动收束子任务。",
-			["父任务", "超时，丢弃句柄"],
-			["spawn 子任务", "仍可能继续运行"],
-			["等待已结束", "后台任务不一定结束"],
-			["生命周期缺口", "结果与清理还没有得到确认"],
-		),
-		interaction(
-			"改为保留 JoinHandle，用可变引用等待。超时后请求 abort，运行时安排取消；任务可能已先完成，abort 返回也不表示其析构已经完成。",
-			["父任务", "保留句柄并 abort"],
-			["spawn 子任务", "取消请求待生效"],
-			["请求停止 ≠ 已停止", "同步 poll 不会被强行切断"],
-			["下一步", "等待 JoinHandle 确认结束"],
-		),
-		interaction(
-			"等待 JoinHandle 后，才观察到正常结果、失败或取消，确认此 Tokio 任务已结束并完成析构。需要异步善后时应显式协调退出；本地取消不撤回已经发往外部系统的请求。",
-			["父任务", "await 取得退出结果"],
-			["子任务", "结束与析构已确认"],
-			["结果 / 错误 / 取消", "都由任务所有者收束"],
-			["外部副作用", "另行确认、补偿或幂等处理"],
-		),
-		interaction(
-			"批量任务也要覆盖成功、失败和取消路径。协调者先关闭新工作入口，再通知停止并持续收集退出结果；若持锁跨 await 又依赖同锁，仍可能形成等待环。",
-			["协调者", "停止接纳与派生"],
-			["任务组", "响应停止并逐个结束"],
-			["结构化生命周期", "离开作用域前收束所管理的任务"],
-			["阻塞工作另行管理", "已启动的阻塞工作不能靠 abort 强停"],
-		),
+		{
+			boxes: [],
+			activeNodes: ["value", "send"],
+			activeEdges: [0],
+			durationMs: 5000,
+			note: "send(value) 已把值移入发送 Future。队列满时虽然还没入队，外层也不再拥有 value。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["send", "lost"],
+			activeEdges: [1],
+			durationMs: 5000,
+			note: "取消分支胜出，未完成的 send Future 被丢弃，其中的 value 随之析构。取消等待没有把所有权退回调用者。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["value", "reserve", "retained"],
+			activeEdges: [2, 3],
+			durationMs: 5000,
+			note: "独立方案先 reserve，值留在外层。取消只放弃容量等待的位置；取得许可后才发送。它仍不能撤回已经发生的外部副作用。",
+		},
 	],
 };
 
 export const scene: Scene = {
 	...polling,
 	legend: EXECUTION_LEGEND,
-	chapters: [polling, cancellation, lifecycle],
+	chapters: [polling, cancellation],
 };

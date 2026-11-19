@@ -1,4 +1,4 @@
-import { connectionEndpoint, controlEdge, logicalFlow, node, withRoles } from "./diagram-layout.ts";
+import { connectionEndpoint, node, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Scene } from "./types.ts";
 
 const steps = [
@@ -84,116 +84,52 @@ const handshake: Scene = {
 	})),
 };
 
-const protocols: [string, string, string, string][] = [
-	["HTTP/1.1", "有序响应", "TLS", "TCP"],
-	["HTTP/2", "多路复用流", "TLS", "TCP"],
-	["HTTP/3", "独立请求流", "QUIC + TLS 1.3", "UDP"],
-];
-
 const architecture: Scene = {
-	title: "HTTP 协议栈",
-	diagramHeight: 280,
+	title: "一个缺口会阻塞哪些流",
+	section: "http-语义与连接复用的演进",
 	description:
-		"本图假设：比较 HTTPS 的三种部署。HTTP/1.1 也可不使用 TLS；HTTP/3 将 TLS 1.3 握手集成在 QUIC 中，不使用 TLS 记录层。",
-	caption:
-		"HTTP 语义延续，承载方式演进；独立流减少跨流按序等待，但共享拥塞控制与应用依赖仍然存在。",
+		"两个独立对照：HTTP/2 的多个流共用一条 TCP 有序字节流；HTTP/3 使用 QUIC 的独立流偏移。箭头表示交付依赖，不是版本升级顺序，也不表示 QUIC 完全消除了所有等待。",
+	caption: "关键区别是传输层按序交付的范围：整条 TCP 字节流，或一条 QUIC 流。",
+	diagram: `flowchart TB
+ subgraph h2[HTTP/2 over TCP]
+  a2["流 A 的帧"] --> tcp["TCP 字节流存在缺口"]
+  b2["流 B 的帧"] --> tcp
+  tcp --> blocked["缺口后的字节不能按序交付<br/>A、B 都可能受阻"]
+ end
+ subgraph h3[HTTP/3 over QUIC]
+  a3["流 A 缺字节"] --> waiting["A 等待自身缺口补齐"]
+  b3["流 B 字节完整"] --> ready["B 可独立交付"]
+ end
+ class tcp,waiting state
+ class blocked risk
+ class ready result`,
 	frames: [
-		"HTTP/1.1 在本图中经 TLS/TCP 传输。持久连接可以复用；即使使用流水线，响应仍须按请求顺序返回。并行连接是另一种并发方式。",
-		"HTTP/2 将不同 Stream 的帧交错发送到同一 TCP 字节流。某个 TCP 段丢失时，后续字节要等待补齐，因此多个 HTTP Stream 都可能受阻。",
-		"HTTP/3 把请求映射到 QUIC 流。Stream A 缺少字节时，已齐备的 Stream B 数据可交付；A 内部仍须有序，连接级拥塞控制与 QPACK 依赖仍可能带来等待。",
-	].map((note, active) => ({
-		note,
-		boxes: protocols.flatMap((p, i) => [
-			node(`http-${i}`, 8 + i * 118, 8, 108, [p[0], p[1]], "client", active === i),
-			node(
-				`security-${i}`,
-				8 + i * 118,
-				88,
-				108,
-				[i === 2 ? "QUIC" : p[2], i === 2 ? "含 TLS 1.3" : "TLS 记录层"],
-				"secure",
-				active === i,
-			),
-			node(`transport-${i}`, 8 + i * 118, 168, 108, [p[3], "IP"], "processing", active === i),
-			node(
-				`delivery-${i}`,
-				8 + i * 118,
-				232,
-				108,
-				[
-					i === 0 ? "顺序响应" : i === 1 ? "TCP 丢失" : "A 等待补齐",
-					i === 0 ? "A → B" : i === 1 ? "A、B 都等待" : "B 可交付",
-				],
-				"delivery",
-				active === i,
-			),
-		]),
-		edges: protocols.flatMap((_, i) => [
-			edge(`upper-${i}`, `M${62 + i * 118} 56 V82`, active === i),
-			edge(`lower-${i}`, `M${62 + i * 118} 136 V162`, active === i),
-			edge(`result-${i}`, `M${62 + i * 118} 216 V226`, active === i),
-		]),
-	})),
-};
-
-const visibility: Scene = {
-	title: "谁能看到什么",
-	diagramHeight: 312,
-	description:
-		"本图假设：普通 HTTPS；分别比较链路旁观者、仅转发 CONNECT 的代理与获授权的 TLS 终止代理。三帧是不同观察位置，不是一次请求的连续解密过程。",
-	caption:
-		"读取 HTTP 内容需要成为 TLS 端点或取得相应密钥；CONNECT 与 ECH 都不会隐藏所有网络元数据。",
-	frames: (
-		[
-			[
-				"链路旁观者",
-				"IP、端口、包长与时序",
-				"无 ECH 时通常可见 SNI",
-				"无法读取 HTTP 正文",
-				"旁观者能看到网络元数据。未使用 ECH 的 ClientHello 通常还暴露 SNI；成功使用 ECH 后真实 inner 被保护，但目的 IP 仍然可见。",
-			],
-			[
-				"CONNECT 字节隧道",
-				"CONNECT 的目标与端口",
-				"转发的是端到端 TLS",
-				"无法自动读取 HTTP 正文",
-				"只转发 CONNECT 的代理知道客户端给它的目标和隧道流量。客户端到代理的 TCP 与代理到目标的 TCP 分开，但 TLS 可跨这两段 TCP 端到端运行。",
-			],
-			[
-				"TLS 终止代理",
-				"信任／证书配置满足要求",
-				"客户端 ⇄ 代理 ⇄ 源站",
-				"代理可读取 HTTP 正文",
-				"客户端接受代理提供的服务身份，代理终止这段 TLS，再单独验证源站并建立另一段 TLS。CertificateVerify 证明私钥持有；Finished 校验握手记录与密钥，不能替代证书链与 SAN 名字检查。",
-			],
-		] as const
-	).map(([kind, known, boundary, content, note]) => ({
-		note: note,
-		boxes: [
-			node("client", 8, 8, 156, ["客户端", "请求 example.com"], "client"),
-			node("origin", 196, 8, 156, ["源站", "HTTPS 服务"], "delivery"),
-			node("observer", 8, 88, 344, [kind, known], "processing", true),
-			node("boundary", 8, 168, 344, ["TLS 边界", boundary], "secure", true),
-			node("content", 8, 248, 344, ["HTTP 可见性", content], "secure", true),
-		],
-		edges: [edge("connection", "M164 32 H190"), controlEdge("observe", "M180 32 V82", true)],
-	})),
+		{
+			boxes: [],
+			activeNodes: ["a2", "b2", "tcp", "blocked"],
+			activeEdges: [0, 1, 2],
+			durationMs: 5000,
+			note: "HTTP/2 虽把多个流的帧交错发送，却仍依赖同一条 TCP 有序字节流。缺失的 TCP 字节会挡住后续字节，其他 HTTP 流也可能一起等待。",
+		},
+		{
+			boxes: [],
+			activeNodes: ["a3", "waiting", "b3", "ready"],
+			activeEdges: [3, 4],
+			durationMs: 5000,
+			note: "QUIC 分别维护流偏移：A 缺字节不要求已完整的 B 等待。但连接级拥塞控制、资源限制和 QPACK 等依赖仍可影响交付，不能理解为互不影响。",
+		},
+	],
 };
 
 export const scene: Scene = {
 	...architecture,
 	chapters: [
-		logicalFlow(architecture),
+		architecture,
 		withRoles(handshake, { client: "client", server: "delivery", message: "secure" }),
-		visibility,
 	],
 };
 
-const sections = [
-	"http-语义与连接复用的演进",
-	"tls-13-握手密钥协商证书校验与-sni--alpn",
-	"端到端可见性边界谁能看到什么",
-];
+const sections = ["http-语义与连接复用的演进", "tls-13-握手密钥协商证书校验与-sni--alpn"];
 
 for (const [index, chapter] of (scene.chapters ?? []).entries()) {
 	chapter.section = sections[index];

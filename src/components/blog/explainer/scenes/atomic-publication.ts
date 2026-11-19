@@ -5,7 +5,7 @@ const atomicity: Scene = {
 	title: "原子访问与完整操作",
 	section: "单次操作与组合操作",
 	description:
-		"本图假设：count 是原子整数，初值 0，无溢出。先展示拆开的 load/store 丢失更新，再重置为 0 对照 fetch_add；全部访问都是原子操作，不模拟未定义行为。",
+		"本图假设：count 是原子整数，初值 0，无溢出。先展示拆开的 load/store 丢失更新，再重置为 0 对照 fetch_add；全部访问都是原子操作，不模拟未定义行为。箭头从共享值指向线程表示读取，反向表示写入；两条高亮不代表同时写入。",
 	caption: "单次访问原子，不代表一组操作原子；两次加一要用读改写操作或完整的临界区。",
 	frames: [
 		interaction(
@@ -38,7 +38,14 @@ const atomicity: Scene = {
 			["最终 count", "2 · 两次更新均保留"],
 			["读改写边界", "Relaxed 已足够维护这个计数"],
 		),
-	],
+	].map((frame, index) => ({
+		...frame,
+		durationMs: 5000,
+		edges:
+			index < 2
+				? [edge("read", index === 0 ? "M86 100 V62" : "M274 100 V62", true)]
+				: [edge("write-a", "M86 56 V94", true), edge("write-b", "M274 56 V94", true)],
+	})),
 };
 
 const publication: Scene = {
@@ -127,72 +134,8 @@ const publication: Scene = {
 	})),
 };
 
-const claim: Scene = {
-	title: "CAS 认领与初始化",
-	section: "cas-与-acqrel成功和失败是不同路径",
-	description:
-		"本图假设：CLAIMED 初始为 false，只能认领一次。CAS 本身只选择执行者，初始化发生在成功之后；尚未引入发布完成状态。",
-	caption:
-		"认领成功与初始化完成是两个状态；OnceLock 等接口封装等待与发布，手工协议也必须补齐这些边界。",
-	frames: [
-		interaction(
-			"A 的 CAS(false→true) 成功，B 对同一标志的 CAS 失败并观察到 true。这个 Relaxed CAS 足以选出认领者，但失败只表示没有取得资格。",
-			["A：CAS 成功", "取得认领资格"],
-			["B：CAS 失败", "只读取到 true"],
-			["CLAIMED = true", "初始化尚未完成"],
-			["成功是读改写", "失败只读取，不执行替换"],
-		),
-		interaction(
-			"A 在认领后才构造数据。认领 CAS 即使用 Release，也不能发布它之后才发生的初始化写入；B 不能把 CLAIMED 当作 READY。",
-			["A", "正在初始化"],
-			["B", "不能读取未完成值"],
-			["状态仍是初始化中", "需要另外的完成发布"],
-			["AcqRel", "读的一半 Acquire，写的一半 Release"],
-		),
-		interaction(
-			"如果需求是一次初始化并拿到完成后的值，可使用 OnceLock::get_or_init。另一个调用者在需要时等待初始化成功，返回的是已发布的值；初始化 panic 与重入仍需按接口处理。",
-			["初始化者", "完成构造"],
-			["其他调用者", "等待后获得完成值"],
-			["OnceLock", "把认领、完成与发布封装在一起"],
-			["接口边界", "不能把初始化中当成已就绪"],
-		),
-	],
-};
-
-const ordering: Scene = {
-	title: "跨对象的共同顺序",
-	section: "seqcst-与顺序一致性",
-	description:
-		"本图假设：独立初始化的原子 x=y=0，A 先写 x 再读 y，B 先写 y 再读 x。对照的是内存模型允许结果，不是 CPU 耗时或日志顺序。",
-	caption:
-		"Release/Acquire 是有条件的局部同步，SeqCst 为这组原子访问提供共同全序；两者都不把任意业务操作自动变成事务。",
-	frames: [
-		interaction(
-			"X 和 Y 是两个独立的原子对象，各有自己的修改顺序：两条链都从初始写 0 到该对象上的写 1。仅凭逐对象顺序，无法给两个线程跨对象的四个访问排出共同顺序。",
-			["X 的修改顺序", "初始 0 → A 写 1"],
-			["Y 的修改顺序", "初始 0 → B 写 1"],
-			["两个独立的原子对象", "每条链只排序对应对象的修改"],
-			["跨对象的读取", "还需看具体内存序"],
-		),
-		interaction(
-			"若写为 Release、读为 Acquire，两边仍可能都读到初始 0：没有读取到对方的发布，就没有所需的同步边。此例也说明不能用普通交错时间线穷尽弱内存模型。",
-			["A", "x=1 → 读 y"],
-			["B", "y=1 → 读 x"],
-			["Release / Acquire", "允许观察结果 (0, 0)"],
-			["同步条件缺失", "两次读取都没接收对方发布"],
-		),
-		interaction(
-			"全部改为 SeqCst 后，(0,0) 与一个满足两条线程内先后关系的共同全序矛盾，因此被排除。其他符合规则的结果仍可发生；这里只约束这组原子访问。",
-			["A", "先写 x，再读 y"],
-			["B", "先写 y，再读 x"],
-			["全部 SeqCst", "共同全序排除 (0, 0)"],
-			["仍不是组合操作原子性", "load + store 仍可被插入"],
-		),
-	],
-};
-
 export const scene: Scene = {
 	...atomicity,
 	legend: EXECUTION_LEGEND,
-	chapters: [atomicity, publication, claim, ordering],
+	chapters: [atomicity, publication],
 };
