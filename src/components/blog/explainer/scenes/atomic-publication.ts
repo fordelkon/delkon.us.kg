@@ -40,7 +40,6 @@ const atomicity: Scene = {
 		),
 	].map((frame, index) => ({
 		...frame,
-		durationMs: 5000,
 		edges:
 			index < 2
 				? [edge("read", index === 0 ? "M86 100 V62" : "M274 100 V62", true)]

@@ -13,15 +13,8 @@ const { scene, sceneId, study = false } = Astro.props;
 const { caption, description } = scene;
 const svgs = scene.diagram ? renderScene(sceneId, scene) : undefined;
 const staticSvgs = study && scene.diagram ? renderScene(`${sceneId}-static`, scene) : undefined;
-let elapsedMs = 0;
-
-const frames = scene.frames.map((frame) => {
-	const durationMs = frame.durationMs ?? (study ? 5000 : 2200);
-	const rendered = { ...frame, delayMs: elapsedMs, durationMs };
-	elapsedMs += durationMs;
-
-	return rendered;
-});
+const stepDurationMs = 3000;
+const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * stepDurationMs }));
 ---
 
 <figure
@@ -35,7 +28,7 @@ const frames = scene.frames.map((frame) => {
 >
 	{study && <p class="explainer-assumptions">{description}</p>}
 	{svgs && <p class="explainer-assumptions">图较宽时可横向滚动，键盘聚焦后可用方向键。</p>}
-	<step-explainer class="step-explainer-canvas">
+	<step-explainer class="step-explainer-canvas" style={`--step-frame-duration: ${stepDurationMs}ms`}>
 		<button
 			class="step-explainer-toggle"
 			type="button"
@@ -73,7 +66,7 @@ const frames = scene.frames.map((frame) => {
 			{frames.map((frame, index) => (
 				<div
 					class="step-explainer-frame"
-					style={`animation-delay: ${frame.delayMs}ms; --step-frame-duration: ${frame.durationMs}ms`}
+					style={`animation-delay: ${frame.delayMs}ms`}
 					aria-hidden="true"
 				>
 					{svgs ? (
@@ -103,7 +96,7 @@ const frames = scene.frames.map((frame) => {
 				{frames.map((frame, index) => (
 					<div
 						class="step-explainer-frame"
-						style={`animation-delay: ${frame.delayMs}ms; --step-frame-duration: ${frame.durationMs}ms`}
+						style={`animation-delay: ${frame.delayMs}ms`}
 					>
 						<p class="explainer-note">
 							{study && (

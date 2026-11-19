@@ -22,7 +22,6 @@ export function chain(
 ): Frame {
 	return {
 		note,
-		durationMs: 5000,
 		boxes: rows.map((lines, index) =>
 			node(
 				`row-${index}`,

@@ -45,9 +45,6 @@ function validateScene(scene: Scene, id: string) {
 
 		if (new Set(ids).size !== ids.length || !frame.note) throw new Error(`Invalid frame: ${id}`);
 
-		if (!Number.isFinite(frame.durationMs ?? 2200) || (frame.durationMs ?? 2200) <= 0)
-			throw new Error(`Invalid duration: ${id}`);
-
 		for (const node of frame.boxes) {
 			if (
 				node.x < 0 ||

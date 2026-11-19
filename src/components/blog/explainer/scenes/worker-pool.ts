@@ -50,7 +50,6 @@ function buildFrames(): Frame[] {
 	const slots = (values: number[]) => `[ ${values[0] ?? "·"} | ${values[1] ?? "·"} ]`;
 
 	const snapshot = (event?: Event): Frame => ({
-		durationMs: 5000,
 		note:
 			pending !== undefined
 				? `任务 ${pending} 仍在发送者手中。${jobs.length === 2 ? "任务队列已满，发送等待。" : "worker 已领取任务，腾出空位，发送现在可以恢复。"}`

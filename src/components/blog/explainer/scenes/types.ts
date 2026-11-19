@@ -28,7 +28,6 @@ export interface Frame {
 	activeEdges?: number[];
 	boxes: Box[];
 	edges?: Edge[];
-	durationMs?: number;
 }
 
 export interface Scene {

@@ -47,7 +47,6 @@ const mutex: Scene = {
 		] as const
 	).map(([owner, count, a, b, note]) => ({
 		note,
-		durationMs: 5000,
 		boxes: [
 			node("a", 8, 8, 156, ["线程 A", a], "actor", owner === "A"),
 			node("b", 196, 8, 156, ["线程 B", b], "actor", owner === "B"),
@@ -108,28 +107,24 @@ const condition: Scene = {
 			boxes: [],
 			activeNodes: ["check", "wait"],
 			activeEdges: [1],
-			durationMs: 5000,
 			note: "队列为空就不能取任务。wait 原子地释放锁并等待，让生产者有机会持同一把锁修改队列。",
 		},
 		{
 			boxes: [],
 			activeNodes: ["wait", "producer"],
 			activeEdges: [2],
-			durationMs: 5000,
 			note: "生产者取得锁、入队，再解锁并通知。通知不是把锁直接交给等待者，也不是为它预留一份任务。",
 		},
 		{
 			boxes: [],
 			activeNodes: ["retry", "check"],
 			activeEdges: [3, 4],
-			durationMs: 5000,
 			note: "醒来后重新获锁并检查：可能是虚假唤醒，也可能已有其他消费者取走任务；谓词仍为假就沿等待分支再走一轮。",
 		},
 		{
 			boxes: [],
 			activeNodes: ["check", "take"],
 			activeEdges: [0],
-			durationMs: 5000,
 			note: "只有持锁确认队列非空，才在该临界区取出任务。生产结束与排空退出需要额外的 done 谓词，正文再展开。",
 		},
 	],
