@@ -7,7 +7,7 @@ tags: ["networking", "rust"]
 
 上一篇[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)解释了数据包怎样抵达目标主机。网络层的 IP 提供尽力而为的交付：包可能丢失、乱序或重复；IP 地址也没有说明该由主机内哪个应用接收。
 
-本篇先比较**传输控制协议**（Transmission Control Protocol，TCP）字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，再解释 TCP 怎样管理连接与在途数据，最后回到应用实际使用的 Socket 接口。两条线需要同时理解：网络协议提供什么服务，某次 API 调用又完成了哪一步。代码选用 Rust 标准库（无需第三方依赖即可直接展示 `TcpStream` 半关闭、短读与短写边界），连接状态观察以 macOS 与 Linux 为例。
+本篇先比较**传输控制协议**（Transmission Control Protocol，TCP）字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。代码选用 Rust 标准库（无需第三方依赖即可直接展示 `TcpStream` 半关闭、短读与短写边界），连接状态观察以 macOS 与 Linux 为例。
 
 ## 端口复用与两条传输抽象：字节流 vs 数据报
 
@@ -25,7 +25,7 @@ UDP 的“保留边界”不表示每次都能取得完整消息。Rust `UdpSock
 
 TCP 中，发送方分别写入 `"hello "` 和 `"world"`，接收方可能一次读到两者，也可能多次才读完。TCP 提供可靠、有序的字节流，但连接仍可能报错或中断；**可靠传输不等于每次业务请求都一定完成**。需要区分请求与响应时，应用必须定义**帧定界**（framing），例如固定长度、长度前缀或分隔符。[第六篇的 HTTP 消息](/posts/networking/http-evolution-tls-handshake-https/)会展示应用协议怎样使用这一契约。
 
-## TCP 的可靠传输与连接生命周期
+## TCP 的连接生命周期
 
 TCP 在两端维护序号、窗口、计时器与连接状态等记录，通常称为**传输控制块**（Transmission Control Block，TCB）[^1]。
 
@@ -85,7 +85,7 @@ stateDiagram-v2
 
 FIN 按序关闭一个方向，RST 则复位连接。即使收到 RST，此前请求也可能已被业务处理，重试仍需考虑幂等性。意外断网可能没有 FIN 或 RST，需等超时或后续通信发现。
 
-### 序号、确认与重传
+## TCP 的序号、确认与重传
 
 TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
@@ -94,7 +94,7 @@ TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 - **重传超时**（Retransmission Timeout，RTO）：发送端根据**往返时延**（Round-Trip Time，RTT）测量估算超时阈值，超时后重传并按规范退避；并不是每个报文段都有一个彼此独立的简单闹钟[^rto]。
 - **快速重传**（Fast Retransmit）：RFC 5681 描述的经典算法在收到三个重复 ACK 后重传疑似丢失的段。重复 ACK 是推断线索，并非丢包的绝对证明，现代实现也可能采用其他丢失检测机制[^3]。
 
-### 流量控制 vs 拥塞控制
+## TCP 的流量控制与拥塞控制
 
 **流量控制**（flow control）保护接收端。接收端通告**接收窗口**（receive window，`rwnd`），告知发送端当前可接受的序号范围；应用迟迟不读，窗口可能收缩至零。窗口和接收缓冲区相关，但不宜把每次通告值机械地等同于某个工具显示的空闲缓冲字节数[^1]。
 

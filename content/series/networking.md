@@ -19,10 +19,10 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 
 | 阶段 | 篇章 | 核心问题 |
 | ---- | ---- | -------- |
-| 分层模型与本地交付 | [① 协议分层与请求路径](/posts/networking/layered-architecture-packet-journey/)、[② IP 寻址与局域网通信](/posts/networking/ip-addressing-subnet-lan-delivery/) | 一次请求经过哪些协议层与设备？主机怎样获得地址、判断同网段并在局域网内完成二层交付？ |
-| 跨网转发与可靠传输 | [③ 路由、NAT 与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)、[④ TCP、UDP 与 Socket](/posts/networking/transport-tcp-udp-socket-quic/) | 数据包如何跨越子网与公私网边界？内核怎样通过 Socket 向应用提供可靠字节流或数据报服务？ |
-| 名字解析与安全通信 | [⑤ DNS 解析、缓存与加密查询](/posts/networking/dns-resolution-caching-encrypted-queries/)、[⑥ HTTP 演进、TLS 与加密边界](/posts/networking/http-evolution-tls-handshake-https/) | 应用如何把域名解析为地址与连接参数？HTTP 怎样组织消息，TLS 又如何建立认证与加密边界？ |
-| 流量接管与分层排障 | [⑦ 代理协议、透明接管与分流实现](/posts/networking/proxies-tunnels-transparent-interception/)、[⑧ 网络诊断、性能指标与分层排障](/posts/networking/network-diagnostics-performance-troubleshooting/) | 显式代理与 TUN 透明接管如何改写解析与连接关系？面对连不上、打不开或传输慢，如何按层定位根因？ |
+| 协议体系与本地网络交付 | [① 协议分层与请求路径](/posts/networking/layered-architecture-packet-journey/)、[② IP 寻址与局域网通信](/posts/networking/ip-addressing-subnet-lan-delivery/) | 一次请求经过哪些协议层与设备？主机怎样获得地址、判断同网段并在局域网内完成二层交付？ |
+| 网络层转发与端到端传输 | [③ 路由、NAT 与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)、[④ TCP、UDP 与 Socket](/posts/networking/transport-tcp-udp-socket-quic/) | 数据包如何跨越子网与公私网边界？内核怎样通过 Socket 向应用提供可靠字节流或数据报服务？ |
+| 域名解析与 Web 通信安全 | [⑤ DNS 解析、缓存与加密查询](/posts/networking/dns-resolution-caching-encrypted-queries/)、[⑥ HTTP 演进、TLS 与加密边界](/posts/networking/http-evolution-tls-handshake-https/) | 应用如何把域名解析为地址与连接参数？HTTP 怎样组织消息，TLS 又如何建立认证与加密边界？ |
+| 代理流量处理与网络诊断 | [⑦ 代理协议、透明接管与分流实现](/posts/networking/proxies-tunnels-transparent-interception/)、[⑧ 网络诊断、性能指标与分层排障](/posts/networking/network-diagnostics-performance-troubleshooting/) | 显式代理与 TUN 透明接管如何改写解析与连接关系？面对连不上、打不开或传输慢，如何按层定位根因？ |
 
 八篇按机制依赖连续展开，阅读顺序不等于一次请求的实际发生顺序：先在第四篇建立 TCP、UDP 与 QUIC 的传输语义，第五篇才能对比传统 DNS 与 DoT、DoH、DoQ 的传输差异；第六篇讨论 TLS 握手、SNI 与 ECH 时，再回接第五篇的 HTTPS/SVCB 记录与第四篇的队头阻塞。第七篇以 Mihomo 为例组装前面的路由、TUN、DNS 与代理协议，第八篇则用可复现的受控实验收束全系列的诊断方法。
 

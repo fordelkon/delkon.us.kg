@@ -149,14 +149,6 @@ TUN 本身只确定“程序可以读写 IP 包”。它既不规定加密协议
 
 这几行可以组合，但不能混为同一机制。代理重建连接时，不一定把原始 IP 包逐个套上外层头；因此，第八篇讨论 MTU 时不能仅凭“启用了 TUN”推导固定的隧道头开销。应用自身的 HTTPS、代理链路加密与 VPN 封装也分别由相应协议决定。
 
-以“终结应用侧 TCP 的 TUN 代理”为例，双向过程是：
-
-1. 应用创建普通 Socket，内核生成的包按路由进入虚拟接口。
-2. 代理从接口读取 IP 包，用配置的协议栈处理应用侧连接，取得目的信息与载荷。
-3. 代理依据规则创建出站 Socket，直连目标或连接远端代理节点。
-4. 出站收到数据后，代理交给应用侧连接处理逻辑，生成相应 IP 包写回虚拟接口。
-5. 内核把写入的包作为接口入站数据处理，经传输层交付给原应用。
-
 ```mermaid title="同一个 TUN 入口之后的两种处理" description="比较两种实现，不是同一条连接依次经过两种模式。左支限定终结应用侧 TCP 的用户态代理，创建独立出站连接；右支限定把完整内层 IP 包加密封装到 UDP/IP 的一种三层 VPN，远端解封装后继续转发原包。两种程序的外层出站都需要可用的绕行路由；标记、策略或接口绑定的效果必须按平台验证。图只展示出站，回程分别重建应用侧包或解封装内层回包。"
 flowchart TB
  tun["内核按路由发送 IP 包<br/>用户态从 TUN 读取"] --> proxy["TUN 代理<br/>协议栈终结应用侧 TCP"]
@@ -167,34 +159,7 @@ flowchart TB
  outer --> peer["远端解密并去掉外层头<br/>继续转发内层 IP 包"]
 ```
 
-下面沿同一个被接管的 TCP 流补齐回程。应用侧的 SYN、ACK 与 FIN 由本地连接状态处理，远端连接使用独立的序号空间；这两段 TCP 仍可搬运同一条端到端 TLS 字节流。
-
-```mermaid title="TUN 代理的本地终止与独立出站" description="限定终结应用侧 TCP、直连远端且不解密应用 TLS 的代理实现。控制性选路使用虚线，实线表示包或流数据的交付。代理自己的出站需要适用的绕行策略，包进入同一个 TUN 则是失败分支。"
-sequenceDiagram
- participant App as 应用
- participant Kernel as 内核
- participant Tun as TUN
- participant Proxy as 代理核心
- participant Peer as 远端
- App->>Kernel: 写入应用侧 TCP
- Kernel-->>Kernel: 选路命中 TUN
- Kernel->>Tun: 送出应用侧 IP 包
- Tun->>Proxy: 用户态读取
- Note over Proxy: 处理应用侧连接
- Proxy-->>Kernel: 查询自身出站路径
- Note over Kernel,Proxy: 需要选到可用物理出口；再次命中 TUN 则可能回环
- Proxy->>Peer: 独立 TCP，经物理出口发送
- Peer->>Proxy: 出站连接返回字节
- Proxy->>Tun: 生成应用侧回包并写回
- Tun->>Kernel: 作为虚拟接口入站
- Kernel->>App: 交付原连接的响应字节
-```
-
-此处只说明接口与连接之间的关系。Mihomo 的接管入口、运行模式、DNS 模式和出站协议如何配合，由[《计算机网络（七）：代理协议、透明接管与分流实现》](/posts/networking/proxies-tunnels-transparent-interception/)进一步展开。
-
-:::important[代理的出站流量需要可用的绕行路径]
-如果出站 Socket 产生的流量又被送回同一个 TUN 入口，可能形成回环。常见处理包括为远端端点配置更具体路由、使用 socket 标记配合策略路由，或按平台能力绑定接口、排除进程。它们的效果取决于平台和整套规则；“绑定物理网卡”不能脱离实际查表结果被当作统一的绕过保证。
-:::
+读到 TUN 时，先核对哪条路由把包交给接口，以及程序写回后内核如何处理。代理如何终结应用侧 TCP、建立独立出站并处理回程，见[第七篇的 TUN 连接与返回路径](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)。
 
 ## 观察路由与转发路径：实验与边界
 

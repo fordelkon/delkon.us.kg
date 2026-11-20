@@ -179,7 +179,7 @@ export const scene: Scene = { ...explicit, chapters: [explicit, tun, fake] };
 const sections = [
 	"显式代理http-connect-与-socks5-的工作边界",
 	"透明接管tun-提供-ip-包域名需要额外关联",
-	"找回域名fake-ip-与协议嗅探",
+	"接管后怎样补足目标域名",
 ];
 
 for (const [index, chapter] of (scene.chapters ?? []).entries()) {

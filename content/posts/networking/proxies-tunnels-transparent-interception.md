@@ -5,9 +5,28 @@ publishDate: "23 Nov 2026"
 tags: ["networking", "go"]
 ---
 
-前六篇沿客户端访问的主线介绍了寻址、路由、传输、DNS 与 Web 通信。代理把这些机制组合到新的连接路径中：应用先连接谁，域名由谁解析，哪一段由谁加密，都可能发生变化。
+前六篇沿客户端访问的主线介绍了寻址、路由、传输、DNS 与 Web 通信。代理把这些机制组合到新的连接路径中：应用先连接谁、域名由谁解析、代理选哪个出站，以及目标 TLS 在哪里终止，都取决于这条连接的实际路径。
 
-本篇以 Mihomo 为配置参照，先解释 HTTP CONNECT 与 SOCKS5，再把第三篇的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)用于透明接管。代码选用 Go 标准库（`net/http` 与 `net.TCPConn` 原生提供请求解析、`CloseWrite` 半关闭与 `SetDeadline`，无需第三方依赖即可完整演示字节流转发），最后用 `curl` 对照显式代理的实际行为。Mihomo 的可用选项与默认值可能随版本变化，阅读配置时应对照所用内核版本的文档。
+本篇以 Mihomo 为配置参照，先画清代理的连接，再分别追踪 HTTP CONNECT、SOCKS5 和第三篇介绍的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)怎样把流量交给代理。最后用 Go 标准库演示最小 CONNECT 代理，再用 `curl` 对照解析位置与连接路径。
+
+## 代理的入站、出站与 TLS 终止
+
+以普通 TCP CONNECT 为例，客户端先与代理建立 TCP 连接，代理再与目标建立一条独立的 TCP 连接。两段连接各自维护序号、确认与关闭状态。代理在两段之间搬运字节时，目标 TLS 仍可由客户端与目标服务建立，证书也由客户端校验。连接端点与加密终止点的对照见[第六篇的可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)[^1]。
+
+对显式入站，应用把目标写进代理请求。对 TUN 入站，路由把 IP 包交给代理程序，目标域名可能要靠 DNS 映射或可见的协议字段补足。下面按入站方式、目标信息与出站决策的顺序展开。
+
+### 入站、运行模式、DNS 与出站
+
+以下字段对照 Mihomo v1.19.34 的配置类型与官方 Wiki（2026 年 11 月 18 日查阅）说明。排查本机时，用 `mihomo -v` 确认实际内核版本，再查看客户端最终生成的配置；GUI 对订阅的覆盖也会改变生效结果[^version]。
+
+| 配置维度 | 决定什么 | 常见选项 |
+| --- | --- | --- |
+| 入站接入方式 | 流量怎样进入代理内核 | HTTP/SOCKS 监听端口、TUN |
+| 运行模式 | 已进入内核的流量怎样选择出站 | `rule`、`global`、`direct` |
+| DNS 模式与关联 | 返回真实还是映射地址，怎样保留域名关系 | `fake-ip`、`redir-host` 及过滤配置 |
+| 出站协议 | 怎样连接远端、是否加密、保护哪段链路 | HTTP、SOCKS、Shadowsocks、Trojan 等 |
+
+`global` 选择的是已进入内核的流量的出站策略，不会替未采用显式代理、也未被 TUN 接管的应用捕获流量。TUN 也可以把流量交给 DIRECT；接管方式与是否使用远端节点是不同选择[^mode][^4]。
 
 ## 显式代理：HTTP CONNECT 与 SOCKS5 的工作边界
 
@@ -22,7 +41,185 @@ tags: ["networking", "go"]
 
 这两种协议的地址与协商格式分别见 RFC 9110 和 RFC 1928[^1][^2]。客户端把域名交给本地代理，也不等于域名一定在远端节点解析：本地代理的规则判断或出站协议仍可能要求先取得真实 IP。
 
-第六篇的[可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)区分了连接端点与 TLS 终止端。普通 CONNECT 成功后，代理转发客户端与目标之间的字节；若代理不终止目标 TLS，客户端仍验证目标证书并与目标 TLS 终止端建立加密会话。代理知道 CONNECT 的目标，不能因此解密其中的 HTTPS 内容。
+CONNECT 请求已经向代理提供目标主机与端口。隧道建立后，客户端可以在其中发起目标 TLS 握手，邻接的两段 TCP 负责把握手和后续密文送到对端。
+
+## 透明接管：TUN 提供 IP 包，域名需要额外关联
+
+先把应用配合方式与内核接管方式放在同一张表中，避免把透明接管等同于 TUN：
+
+| 入口 | 交给处理程序的对象 | 主要前提与限制 |
+| --- | --- | --- |
+| 系统代理 / 显式代理 | 应用发出的 HTTP 或 SOCKS 请求 | 应用须采用代理配置；不是系统路由强制接管 |
+| TUN | 三层 IP 包 | 需要接口、路由和流处理；本身不提供域名 |
+| TAP | 二层以太网帧 | 需要二层处理，可用于桥接；不是 Mihomo 的 TUN 选项 |
+| REDIRECT | 经本地重定向后交给监听 Socket 的流量 | 常见 Linux TCP 方案会改写目的；恢复原目的信息需要平台接口 |
+| TPROXY | 保留原目的地址的透明 Socket 流量 | Linux 需相应内核支持、策略路由及透明 Socket 配合，可用于 TCP/UDP |
+
+REDIRECT 与 TPROXY 的上述区别依据 Linux 内核文档，不能复制为 macOS 或 Windows 的部署命令。它们也不能单独解决 DNS 域名关联、代理出站或 TLS 解密问题[^transparent]。
+
+对不采用显式代理的应用，可以通过路由把匹配流量引向 TUN。Mihomo 的 `tun.enable` 与 `auto-route` 负责相应接口及自动路由配置，但实际范围仍受更具体路由、排除地址、策略路由与 IPv4/IPv6 配置影响。第三篇的[最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由表与最长前缀匹配)解释了为什么“已启用 TUN”不能直接证明所有连接都进入代理[^4]。
+
+显式代理可以直接取得 CONNECT/SOCKS 请求中的域名；TUN 则向程序交付 IP 包。**IP 头本来就没有域名字段**，缺少额外关联时，代理只能从头部取得目标 IP，而不能反推出唯一域名。域名可能仍在 DNS、HTTP Host 或 TLS SNI 等应用层数据里，不能说它“离开进程时被 IP 层剥掉”。
+
+代理内核需要把这些包转换为可处理的传输流或 UDP 会话。Mihomo 文档中，`system` 使用系统协议栈，`gvisor` 使用用户态协议栈，`mixed` 的 TCP 使用 system、UDP 使用 gvisor；文档还列有自研 `mips` 栈。因此 `system` 本身不是“混合栈”，可用选项和默认值应结合安装版本确认[^4]。
+
+TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP 包封装成 VPN 隧道。代理可以终结传输流再建立出站连接；MTU 开销也应按实际出站封装计算，参见[第八篇的 MTU 排查](/posts/networking/network-diagnostics-performance-troubleshooting/)。
+
+## 接管后怎样补足目标域名
+
+### Fake-IP：在 DNS 阶段建立映射
+
+在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回域名关联的虚拟映射地址，而不必在这个响应阶段取得真实目标 IP。这一思路在原型上可追溯至 RFC 3089 提出的应用层虚拟地址映射机制[^fakeip-rfc]，Mihomo 官方配置示例则借用 RFC 2544 预留的基准测试网段 `198.18.0.0/15`（具体默认配置如 `198.18.0.1/16`）作为地址池；它属于特殊用途地址空间，并不是网站真实的公网地址[^3][^fakeip-rfc]。
+
+应用连接映射地址，流量再进入代理时，内核可通过映射关系恢复域名。随后是否需要本地真实解析，仍取决于规则和出站：若二者都不要求本地目标 IP，可以把域名交给远端；若目标 IP 规则、直连或特定出站要求真实 IP，则仍需在相应阶段查询。
+
+```mermaid title="Fake-IP 从 DNS 映射到域名出站的闭环" description="限定 DNS 请求进入内部解析器、应用连接对应 Fake-IP 且路由将其送入 TUN 的情形。DNS 模块与 TUN 处理侧属于同一个 Mihomo，共享映射状态；此处选择无需本地目标 IP 的域名规则及支持域名的远端出站。远端再解析目标并连接源站，DIRECT、IP 规则和不支持域名的出站另有路径。箭头表示逻辑交付顺序，不按耗时绘制，也不表示本地 TCP 包原样穿过全部连接。"
+sequenceDiagram
+ participant App as 应用
+ participant DNS as Mihomo DNS
+ participant Kernel as 内核
+ participant Inbound as TUN 与代理核心
+ participant Node as 远端代理节点
+ participant Target as 目标服务
+ App-->>DNS: 查询 example.com 的 A 记录
+ Note over DNS,Inbound: 写入共享映射<br/>198.18.0.8 ↔ example.com
+ DNS->>App: 返回 198.18.0.8
+ App->>Kernel: 连接 198.18.0.8:443
+ Kernel->>Inbound: 路由选中 TUN，交付 IP 包
+ Note over Inbound: 查映射恢复 example.com，DOMAIN-SUFFIX 规则选择远端出站
+ Inbound->>Node: 通过支持域名的出站协议<br/>提交 example.com:443
+ Note over Node: 按节点环境解析真实目标地址
+ Node->>Target: 建立独立的目标连接
+ Target->>Node: 返回响应
+ Node->>Inbound: 通过对应代理会话返回
+ Inbound->>Kernel: 按应用侧状态写回 IP 包
+ Kernel->>App: 交付响应字节
+```
+
+需要分开看三类解析对象[^3]：
+
+| 解析对象 | 相关配置职责 |
+| --- | --- |
+| 网站目标域名 | `nameserver-policy`、`nameserver`、`fallback`，DIRECT 可采用 `direct-nameserver` |
+| 代理节点自身域名 | `proxy-server-nameserver`，未设置时按文档回退到其他解析配置 |
+| DNS 服务自身域名 | `default-nameserver` 负责引导，避免解析器地址也依赖尚未建立的解析路径 |
+
+`direct-nameserver` 未设置时也会有文档规定的回退路径，不能写成“DIRECT 只能使用这一项”。第五篇的[DNS 引导与解析路径](/posts/networking/dns-resolution-caching-encrypted-queries/)说明了这些依赖为什么可能绕成环。
+
+`dns-hijack` 把匹配的 DNS 连接送进内部模块，不是所有名称解析的总开关：普通 `any:53` 写法默认匹配 UDP，TCP 需要相应配置；浏览器 DoH 等加密 DNS 也不能仅凭端口 53 的规则接管。macOS、Windows 的局域网 DNS 劫持还存在文档列出的限制[^4]。因此，`dig @某服务器` 只指定了请求的表面目的地址，不能单凭参数证明实际处理者。
+
+### 映射没有命中时怎么办
+
+成功路径要求 DNS 应答、Fake-IP 映射与 TUN 接管保持一致。下面从“代理已收到连接”开始分支；如果应用流量根本没有进入代理，应先检查路由，而不是在规则引擎里寻找原因。
+
+```mermaid title="目标域名关联的成功与失败分支" description="限定连接已进入代理。Fake-IP 必须有可用映射，不能作为普通公网地址连接；真实 IP 可以按配置尝试嗅探，但 ECH 或自定义协议可能不提供真实域名。图中的停止表示没有足够目标信息，具体报错和恢复由实现决定，不保证自动补回映射。"
+flowchart TB
+ inbound["入站已收到目标地址"] --> fake{"目标属于配置的 Fake-IP 池？"}
+ fake -->|是| cache{"映射仍可用？"}
+ cache -->|命中| domain["恢复域名<br/>进入规则与出站处理"]
+ cache -->|未命中| repair["记录映射缺失<br/>检查 DNS 与持久化状态，重新解析"]
+ fake -->|否，真实 IP| sniff{"允许且成功取得域名元数据？"}
+ sniff -->|是| domain
+ sniff -->|否| iponly["仅按已有 IP 与其他元数据处理<br/>或依配置拒绝"]
+```
+
+| 条件 | 缺少什么 | 下一步证据 |
+| --- | --- | --- |
+| 代理重启或映射被清理，应用仍缓存 Fake-IP | 虚拟地址到原域名的可用映射 | 对照 DNS 回答时间、映射持久化和连接日志；不能向公网连接该地址 |
+| 应用自行使用 DoH，绕过内部 DNS | DNS 阶段的 Fake-IP 关联 | 检查应用 DNS 设置与实际收到的真实 IP；端口 53 劫持不覆盖 DoH |
+| 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 按 IP、进程等规则验证，不能凭 IP 断言唯一域名 |
+| TLS / QUIC 使用 ECH | 真实的内部 SNI | 外层公开名不能冒充真实目标名；其他已知映射仍可独立使用 |
+| IPv4 被接管，IPv6 地址或路由未配套 | 另一地址族的接管路径 | 分别核对 A/AAAA、IPv6 路由和代理日志，不能拿 IPv4 成功证明双栈完整 |
+
+持久化映射可减少某些重启场景的失配，却不保证应用缓存与代理状态永远同步。`fake-ip-filter` 命中的域名返回真实地址时，本来就应走真实 IP 的分析路径，而不是当作映射故障[^3]。
+
+### 域名嗅探：读取可见的协议元数据
+
+没有可用 Fake-IP 关联时，**域名嗅探**（domain sniffing）可以从部分协议数据取得目标名[^5]：
+
+- 明文 HTTP 请求中的 `Host`。
+- TLS ClientHello 中未被 ECH 隐藏的 SNI。
+- QUIC Initial 中可解析的 ClientHello 信息。
+
+这里的“首包”是处理阶段的简称，不保证一个网络包就包含完整字段：TCP 分段、TLS 记录及 QUIC 数据可能需要重组。嗅探也不是对 HTTPS 内容的解密；在[第六篇的 ECH 场景](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)下，外层信息不能可靠揭示内部目标域名。
+
+:::caution[映射地址与嗅探都有适用条件]
+会把解析结果上报给其他设备的应用，可能无法使用仅在本机代理内有意义的 Fake-IP。此时可按 `fake-ip-filter` 及其过滤模式让相关域名返回真实 IP，而不是把整个 DNS 模式都改掉。嗅探则依赖可见且可识别的元数据；硬编码 IP、自定义协议或 ECH 都可能使它无法取得真实域名[^3][^5]。
+:::
+
+### 按地址族验证接管与出站
+
+应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。AAAA 只说明这是 IPv6 形式的结果。内核使用实际目标地址选路，IPv4 的覆盖路由对 IPv6 不生效，双栈竞速还可能改变最终使用的地址族。虚拟地址必须由生成映射的核心恢复目标名，真实地址则依赖独立的域名元数据或 IP 规则[^3][^4]。
+
+```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
+flowchart TB
+ dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
+ route -->|TUN| tun["内核交付 IPv6 包"]
+ route -->|物理接口| native["按系统路由出站"]
+ route -.->|无有效路由| stop["本次尝试失败"]
+ tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
+ core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
+```
+
+排查意外绕行时，在同一次请求记录实际目标地址、出接口、核心是否记录了该入站，以及代理自己的出站连接。可以用同一域名的 `curl -4` 和 `curl -6` 对照并记录 `remote_ip`，再用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实。若显式代理在另一端解析目标，curl 的远端地址和地址族选项可能只反映它到代理的连接，两段要分别观察[^curl]。
+
+## 规则引擎、出站与返回路径
+
+在 `rule` 模式下，可以按下面的顺序理解一次处理：
+
+```mermaid title="规则匹配、出站选择与响应返回" description="规则按顺序检查，还需核对出站适用性；真实目标 IP 按规则和出站需要获取。REJECT 在此终止，策略组选择需落实到最终出站，非拒绝结果按实际选择建立直连或代理会话。响应通过对应的出站会话和入站转发状态返回原应用，不是把远端 TCP 包原样塞回原连接。"
+flowchart TB
+ app["应用"] --> explicit["显式入站<br/>HTTP / SOCKS5"]
+ app --> transparent["透明入站<br/>TUN / REDIRECT / TPROXY"]
+ explicit --> metadata["整理目标、域名映射<br/>嗅探与进程等元数据"]
+ transparent --> metadata
+ metadata --> rules["按规则顺序匹配<br/>检查出站适用性"]
+ rules --> choice["确定最终出站<br/>DIRECT / REJECT / 节点"]
+ choice -->|REJECT| reject["拒绝请求<br/>终止处理"]
+ choice -->|DIRECT| direct["核心建立到目标的出站"]
+ choice -->|代理节点| relay["核心连接节点<br/>节点另建到目标的连接"]
+ direct --> response
+ relay --> response["对应出站会话<br/>收到响应"]
+ response --> inbound["入站转发状态"]
+ inbound --> original["原应用"]
+```
+
+代理规则列表通常按书写顺序取首个匹配，和路由表的最长前缀匹配不同。还要检查所选出站是否适用：官方文档指出，UDP 请求命中不支持 UDP 的节点时会继续匹配后续规则，不能把“首条匹配立即停止”写成无条件保证[^6]。
+
+`no-resolve` 也有明确的作用范围：当连接元数据含域名而尚无真实目标 IP 时，目标 IP 类规则可能为匹配而触发解析。给这条规则加 `no-resolve`，只阻止它主动触发这次解析；若之前已经取得 IP，这条规则仍可匹配。后续规则和出站阶段仍可能查询 DNS[^6]。
+
+选中名为 `Proxy` 的策略组不代表一定建立 TLS/QUIC 隧道：`Proxy` 常常只是用户命名，实际行为取决于所选节点。HTTP 出站就有可选的 TLS 配置；其他出站使用的加密机制也各不相同[^http-outbound]。应用的 HTTPS 保护应用与目标 TLS 终止端之间的内容，代理传输的加密则保护其覆盖的代理链路，需要分别判断。
+
+### TUN 代理如何建立出站并交付回包
+
+以一个被 TUN 接管并由本地代理终结的 TCP 流为例。应用侧的 SYN、ACK 与 FIN 由本地连接状态处理，远端连接使用独立的序号空间；这两段 TCP 仍可搬运同一条端到端 TLS 字节流。
+
+```mermaid title="TUN 代理的本地终止与独立出站" description="限定终结应用侧 TCP、直连远端且不解密应用 TLS 的代理实现。控制性选路使用虚线，实线表示包或流数据的交付。代理自己的出站需要适用的绕行策略，包进入同一个 TUN 则是失败分支。"
+sequenceDiagram
+ participant App as 应用
+ participant Kernel as 内核
+ participant Tun as TUN
+ participant Proxy as 代理核心
+ participant Peer as 远端
+ App->>Kernel: 写入应用侧 TCP
+ Kernel-->>Kernel: 选路命中 TUN
+ Kernel->>Tun: 送出应用侧 IP 包
+ Tun->>Proxy: 用户态读取
+ Note over Proxy: 处理应用侧连接
+ Proxy-->>Kernel: 查询自身出站路径
+ Note over Kernel,Proxy: 需要选到可用物理出口；再次命中 TUN 则可能回环
+ Proxy->>Peer: 独立 TCP，经物理出口发送
+ Peer->>Proxy: 出站连接返回字节
+ Proxy->>Tun: 生成应用侧回包并写回
+ Tun->>Kernel: 作为虚拟接口入站
+ Kernel->>App: 交付原连接的响应字节
+```
+
+:::important[代理的出站流量需要可用的绕行路径]
+如果出站 Socket 产生的流量又被送回同一个 TUN 入口，可能形成回环。常见处理包括为远端端点配置更具体路由、使用 socket 标记配合策略路由，或按平台能力绑定接口、排除进程。它们的效果取决于平台和整套规则；“绑定物理网卡”不能脱离实际查表结果被当作统一的绕过保证。
+:::
+
+## 实验：用 Go 实现最小 HTTP CONNECT 代理
 
 ### Go 示例：保留预读数据与两个方向的结束状态
 
@@ -199,171 +396,7 @@ client received: response after EOF
 
 这里选择等待反向复制，是为了展示第四篇的[半关闭契约](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)。HTTP CONNECT 规范本身另有隧道关闭要求，不能把这段教学代码当成所有 HTTP 代理的完整一致性实现[^1]。
 
-这个例子还展示了代理与**网络地址转换**（NAT）的区别：客户端 TCP 终结在代理，代理创建另一条 TCP；[NAT 的转发与映射](/posts/networking/routing-forwarding-nat-virtual-interfaces/)通常在原传输连接的报文路径中改写地址。目标看到的是出站连接一侧的网络身份。
-
-## 先分清四个配置维度
-
-阅读 Mihomo 配置时，先问每项配置决定哪一步：
-
-以下字段对照 Mihomo v1.19.34 的配置类型与官方 Wiki（2026 年 11 月 18 日查阅）说明。排查本机时，用 `mihomo -v` 确认实际内核版本，再查看客户端最终生成的配置；GUI 对订阅的覆盖也会改变生效结果[^version]。
-
-| 配置维度 | 决定什么 | 常见选项 |
-| --- | --- | --- |
-| 入站接入方式 | 流量怎样进入代理内核 | HTTP/SOCKS 监听端口、TUN |
-| 运行模式 | 已进入内核的流量怎样选择出站 | `rule`、`global`、`direct` |
-| DNS 模式与关联 | 返回真实还是映射地址，怎样保留域名关系 | `fake-ip`、`redir-host` 及过滤配置 |
-| 出站协议 | 怎样连接远端、是否加密、保护哪段链路 | HTTP、SOCKS、Shadowsocks、Trojan 等 |
-
-`global` 选择的是已进入内核的流量的出站策略，不会替未采用显式代理、也未被 TUN 接管的应用捕获流量。TUN 也可以把流量交给 DIRECT；接管方式与是否使用远端节点是不同选择[^mode][^4]。
-
-## 透明接管：TUN 提供 IP 包，域名需要额外关联
-
-先把应用配合方式与内核接管方式放在同一张表中，避免把透明接管等同于 TUN：
-
-| 入口 | 交给处理程序的对象 | 主要前提与限制 |
-| --- | --- | --- |
-| 系统代理 / 显式代理 | 应用发出的 HTTP 或 SOCKS 请求 | 应用须采用代理配置；不是系统路由强制接管 |
-| TUN | 三层 IP 包 | 需要接口、路由和流处理；本身不提供域名 |
-| TAP | 二层以太网帧 | 需要二层处理，可用于桥接；不是 Mihomo 的 TUN 选项 |
-| REDIRECT | 经本地重定向后交给监听 Socket 的流量 | 常见 Linux TCP 方案会改写目的；恢复原目的信息需要平台接口 |
-| TPROXY | 保留原目的地址的透明 Socket 流量 | Linux 需相应内核支持、策略路由及透明 Socket 配合，可用于 TCP/UDP |
-
-REDIRECT 与 TPROXY 的上述区别依据 Linux 内核文档，不能复制为 macOS 或 Windows 的部署命令。它们也不能单独解决 DNS 域名关联、代理出站或 TLS 解密问题[^transparent]。
-
-对不采用显式代理的应用，可以通过路由把匹配流量引向 TUN。Mihomo 的 `tun.enable` 与 `auto-route` 负责相应接口及自动路由配置，但实际范围仍受更具体路由、排除地址、策略路由与 IPv4/IPv6 配置影响。第三篇的[最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/)解释了为什么“已启用 TUN”不能直接证明所有连接都进入代理[^4]。
-
-显式代理可以直接取得 CONNECT/SOCKS 请求中的域名；TUN 则向程序交付 IP 包。**IP 头本来就没有域名字段**，缺少额外关联时，代理只能从头部取得目标 IP，而不能反推出唯一域名。域名可能仍在 DNS、HTTP Host 或 TLS SNI 等应用层数据里，不能说它“离开进程时被 IP 层剥掉”。
-
-代理内核需要把这些包转换为可处理的传输流或 UDP 会话。Mihomo 文档中，`system` 使用系统协议栈，`gvisor` 使用用户态协议栈，`mixed` 的 TCP 使用 system、UDP 使用 gvisor；文档还列有自研 `mips` 栈。因此 `system` 本身不是“混合栈”，可用选项和默认值应结合安装版本确认[^4]。
-
-TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP 包封装成 VPN 隧道。代理可以终结传输流再建立出站连接；MTU 开销也应按实际出站封装计算，参见[第八篇的 MTU 排查](/posts/networking/network-diagnostics-performance-troubleshooting/)。
-
-## 找回域名：Fake-IP 与协议嗅探
-
-### 1. Fake-IP：在 DNS 阶段建立映射
-
-在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回域名关联的虚拟映射地址，而不必在这个响应阶段取得真实目标 IP。这一思路在原型上可追溯至 RFC 3089 提出的应用层虚拟地址映射机制[^fakeip-rfc]，Mihomo 官方配置示例则借用 RFC 2544 预留的基准测试网段 `198.18.0.0/15`（具体默认配置如 `198.18.0.1/16`）作为地址池；它属于特殊用途地址空间，并不是网站真实的公网地址[^3][^fakeip-rfc]。
-
-应用连接映射地址，流量再进入代理时，内核可通过映射关系恢复域名。随后是否需要本地真实解析，仍取决于规则和出站：若二者都不要求本地目标 IP，可以把域名交给远端；若目标 IP 规则、直连或特定出站要求真实 IP，则仍需在相应阶段查询。
-
-```mermaid title="Fake-IP 从 DNS 映射到域名出站的闭环" description="限定 DNS 请求进入内部解析器、应用连接对应 Fake-IP 且路由将其送入 TUN 的情形。DNS 模块与 TUN 处理侧属于同一个 Mihomo，共享映射状态；此处选择无需本地目标 IP 的域名规则及支持域名的远端出站。远端再解析目标并连接源站，DIRECT、IP 规则和不支持域名的出站另有路径。箭头表示逻辑交付顺序，不按耗时绘制，也不表示本地 TCP 包原样穿过全部连接。"
-sequenceDiagram
- participant App as 应用
- participant DNS as Mihomo DNS
- participant Kernel as 内核
- participant Inbound as TUN 与代理核心
- participant Node as 远端代理节点
- participant Target as 目标服务
- App-->>DNS: 查询 example.com 的 A 记录
- Note over DNS,Inbound: 写入共享映射<br/>198.18.0.8 ↔ example.com
- DNS->>App: 返回 198.18.0.8
- App->>Kernel: 连接 198.18.0.8:443
- Kernel->>Inbound: 路由选中 TUN，交付 IP 包
- Note over Inbound: 查映射恢复 example.com，DOMAIN-SUFFIX 规则选择远端出站
- Inbound->>Node: 通过支持域名的出站协议<br/>提交 example.com:443
- Note over Node: 按节点环境解析真实目标地址
- Node->>Target: 建立独立的目标连接
- Target->>Node: 返回响应
- Node->>Inbound: 通过对应代理会话返回
- Inbound->>Kernel: 按应用侧状态写回 IP 包
- Kernel->>App: 交付响应字节
-```
-
-需要分开看三类解析对象[^3]：
-
-| 解析对象 | 相关配置职责 |
-| --- | --- |
-| 网站目标域名 | `nameserver-policy`、`nameserver`、`fallback`，DIRECT 可采用 `direct-nameserver` |
-| 代理节点自身域名 | `proxy-server-nameserver`，未设置时按文档回退到其他解析配置 |
-| DNS 服务自身域名 | `default-nameserver` 负责引导，避免解析器地址也依赖尚未建立的解析路径 |
-
-`direct-nameserver` 未设置时也会有文档规定的回退路径，不能写成“DIRECT 只能使用这一项”。第五篇的[DNS 引导与解析路径](/posts/networking/dns-resolution-caching-encrypted-queries/)说明了这些依赖为什么可能绕成环。
-
-`dns-hijack` 把匹配的 DNS 连接送进内部模块，不是所有名称解析的总开关：普通 `any:53` 写法默认匹配 UDP，TCP 需要相应配置；浏览器 DoH 等加密 DNS 也不能仅凭端口 53 的规则接管。macOS、Windows 的局域网 DNS 劫持还存在文档列出的限制[^4]。因此，`dig @某服务器` 只指定了请求的表面目的地址，不能单凭参数证明实际处理者。
-
-### 映射没有命中时怎么办
-
-成功路径要求 DNS 应答、Fake-IP 映射与 TUN 接管保持一致。下面从“代理已收到连接”开始分支；如果应用流量根本没有进入代理，应先检查路由，而不是在规则引擎里寻找原因。
-
-```mermaid title="目标域名关联的成功与失败分支" description="限定连接已进入代理。Fake-IP 必须有可用映射，不能作为普通公网地址连接；真实 IP 可以按配置尝试嗅探，但 ECH 或自定义协议可能不提供真实域名。图中的停止表示没有足够目标信息，具体报错和恢复由实现决定，不保证自动补回映射。"
-flowchart TB
- inbound["入站已收到目标地址"] --> fake{"目标属于配置的 Fake-IP 池？"}
- fake -->|是| cache{"映射仍可用？"}
- cache -->|命中| domain["恢复域名<br/>进入规则与出站处理"]
- cache -->|未命中| repair["记录映射缺失<br/>检查 DNS 与持久化状态，重新解析"]
- fake -->|否，真实 IP| sniff{"允许且成功取得域名元数据？"}
- sniff -->|是| domain
- sniff -->|否| iponly["仅按已有 IP 与其他元数据处理<br/>或依配置拒绝"]
-```
-
-| 条件 | 缺少什么 | 下一步证据 |
-| --- | --- | --- |
-| 代理重启或映射被清理，应用仍缓存 Fake-IP | 虚拟地址到原域名的可用映射 | 对照 DNS 回答时间、映射持久化和连接日志；不能向公网连接该地址 |
-| 应用自行使用 DoH，绕过内部 DNS | DNS 阶段的 Fake-IP 关联 | 检查应用 DNS 设置与实际收到的真实 IP；端口 53 劫持不覆盖 DoH |
-| 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 按 IP、进程等规则验证，不能凭 IP 断言唯一域名 |
-| TLS / QUIC 使用 ECH | 真实的内部 SNI | 外层公开名不能冒充真实目标名；其他已知映射仍可独立使用 |
-| IPv4 被接管，IPv6 地址或路由未配套 | 另一地址族的接管路径 | 分别核对 A/AAAA、IPv6 路由和代理日志，不能拿 IPv4 成功证明双栈完整 |
-
-持久化映射可减少某些重启场景的失配，却不保证应用缓存与代理状态永远同步。`fake-ip-filter` 命中的域名返回真实地址时，本来就应走真实 IP 的分析路径，而不是当作映射故障[^3]。
-
-### 按地址族验证接管与出站
-
-应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。AAAA 只说明这是 IPv6 形式的结果。内核使用实际目标地址选路，IPv4 的覆盖路由对 IPv6 不生效，双栈竞速还可能改变最终使用的地址族。虚拟地址必须由生成映射的核心恢复目标名，真实地址则依赖独立的域名元数据或 IP 规则[^3][^4]。
-
-```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
-flowchart TB
- dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
- route -->|TUN| tun["内核交付 IPv6 包"]
- route -->|物理接口| native["按系统路由出站"]
- route -.->|无有效路由| stop["本次尝试失败"]
- tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
- core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
-```
-
-排查意外绕行时，在同一次请求记录实际目标地址、出接口、核心是否记录了该入站，以及代理自己的出站连接。可以用同一域名的 `curl -4` 和 `curl -6` 对照并记录 `remote_ip`，再用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实。若显式代理在另一端解析目标，curl 的远端地址和地址族选项可能只反映它到代理的连接，两段要分别观察[^curl]。
-
-### 2. 域名嗅探：读取可见的协议元数据
-
-没有可用 Fake-IP 关联时，**域名嗅探**（domain sniffing）可以从部分协议数据取得目标名[^5]：
-
-- 明文 HTTP 请求中的 `Host`。
-- TLS ClientHello 中未被 ECH 隐藏的 SNI。
-- QUIC Initial 中可解析的 ClientHello 信息。
-
-这里的“首包”是处理阶段的简称，不保证一个网络包就包含完整字段：TCP 分段、TLS 记录及 QUIC 数据可能需要重组。嗅探也不是对 HTTPS 内容的解密；在[第六篇的 ECH 场景](/posts/networking/http-evolution-tls-handshake-https/)下，外层信息不能可靠揭示内部目标域名。
-
-:::caution[映射地址与嗅探都有适用条件]
-会把解析结果上报给其他设备的应用，可能无法使用仅在本机代理内有意义的 Fake-IP。此时可按 `fake-ip-filter` 及其过滤模式让相关域名返回真实 IP，而不是把整个 DNS 模式都改掉。嗅探则依赖可见且可识别的元数据；硬编码 IP、自定义协议或 ECH 都可能使它无法取得真实域名[^3][^5]。
-:::
-
-## 规则引擎、出站与返回路径
-
-在 `rule` 模式下，可以按下面的顺序理解一次处理：
-
-```mermaid title="规则匹配、出站选择与响应返回" description="规则按顺序检查，还需核对出站适用性；真实目标 IP 按规则和出站需要获取。REJECT 在此终止，策略组选择需落实到最终出站，非拒绝结果按实际选择建立直连或代理会话。响应通过对应的出站会话和入站转发状态返回原应用，不是把远端 TCP 包原样塞回原连接。"
-flowchart TB
- app["应用"] --> explicit["显式入站<br/>HTTP / SOCKS5"]
- app --> transparent["透明入站<br/>TUN / REDIRECT / TPROXY"]
- explicit --> metadata["整理目标、域名映射<br/>嗅探与进程等元数据"]
- transparent --> metadata
- metadata --> rules["按规则顺序匹配<br/>检查出站适用性"]
- rules --> choice["确定最终出站<br/>DIRECT / REJECT / 节点"]
- choice -->|REJECT| reject["拒绝请求<br/>终止处理"]
- choice -->|DIRECT| direct["核心建立到目标的出站"]
- choice -->|代理节点| relay["核心连接节点<br/>节点另建到目标的连接"]
- direct --> response
- relay --> response["对应出站会话<br/>收到响应"]
- response --> inbound["入站转发状态"]
- inbound --> original["原应用"]
-```
-
-代理规则列表通常按书写顺序取首个匹配，和路由表的最长前缀匹配不同。还要检查所选出站是否适用：官方文档指出，UDP 请求命中不支持 UDP 的节点时会继续匹配后续规则，不能把“首条匹配立即停止”写成无条件保证[^6]。
-
-`no-resolve` 也有明确的作用范围：当连接元数据含域名而尚无真实目标 IP 时，目标 IP 类规则可能为匹配而触发解析。给这条规则加 `no-resolve`，只阻止它主动触发这次解析；若之前已经取得 IP，这条规则仍可匹配。后续规则和出站阶段仍可能查询 DNS[^6]。
-
-选中名为 `Proxy` 的策略组不代表一定建立 TLS/QUIC 隧道：`Proxy` 常常只是用户命名，实际行为取决于所选节点。HTTP 出站就有可选的 TLS 配置；其他出站使用的加密机制也各不相同[^http-outbound]。应用的 HTTPS 保护应用与目标 TLS 终止端之间的内容，代理传输的加密则保护其覆盖的代理链路，需要分别判断。
-
-TUN 场景下，代理自身的出站连接还必须通过接口绑定、路由排除或相应平台机制避免重新进入同一入站处理。回程字节则经已建立的转发状态交还应用；对终结 TCP 的代理实现而言，入站与出站有各自的 TCP 序号和重传状态，不能理解为把远端 TCP 包原样塞回原连接。
+在回环实验中，目标看到的对端是代理的出站 Socket。对照[第三篇的 NAT 映射](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)，也可以从连接状态判断地址改写和代理重建连接各自发生在哪里。
 
 ## 命令行验证：先确认入站，再对照解析位置
 

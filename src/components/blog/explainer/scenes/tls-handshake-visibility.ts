@@ -86,7 +86,7 @@ const handshake: Scene = {
 
 const architecture: Scene = {
 	title: "一个缺口会阻塞哪些流",
-	section: "http-语义与连接复用的演进",
+	section: "http11-到-http3-的连接与复用",
 	description:
 		"两个独立对照：HTTP/2 的多个流共用一条 TCP 有序字节流；HTTP/3 使用 QUIC 的独立流偏移。箭头表示交付依赖，不是版本升级顺序，也不表示 QUIC 完全消除了所有等待。",
 	caption: "关键区别是传输层按序交付的范围：整条 TCP 字节流，或一条 QUIC 流。",
@@ -127,7 +127,7 @@ export const scene: Scene = {
 	],
 };
 
-const sections = ["http-语义与连接复用的演进", "tls-13-握手密钥协商证书校验与-sni--alpn"];
+const sections = ["http11-到-http3-的连接与复用", "tls-13-握手密钥协商证书校验与-sni--alpn"];
 
 for (const [index, chapter] of (scene.chapters ?? []).entries()) {
 	chapter.section = sections[index];

@@ -7,9 +7,9 @@ tags: ["networking"]
 
 前七篇从[封装与端点边界](/posts/networking/layered-architecture-packet-journey/)讲到[代理怎样接管连接](/posts/networking/proxies-tunnels-transparent-interception/)。遇到“能连上却打不开网页”“测速很快但页面慢”时，要先把症状对应到请求阶段，再用对照实验缩小范围。一次成功、一次超时或一个偏高的指标，都不足以独立确定根因。
 
-本篇先解释性能指标及单流吞吐的约束，再分析“大传输失败”与路径 MTU 的关系，最后给出可重复的 curl 实验。排障记录应保留时间、命令版本、连接地址、代理方式、退出码与多次测量结果，让后续比较有共同条件。
+本篇先按症状选观测点，再用性能指标、TCP 窗口和路径 MTU 解释现象，最后用 curl 和 Wireshark 验证判断。排障记录应保留时间、命令版本、连接地址、代理方式、退出码与多次测量结果，让后续比较有共同条件。
 
-## 从哪一步开始排查
+## 从症状到观测点
 
 排查网页访问，可以沿接口与选路、DNS、传输、TLS、HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始；HTTP/3 的传输分支检查 QUIC。
 
@@ -30,6 +30,28 @@ flowchart TB
 
 例如，DNS 返回 Fake-IP 时，后续连接需要本地映射；本地代理已经接受 TCP 连接时，还要查它是否连上远端。这些路径差异会直接影响后面的计时解释。
 
+### 从请求阶段选择观测点
+
+先把“打不开”改写成可以验证的问题：解析到了哪个地址？连接哪个端点超时？TLS 是否完成？首字节还是正文传输慢？下表可以往返使用，不要求每个问题都从第一行开始。
+
+| 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
+| --- | --- | --- | --- |
+| 本地配置与邻居 | 接口地址、前缀与下一跳是否符合预期？ | `ifconfig` / `ip addr`，`arp -a`、`ndp -a` / `ip neigh` | 邻居表不是在线设备清单；见[第二篇](/posts/networking/ip-addressing-subnet-lan-delivery/) |
+| 选路与接管 | 对实际目标地址，选中了哪个接口和下一跳？ | `route -n get <IP>` / `ip route get <IP>` | 只观察本机决策；更具体路由、策略和 IPv6 需分别检查，见[第三篇](/posts/networking/routing-forwarding-nat-virtual-interfaces/) |
+| 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | `dig @服务器` 仍可能被接管；错误类型、Fake-IP 与真实公网地址应分开，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/) |
+| 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
+| TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
+
+把症状与观察位置配对，最好一次只改变一个条件。下表的“支持”仅适用于本次有效样本。
+
+| 症状 | 观测点与工具 | 能支持的判断 | 下一次对照 |
+| --- | --- | --- | --- |
+| 同一名字在两个程序结果不同 | 实际解析器、系统缓存、应用 DNS 设置，辅以 `dig` | 解析结果或路径不同 | 固定同一名称、类型和解析服务再做对照 |
+| TCP 超时或立即失败 | 实际出口与接收端，用 `tcpdump` 或 Wireshark 看 SYN、回应及 RST | 已返回 RST 时响应路径至少曾可用 | 确认 RST 来源；对照同一目标的地址族、端口和代理视角 |
+| HTTP/3 失败而 HTTP/2 成功 | QUIC Initial、UDP 响应与端点日志 | 该样本中 TCP 路径可用，QUIC 仍待定位 | 在同一支持两种协议的服务上固定 HTTP 版本与地址 |
+| 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与包长 | 包长依赖只是 PMTU 线索 | 降低受控测试的包长，并检查反馈是否抵达发送端 |
+| 建连与握手快，首字节或正文慢 | curl 时间戳、应用日志、RTT 与 TCP 窗口 | 延迟落在可定位的阶段 | 固定连接配置，只改变应用等待或传输大小 |
+
 ## 性能诊断的五个常用指标
 
 这些指标描述不同方面，但会相互影响。例如路由器或网关瓶颈处队列过长引发的**缓冲膨胀**（Bufferbloat），既可能显著推高**往返时延**（Round-Trip Time，RTT）与**时延抖动**（Jitter），也可能导致丢包和吞吐剧烈波动[^bufferbloat]。
@@ -48,7 +70,7 @@ flowchart TB
 
 **带宽时延积**（Bandwidth-Delay Product，BDP）是瓶颈带宽与 RTT 的乘积。带宽用 bit/s、RTT 用秒时，乘积是 bit；除以 8 才得到 byte。它可用于估算持续利用路径容量需要多少在途数据[^throughput]。
 
-第四篇区分了[流量控制与拥塞控制](/posts/networking/transport-tcp-udp-socket-quic/#流量控制-vs-拥塞控制)。在简化的稳定传输模型中，未确认数据量受拥塞窗口 `cwnd` 和接收窗口 `rwnd` 共同约束。若将二者中的较小值记为 $W$（byte），路径瓶颈带宽记为 $B$（bit/s），则有估算上界：
+第四篇区分了[流量控制与拥塞控制](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的流量控制与拥塞控制)。在简化的稳定传输模型中，未确认数据量受拥塞窗口 `cwnd` 和接收窗口 `rwnd` 共同约束。若将二者中的较小值记为 $W$（byte），路径瓶颈带宽记为 $B$（bit/s），则有估算上界：
 
 $$
 \text{TCP 载荷吞吐率} \lesssim \min\left(B, \frac{8W}{\text{RTT}}\right)
@@ -114,46 +136,6 @@ sequenceDiagram
 若可控制隧道两端，可临时降低测试接口或连接的包长做对照，记录变化并恢复配置。**MSS 钳制**（MSS Clamping）通过调整 TCP SYN 中通告的 MSS 影响对端发包，应根据已知路径预算设置，并考虑方向；它不能作为 UDP/QUIC 的通用修复。
 
 **分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）通过发送探测包、判断是否被确认来发现可用大小，减少对 ICMP 的依赖。TCP 等传输的框架见 RFC 4821，数据报传输的 DPLPMTUD 见 RFC 8899；是否启用仍需检查具体实现[^plpmtu][^dplpmtu]。
-
-## 按请求阶段缩小范围
-
-先把“打不开”改写成可以验证的问题：解析到了哪个地址？连接哪个端点超时？TLS 是否完成？首字节还是正文传输慢？下表可以往返使用，不要求每个问题都从第一行开始。
-
-| 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
-| --- | --- | --- | --- |
-| 本地配置与邻居 | 接口地址、前缀与下一跳是否符合预期？ | `ifconfig` / `ip addr`，`arp -a`、`ndp -a` / `ip neigh` | 邻居表不是在线设备清单；见[第二篇](/posts/networking/ip-addressing-subnet-lan-delivery/) |
-| 选路与接管 | 对实际目标地址，选中了哪个接口和下一跳？ | `route -n get <IP>` / `ip route get <IP>` | 只观察本机决策；更具体路由、策略和 IPv6 需分别检查，见[第三篇](/posts/networking/routing-forwarding-nat-virtual-interfaces/) |
-| 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | `dig @服务器` 仍可能被接管；错误类型、Fake-IP 与真实公网地址应分开，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/) |
-| 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
-| TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
-
-把症状与观察位置配对，最好一次只改变一个条件。下表的“支持”仅适用于本次有效样本。
-
-| 症状 | 观测点与工具 | 能支持的判断 | 下一次对照 |
-| --- | --- | --- | --- |
-| 同一名字在两个程序结果不同 | 实际解析器、系统缓存、应用 DNS 设置，辅以 `dig` | 解析结果或路径不同 | 固定同一名称、类型和解析服务再做对照 |
-| TCP 超时或立即失败 | 实际出口与接收端，用 `tcpdump` 或 Wireshark 看 SYN、回应及 RST | 已返回 RST 时响应路径至少曾可用 | 确认 RST 来源；对照同一目标的地址族、端口和代理视角 |
-| HTTP/3 失败而 HTTP/2 成功 | QUIC Initial、UDP 响应与端点日志 | 该样本中 TCP 路径可用，QUIC 仍待定位 | 在同一支持两种协议的服务上固定 HTTP 版本与地址 |
-| 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与包长 | 包长依赖只是 PMTU 线索 | 降低受控测试的包长，并检查反馈是否抵达发送端 |
-| 建连与握手快，首字节或正文慢 | curl 时间戳、应用日志、RTT 与 TCP 窗口 | 延迟落在可定位的阶段 | 固定连接配置，只改变应用等待或传输大小 |
-
-### 平台命令对照
-
-下面是功能上的近似对应，不代表解析策略、字段或底层实现相同。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
-
-| 目的 | macOS | Linux | Windows / PowerShell |
-| --- | --- | --- | --- |
-| 接口与地址 | `ifconfig` | `ip addr` | `ipconfig /all` |
-| 路由表 | `netstat -rn` | `ip route`、`ip -6 route` | `route print`、`Get-NetRoute` |
-| 特定目标选路 | `route -n get <IP>` | `ip route get <IP>` | `Find-NetRoute -RemoteIPAddress <IP>` |
-| DNS 配置 | `scutil --dns` | `resolvectl status`，限 systemd-resolved 环境 | `Get-DnsClientServerAddress` |
-| DNS 查询 | `dig example.com A` | `dig example.com A` | `Resolve-DnsName example.com -Type A` |
-| 本地 DNS 缓存视图 | `dscacheutil` 查询名称服务，不是完整缓存转储 | 按实际缓存服务选择工具 | `ipconfig /displaydns` |
-| TCP 连接 | `netstat -anv -p tcp` | `ss -tin` | `Get-NetTCPConnection` |
-| 邻居表 | `arp -a`、`ndp -a` | `ip neigh` | `Get-NetNeighbor` |
-| 抓包 | tcpdump / Wireshark | tcpdump / Wireshark | Wireshark 配合 Npcap |
-
-Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不代表浏览器内置 DoH 或代理连接路径；权限和可用参数应按所用系统确认[^windows]。前面各篇使用的 Rust、Go、Python 程序应保存成文件运行；回环验证不要求改系统路由。
 
 ## 用 curl 记录请求耗时
 
@@ -310,6 +292,24 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 一个有用的结论包含三部分：已经观察到什么、它排除了什么、还需要什么证据。例如：“连续三次成功建连，但 TLS 完成前超时；当前选路经过 TUN，尚未取得远端节点握手日志。”它比“网不好”或“肯定是服务器慢”更便于下一步验证。
 
 至此，本系列选取的客户端访问主线已经串联起来：从[协议分层与封装](/posts/networking/layered-architecture-packet-journey/)、[局域网交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[路由与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)到[传输层与 Socket](/posts/networking/transport-tcp-udp-socket-quic/)，再穿过[域名解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[HTTP 与 TLS 边界](/posts/networking/http-evolution-tls-handshake-https/)以及[代理与透明接管](/posts/networking/proxies-tunnels-transparent-interception/)。排障时沿这些边界回查，就能让每个推断都对应到具体连接、具体观察位置和下一项可证伪的实验。
+
+## 平台命令对照
+
+对照平台时，先固定诊断任务。例如，拿到应用实际连接的 IP 后，用表中「特定目标选路」一行检查它命中的接口与下一跳。各平台命令返回的字段以各自实现为准。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
+
+| 目的 | macOS | Linux | Windows / PowerShell |
+| --- | --- | --- | --- |
+| 接口与地址 | `ifconfig` | `ip addr` | `ipconfig /all` |
+| 路由表 | `netstat -rn` | `ip route`、`ip -6 route` | `route print`、`Get-NetRoute` |
+| 特定目标选路 | `route -n get <IP>` | `ip route get <IP>` | `Find-NetRoute -RemoteIPAddress <IP>` |
+| DNS 配置 | `scutil --dns` | `resolvectl status`，限 systemd-resolved 环境 | `Get-DnsClientServerAddress` |
+| DNS 查询 | `dig example.com A` | `dig example.com A` | `Resolve-DnsName example.com -Type A` |
+| 本地 DNS 缓存视图 | `dscacheutil` 查询名称服务，不是完整缓存转储 | 按实际缓存服务选择工具 | `ipconfig /displaydns` |
+| TCP 连接 | `netstat -anv -p tcp` | `ss -tin` | `Get-NetTCPConnection` |
+| 邻居表 | `arp -a`、`ndp -a` | `ip neigh` | `Get-NetNeighbor` |
+| 抓包 | tcpdump / Wireshark | tcpdump / Wireshark | Wireshark 配合 Npcap |
+
+Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不代表浏览器内置 DoH 或代理连接路径；权限和可用参数应按所用系统确认[^windows]。前面各篇使用的 Rust、Go、Python 程序应保存成文件运行；回环验证不要求改系统路由。
 
 ## 延伸阅读
 

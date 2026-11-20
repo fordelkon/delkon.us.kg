@@ -116,7 +116,7 @@ export const scene: Scene = {
 	],
 };
 
-const sections = ["用-curl-记录请求耗时", "从哪一步开始排查"];
+const sections = ["用-curl-记录请求耗时", "从症状到观测点"];
 
 for (const [index, chapter] of (scene.chapters ?? []).entries()) {
 	chapter.section = sections[index];

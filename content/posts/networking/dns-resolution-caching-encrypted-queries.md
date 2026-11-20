@@ -7,7 +7,7 @@ tags: ["networking"]
 
 上一篇[《计算机网络（四）：TCP、UDP、Socket 与可靠传输》](/posts/networking/transport-tcp-udp-socket-quic/)解释了字节流与数据报怎样交付给通信端点。但应用发起连接时，手里通常只有 `example.com` 这样的域名。**域名系统**（Domain Name System，DNS）要先将名字转换成地址及相关连接参数，传输层才能继续工作。
 
-本篇沿着“查什么、谁来查、缓存什么、怎样保护查询”展开。DNS 排障也依赖这四个问题：一个工具查到了地址，并不表示浏览器采用了同一个解析器；一个查询没有地址，也不表示域名不存在。HTTP、TLS 与 QUIC 的连接细节在[下一篇](/posts/networking/http-evolution-tls-handshake-https/)继续解释，这里先明确 DNS 能提供哪些信息。
+本篇从资源记录、解析路径与缓存讲起，再解释怎样验证答案、保护查询，以及应用如何使用返回的地址。排查时可以依次核对查询类型、实际解析器、响应状态和连接目标。HTTP、TLS 与 QUIC 的连接细节在[下一篇](/posts/networking/http-evolution-tls-handshake-https/)继续解释。
 
 ## 域名空间与常见资源记录
 
@@ -107,12 +107,6 @@ flowchart LR
 用 `dig example.com A` 查看 `status`、`ANSWER`、`AUTHORITY` 和 TTL，再与系统解析结果对照。只使用 `+short` 容易把不存在、没有该类型记录与某些失败都压成一段空输出。清缓存之前先记录证据，也能避免把缓存刷新与其他同时发生的变化混在一起。
 :::
 
-### CDN 调度与双栈连接
-
-权威服务器一般能看到向它查询的递归解析器地址。**EDNS 客户端子网**（EDNS Client Subnet，ECS）允许解析器附带客户端地址前缀，可能影响权威端的地域调度；同时也会向更多参与者暴露客户端网络信息。公共解析服务可能使用任播与地域节点，CDN 也可能结合其他信号，不能仅凭公共 DNS 的品牌或注册地断定一定绕路[^ecs]。
-
-DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeballs 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/)中继续核对。
-
 ## DNSSEC 与加密 DNS：数据认证和通道保密
 
 ### DNSSEC 验证数据，不隐藏查询
@@ -148,6 +142,12 @@ DoT、DoH、DoQ 在使用正确的服务端认证时，保护客户端到所选�
 :::important[网站、代理节点与 DNS 服务是三个解析对象]
 开启代理后，目标网站、代理节点自身、加密 DNS 服务自身可能分别使用不同的解析路径。Fake-IP 能让代理先返回映射地址，但是否需要本地真实解析仍取决于规则与出站协议。具体接管与配置职责见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/)，不能把“开了 TUN”当作全部查询都由同一个解析器完成的证据。
 :::
+
+## DNS 答案怎样影响连接目标
+
+权威服务器一般能看到向它查询的递归解析器地址。**EDNS 客户端子网**（EDNS Client Subnet，ECS）允许解析器附带客户端地址前缀，可能影响权威端的地域调度；同时也会向更多参与者暴露客户端网络信息。公共解析服务可能使用任播与地域节点，CDN 也可能结合其他信号，不能仅凭公共 DNS 的品牌或注册地断定一定绕路[^ecs]。
+
+DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeballs 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/)中继续核对。
 
 ## 观察域名解析与缓存：实验与边界
 

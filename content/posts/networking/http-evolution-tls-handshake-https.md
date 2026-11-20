@@ -9,7 +9,7 @@ tags: ["networking"]
 
 本篇先读一组最小 HTTP 消息，再比较三个版本的连接复用，最后沿 TLS 握手划清各方的观察边界。这些边界也会成为[第七篇代理分析](/posts/networking/proxies-tunnels-transparent-interception/)的依据：传输连接被代理分成两段，不表示应用的 TLS 也一定在那里终止。
 
-## HTTP 语义与连接复用的演进
+## HTTP 请求、响应与消息语义
 
 ### 先读一组请求与响应
 
@@ -44,7 +44,13 @@ hello
 
 重定向意味着客户端还可能访问另一个 URL，形成新的解析、连接或身份校验。`curl` 默认不自动跟随 HTTP 重定向，`-L` 才请求跟随[^curl]；做阶段计时应先确认是否发生重定向，具体方法见[第八篇](/posts/networking/network-diagnostics-performance-troubleshooting/)。
 
-### 从顺序响应到多路复用
+### 缓存与 Cookie 不属于传输连接状态
+
+`Cache-Control: max-age=60` 允许响应在满足其他条件时保持 60 秒新鲜；`no-cache` 要求复用前验证，并不等于禁止存储；`no-store` 才要求缓存不要存储。过期响应若有 `ETag`，客户端可以发送 `If-None-Match`，服务端在条件满足时返回 `304`，复用已有正文。这种条件请求仍然会产生网络交互，应与完全命中本地缓存区分[^cache]。
+
+Cookie 则是 HTTP 层的状态管理：服务端用 `Set-Cookie` 设置，客户端按适用条件在后续请求中发送 `Cookie`，不依赖是否复用了同一条 TCP/TLS 连接。TLS 保护传输，但不能代替 Cookie 的作用域和访问控制；`Secure` 限制安全通道发送，`HttpOnly` 限制脚本读取，都不意味着服务端或 TLS 终止端看不到它[^cookie]。
+
+## HTTP/1.1 到 HTTP/3 的连接与复用
 
 | 协议版本 | 传输与消息组织 | 复用能力 | 遗留边界 |
 | --- | --- | --- | --- |
@@ -55,12 +61,6 @@ hello
 HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接关闭、消息定界和完整消费响应都会影响能否复用。浏览器并行建立多条连接属于实现策略，不是协议规定固定创建六条。HTTP/2 也允许在预先知道服务端支持的条件下直接使用明文 TCP；`h2` 则是用于 TLS ALPN 的协议标识，不能把浏览器常见部署当成唯一形式。
 
 HTTP/3 避免的是丢包引起的跨流传输按序交付阻塞，并不保证一个流绝不受其他流影响。它所依赖的可靠性、流量控制与连接迁移见[第四篇的 QUIC](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)。
-
-### 缓存与 Cookie 不属于传输连接状态
-
-`Cache-Control: max-age=60` 允许响应在满足其他条件时保持 60 秒新鲜；`no-cache` 要求复用前验证，并不等于禁止存储；`no-store` 才要求缓存不要存储。过期响应若有 `ETag`，客户端可以发送 `If-None-Match`，服务端在条件满足时返回 `304`，复用已有正文。这种条件请求仍然会产生网络交互，应与完全命中本地缓存区分[^cache]。
-
-Cookie 则是 HTTP 层的状态管理：服务端用 `Set-Cookie` 设置，客户端按适用条件在后续请求中发送 `Cookie`，不依赖是否复用了同一条 TCP/TLS 连接。TLS 保护传输，但不能代替 Cookie 的作用域和访问控制；`Secure` 限制安全通道发送，`HttpOnly` 限制脚本读取，都不意味着服务端或 TLS 终止端看不到它[^cookie]。
 
 ## TLS 1.3 握手：密钥协商、证书校验与 SNI / ALPN
 
@@ -97,7 +97,7 @@ sequenceDiagram
 
 客户端需要确认认证路径通向受信任的**证书颁发机构**（certificate authority，CA）根证书、证书的有效期与约束满足要求[^pki]，并验证服务器持有相应私钥[^5]。它还要独立地把预期服务名与证书**主题备用名称**（Subject Alternative Name，SAN）中适用的身份匹配。RFC 9525 不再允许使用 Common Name 作为服务身份；仅仅“某个 CA 签过这张证书”不能代替名字匹配[^identity]。
 
-吊销状态的获取和失败处理依客户端策略而异，不能声称所有工具都会在线确认“未被吊销”。浏览器、OpenSSL 和应用自带信任库也可能不同，诊断时应记录工具与信任配置。TLS 1.3 会话恢复允许在满足条件时尝试**早期数据**（early data，0-RTT）。服务端可拒绝早期数据，攻击者也可能重放；客户端只应把应用层明确允许重放的数据放入此阶段。不要仅凭 GET 方法名假定业务操作可重放。HTTP 可用 425 表明服务端不愿承担重放风险，QUIC 的恢复与早期数据另见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)[^early]。
+吊销状态的获取和失败处理依客户端策略而异，不能声称所有工具都会在线确认“未被吊销”。浏览器、OpenSSL 和应用自带信任库也可能不同，诊断时应记录工具与信任配置。
 
 | 材料或机制 | 回答的问题 | 不能代替什么 |
 | --- | --- | --- |
@@ -106,6 +106,10 @@ sequenceDiagram
 | CA 信任链及约束 | 这条证书路径是否受当前信任库认可？ | 不能单独证明持有私钥或名字正确 |
 | CertificateVerify / Finished | 是否持有相应私钥、握手记录和密钥是否一致？ | 不能免除证书身份与路径检查 |
 | ECH | 是否保护真实 ClientHello 中的敏感参数？ | 不能代替服务认证，也不隐藏目的 IP |
+
+### TLS 会话恢复与早期数据
+
+TLS 1.3 会话恢复允许在满足条件时尝试**早期数据**（early data，0-RTT）。服务端可拒绝早期数据，攻击者也可能重放；客户端只应把应用层明确允许重放的数据放入此阶段。不要仅凭 GET 方法名假定业务操作可重放。HTTP 可用 425 表明服务端不愿承担重放风险，QUIC 的恢复与早期数据另见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)[^early]。
 
 ### HTTP/3 怎样把 TLS 放进 QUIC
 
