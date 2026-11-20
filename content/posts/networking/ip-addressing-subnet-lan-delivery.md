@@ -32,7 +32,7 @@ IP 地址标识网络中的通信接口，而不是设备永久不变的身份�
 | --- | --- | --- | --- |
 | 公网单播地址 | 已分配且允许全球路由的地址 | 当前主要分配于 `2000::/3` 的全局单播地址 | 可用于全球路由；实际可达性仍取决于路由与策略 |
 | 私网地址 | `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` | `fc00::/7` 的**唯一本地地址**（Unique Local Address，ULA） | 用于内部网络，不应作为普通源或目的地址在公网传播[^1] |
-| 共享地址 | `100.64.0.0/10` | 无直接对应地址段 | 常用于**运营商级 NAT**（Carrier-Grade NAT，CGNAT）的接入网络[^2] |
+| 共享地址 | `100.64.0.0/10` | 无直接对应地址段 | 常用于**运营商级网络地址转换**（Carrier-Grade Network Address Translation，CGNAT，RFC 6888 简称 CGN）的接入网络[^2][^cgn] |
 | 链路本地地址 | `169.254.0.0/16` | `fe80::/10` | 限于当前链路，不由路由器转发到其他链路 |
 | 环回地址 | `127.0.0.0/8`，常见 `127.0.0.1` | `::1/128` | 用于本机内部通信 |
 
@@ -482,6 +482,8 @@ sudo tcpdump -i en0 -nn -e arp
 - 子网计算示例可在 [Rust Playground](https://play.rust-lang.org/) 运行
 
 [^1]: 〔RFC〕[RFC 1918 §3、§5](https://www.rfc-editor.org/rfc/rfc1918.html#section-3)——IPv4 私网范围及公共互联网路由边界；[RFC 4193 §3、§4.1](https://www.rfc-editor.org/rfc/rfc4193.html#section-3)另行定义 IPv6 ULA 的 `fc00::/7` 范围与外部路由过滤要求。
+
+[^cgn]: 〔RFC 与实现〕[RFC 6888 §2](https://www.rfc-editor.org/rfc/rfc6888.html#section-2)与[Cisco: Configure CGNAT IPs](https://www.cisco.com/c/en/us/support/docs/security/umbrella/225267-configure-cgnat-carrier-grade-nat-ips.html)——运营商网络中共享公网 IPv4 的机制，以及 CGN、CGNAT 两种写法。
 
 [^2]: 〔RFC〕[RFC 6598 §4](https://www.rfc-editor.org/rfc/rfc6598.html#section-4)——运营商共享地址空间 `100.64.0.0/10` 及使用限制。
 

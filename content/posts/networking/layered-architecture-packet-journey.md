@@ -171,7 +171,7 @@ flowchart TB
 再看流量怎样进入代理；这里只标出入口，具体流程留在第七篇：
 
 - **显式代理**：应用主动连接代理监听端口，用 HTTP CONNECT 或 SOCKS5 告诉它目标，由代理创建出站连接。HTTP CONNECT 与 SOCKS5 是不同协议，目标表达和解析位置需分别理解[^connect][^socks]。
-- **TUN 虚拟接口**：程序从三层接口读写 IP 包，路由和策略把选中的流量导向该接口。能否覆盖某个应用、IPv4 或 IPv6，取决于实际选路与排除规则；TUN 本身也不规定后续是直连、代理重建连接还是 IP 隧道封装。
+- **三层虚拟隧道接口**（Network Tunnel，TUN）：程序从这个接口读写 IP 包[^tun-name]，路由和策略把选中的流量导向该接口。能否覆盖某个应用、IPv4 或 IPv6，取决于实际选路与排除规则；TUN 本身也不规定后续是直连、代理重建连接还是 IP 隧道封装。
 
 ## 端到端与逐跳：主机、交换机与路由器的分工
 
@@ -351,6 +351,8 @@ curl -q -4 --noproxy '*' --http1.1 \
 [^ipv6]: 〔RFC〕[RFC 8200 §3、§4、§8.1](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 基本头、扩展头、Hop Limit 与 ICMPv6 上层协议号
 
 [^connect]: 〔RFC〕[RFC 9110 §9.3.6: CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——HTTP CONNECT 的目标 authority 与隧道建立语义
+
+[^tun-name]: 〔平台与实现〕[OpenBSD tun(4)](https://man.openbsd.org/tun.4)——`tun` 是三层网络隧道接口。
 
 [^socks]: 〔RFC〕[RFC 1928 §3–§5](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 协商、请求地址类型与代理回复
 
