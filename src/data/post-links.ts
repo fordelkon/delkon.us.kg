@@ -2,6 +2,7 @@ import { type CollectionEntry, render } from "astro:content";
 import { z } from "astro/zod";
 import { siteConfig } from "@/site.config";
 import { entryUrl } from "./routes";
+import type { SeriesContext } from "./series";
 
 type Post = CollectionEntry<"post">;
 
@@ -11,6 +12,7 @@ interface PostNeighbor {
 	id: string;
 	title: string;
 	href: string;
+	publishTime: number;
 	direction: Direction;
 }
 
@@ -26,6 +28,21 @@ export interface PostNeighborhood {
 
 const destinationsSchema = z.array(z.string());
 const site = new URL(siteConfig.url);
+
+export function orderLinkedPosts(neighbors: PostNeighbor[], series: SeriesContext | undefined) {
+	const positions = new Map(
+		series?.group.entries
+			.filter((entry) => entry.collection === "post")
+			.map((entry, index) => [entry.id, index]),
+	);
+
+	return neighbors.toSorted(
+		(a, b) =>
+			a.publishTime - b.publishTime ||
+			(positions.get(a.id) ?? positions.size) - (positions.get(b.id) ?? positions.size) ||
+			a.id.localeCompare(b.id),
+	);
+}
 
 function postPath(url: URL): string {
 	return decodeURI(url.pathname).replace(/\/$/, "");
@@ -84,6 +101,7 @@ export async function getPostNeighborhoods(posts: Post[]): Promise<Map<string, P
 				id: candidate.id,
 				title: candidate.data.title,
 				href: entryUrl(candidate),
+				publishTime: candidate.data.publishDate.getTime(),
 				direction: linksOut && linksIn ? "reciprocal" : linksOut ? "outgoing" : "incoming",
 			});
 		}

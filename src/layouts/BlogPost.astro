@@ -9,7 +9,7 @@ import TOC from "@/components/blog/TOC.astro";
 import WebMentions from "@/components/blog/webmentions/index.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
 import { getPostExplainer } from "@/data/post-explainers";
-import type { PostNeighborhood } from "@/data/post-links";
+import { orderLinkedPosts, type PostNeighborhood } from "@/data/post-links";
 import { ogImageUrl } from "@/data/routes";
 import { getSeriesContext } from "@/data/series";
 
@@ -27,6 +27,7 @@ const { ogImage, title, description, updatedDate, publishDate } = post.data;
 const socialImage = ogImage ?? ogImageUrl(post.id);
 const articleDate = updatedDate?.toISOString() ?? publishDate.toISOString();
 const series = await getSeriesContext(post);
+const linkedPosts = orderLinkedPosts(neighborhood?.neighbors ?? [], series);
 const explainer = getPostExplainer(post.id);
 ---
 
@@ -49,14 +50,16 @@ const explainer = getPostExplainer(post.id);
 			<WebMentions />
 		</div>
 	</article>
-	{!!neighborhood?.neighbors.length && (
+	{!!linkedPosts.length && (
 		<div class="mt-8 xl:hidden">
-			<PostLinkList neighbors={neighborhood.neighbors} />
+			<PostLinkList neighbors={linkedPosts} />
 		</div>
 	)}
 	{!!neighborhood?.neighbors.length && (
 		<Fragment slot="start-gutter">
-			<PostGraph postId={post.id} title={title} neighborhood={neighborhood} />
+			<PostGraph postId={post.id} title={title} neighborhood={neighborhood}>
+				<PostLinkList neighbors={linkedPosts} />
+			</PostGraph>
 		</Fragment>
 	)}
 	{!!headings.length && (

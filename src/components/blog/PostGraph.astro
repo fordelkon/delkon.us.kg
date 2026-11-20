@@ -1,6 +1,5 @@
 ---
 import type { PostNeighborhood } from "@/data/post-links";
-import PostLinkList from "./PostLinkList.astro";
 import { layoutPostGraph } from "./post-graph-layout";
 
 interface Props {
@@ -64,7 +63,7 @@ const points = layoutPostGraph(postId, neighborhood);
 			{title}
 		</p>
 	</post-link-graph>
-	<PostLinkList neighbors={neighbors} />
+	<slot />
 </aside>
 
 <script>
