@@ -288,7 +288,33 @@ sequenceDiagram
 
 这里有两张用途不同的表：主机的**邻居表**（Neighbor Table）关联下一跳 IP 与 MAC，交换机的 **MAC 地址表**（MAC Address Table）关联 MAC 与端口。交换机转发 ARP 请求不需要理解其中的目标 IPv4，也不会代替 B 回答；它只根据帧头完成当前 VLAN 内的交付。
 
-如果 A 访问远端，前面的路由表会选出网关，此时把例子里的 B 换成网关即可：ARP 查询网关 MAC，随后数据帧的目的 MAC 是网关，而 IPv4 包的目的地址仍是远端。本文实验里的网关 `192.168.1.1` 使用文档 MAC `00:00:5e:00:53:02`。IPv6 不使用 ARP，而采用下面的邻居发现机制。
+如果 A 访问远端，前面的路由表会选出网关，此时把例子里的 B 换成网关即可：ARP 查询网关 MAC，随后数据帧的目的 MAC 是网关，而 IPv4 包的目的地址仍是远端。本文实验里的网关 `192.168.1.1` 使用文档 MAC `00:00:5e:00:53:02`。
+
+### 从 ARP 结果到实际发出的帧
+
+沿用 A、B 和网关的地址，比较 A 发出的两份 IPv4 包：一份给同链路的 B（`192.168.1.11`），另一份给远端服务器（文档示例地址 `198.51.100.20`）。仍假定只有普通 `/24` 直连路由与默认路由，没有代理 ARP 或更具体路由；所需的 ARP 解析已经完成。
+
+```mermaid mobile-direction="TB" title="同链路目标与远端目标的出站帧" description="比较主机 A 在同一接口发出的两份不同业务包，不是同一个包先后经过两个状态。左侧直接解析 B，右侧解析默认网关。帧头中的目的 MAC 随下一跳而不同，IPv4 目的地址分别保留为 B 与远端服务器。框内按外层头到内层头排列，省略传输层、载荷、填充与 FCS；无 NAT 发生在这里的主机封装步骤。"
+flowchart LR
+ subgraph direct[直连：下一跳是 B]
+  direction TB
+  direct_eth["以太网头<br/>源 MAC = 00:00:5e:00:53:01<br/>目的 MAC = 00:00:5e:00:53:03<br/>EtherType = 0x0800"]
+  direct_ip["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 192.168.1.11"]
+  direct_eth --- direct_ip
+ end
+ subgraph remote[经网关：下一跳是 192.168.1.1]
+  direction TB
+  remote_eth["以太网头<br/>源 MAC = 00:00:5e:00:53:01<br/>目的 MAC = 00:00:5e:00:53:02<br/>EtherType = 0x0800"]
+  remote_ip["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20"]
+  remote_eth --- remote_ip
+ end
+ direct --- remote
+ linkStyle default stroke:none
+```
+
+右侧帧交给网关，是因为目的 MAC 填了网关的地址；网关取出里面的 IPv4 包后，仍按 `198.51.100.20` 继续选路。A 无需取得远端服务器的 MAC。交换机只在当前 VLAN 内交付这个帧，经过路由器之后的下一份帧见[第三篇的三跳包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)。
+
+IPv6 不使用 ARP，而采用下面的邻居发现机制。
 
 ### IPv6 的邻居发现：NDP
 

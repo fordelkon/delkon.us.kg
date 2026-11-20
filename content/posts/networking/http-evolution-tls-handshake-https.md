@@ -113,25 +113,45 @@ TLS 1.3 会话恢复允许在满足条件时尝试**早期数据**（early data�
 
 ### HTTP/3 怎样把 TLS 放进 QUIC
 
-HTTP/2 的普通新连接先建 TCP，再在字节流上运行 TLS；HTTP/3 则把 TLS 握手消息放进 QUIC 的 CRYPTO 帧，不使用 TLS 记录层。两者的建连过程如下，省略 DNS、重试、会话恢复与请求正文[^quic-handshake]：
+HTTP/2 的普通新连接先建 TCP，再在字节流上运行 TLS；HTTP/3 则把 TLS 握手消息放进 QUIC 的 CRYPTO 帧，不使用 TLS 记录层。QUIC Initial 的保护密钥可由公开信息导出，不能向旁观者隐藏其中的 ClientHello；后续 Handshake 与 1-RTT 使用另外派生的密钥[^quic-handshake]。
 
-```mermaid mobile-direction="TB" title="HTTPS over TCP 与 QUIC 的建连对照" description="两组是独立的新连接，均无 0-RTT 或 HelloRetryRequest，QUIC 也没有 Retry。箭头表示阶段依赖，不表示相同耗时。QUIC Initial 的密钥可由公开信息导出，不能向旁观者保密；后续 Handshake 与 1-RTT 使用另外派生的密钥。"
-flowchart LR
- subgraph tcp_case[HTTP/2：先建 TCP，再运行 TLS]
-  direction TB
-  tcp["TCP 三次握手"] --> tls["TLS 握手<br/>密钥协商与证书验证<br/>Finished"]
-  tls --> h2["HTTP/2 帧<br/>经 TLS 记录与 TCP 字节流传输"]
+握手完成后，HTTP 数据在线上怎样排列？设客户端为 `192.168.1.10`，目标为文档示例地址 `198.51.100.20`。下面比较同一客户端分别建立的 HTTP/2 与 HTTP/3 连接，只画客户端出站、尚未经过 NAT 的 IP 数据报，不画外面的链路帧。为单独看清包含关系，特意选择能在一个 TCP 段中装下完整 TLS 记录、以及一个 UDP 数据报中只装一个 QUIC 1-RTT 包的情况：
+
+```mermaid title="HTTP/2 与 HTTP/3 的数据包里分别装了什么" description="上下是独立连接的应用数据封装，不表示两者逐字段等价，也不按字节比例绘制。上方仅选一条完整 TLS 记录装入一个 TCP 段的示例，实际 TLS 记录可跨段；下方仅选一个 UDP 数据报承载一个 QUIC 短头 1-RTT 包的示例。无箭头连线只排列字段；标为解密后的内容在线上属于密文。"
+flowchart TB
+ subgraph h2_packet[HTTP/2：一个 IPv4 数据报]
+  ip2["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20<br/>Protocol = 6"]
+  subgraph tcp_segment[TCP 报文段]
+   tcp2["TCP 头<br/>50001 → 443<br/>Seq · Ack · 校验和"]
+   subgraph tls_record[TLS 1.3 记录]
+    record2["公开记录头<br/>type = 23<br/>version = 0x0303<br/>length = 后续密文长度"]
+    cipher2["AEAD 密文与认证标签<br/>解密后：HTTP/2 DATA 帧<br/>内层类型与可选填充"]
+    record2 --- cipher2
+   end
+   tcp2 --- record2
+  end
+  ip2 --- tcp2
  end
- subgraph quic_case[HTTP/3：QUIC 内集成 TLS]
-  direction TB
-  initial["QUIC Initial<br/>CRYPTO 帧开始 TLS 握手"] --> handshake["Initial 携带 ServerHello<br/>Handshake 携带后续握手"]
-  handshake --> h3["客户端发送 Finished<br/>1-RTT 包承载 HTTP/3 流"]
+ subgraph h3_packet[HTTP/3：一个 IPv4 数据报]
+  ip3["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20<br/>Protocol = 17"]
+  subgraph udp_datagram[UDP 数据报]
+   udp3["UDP 头<br/>50002 → 443<br/>长度 · 校验和"]
+   subgraph quic_packet[QUIC 1-RTT 包]
+    header3["QUIC 短头<br/>目的连接 ID 可见<br/>包号受头部保护"]
+    cipher3["AEAD 密文与认证标签<br/>解密后：STREAM 帧<br/>流内字节承载 HTTP/3 DATA 帧"]
+    header3 --- cipher3
+   end
+   udp3 --- header3
+  end
+  ip3 --- udp3
  end
- tcp_case --- quic_case
- linkStyle 4 stroke:none
+ h2_packet --- h3_packet
+ linkStyle default stroke:none
 ```
 
-QUIC 的应用流仍在流内按序交付；QPACK 的动态表依赖也可能让某些头部解码等待。减少跨流传输阻塞不能推导“HTTP/3 完全没有队头阻塞”，更不能保证 UDP 受限路径上一定比 HTTP/2 快。
+HTTP/2 这组能读取到 TCP 端口、序号和 TLS 外层记录头，但 `type=23` 只说明这是 TLS 加密记录的外层类型，不能据此读出 HTTP 方法、路径或正文；`0x0303` 是兼容字段，也不表示实际协商了 TLS 1.2[^tls-record]。HTTP/3 这组把可靠传输与加密交给 QUIC：UDP 载荷中直接装 QUIC 包，没有再套一层 TLS 记录；应用流数据属于受保护的 QUIC 包体，包号还接受单独的头部保护[^quic-handshake]。
+
+图中的单包安排是为了看清字段归属。实际 HTTP/2 帧、TLS 记录与 TCP 段之间没有固定的一一对应关系，见[第一篇的记录与分段示例](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。HTTP/3 帧也可能跨多个 QUIC STREAM 帧与包传输；反过来，一个包可以携带多个 QUIC 帧。QUIC 的应用流仍在流内按序交付，QPACK 动态表依赖也可能让某些头部解码等待。减少跨流传输阻塞不能推导“HTTP/3 完全没有队头阻塞”，更不能保证 UDP 受限路径上一定比 HTTP/2 快。
 
 ### ECH：保护真实的 ClientHello
 
@@ -270,7 +290,9 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 
 [^cookie]: 〔RFC〕[RFC 6265 §4.1、§4.2、§5.4](https://www.rfc-editor.org/rfc/rfc6265.html#section-4.1)——Set-Cookie、Cookie 的作用域和发送条件，以及 Secure、HttpOnly 属性。
 
-[^quic-handshake]: 〔RFC〕[RFC 9001 §4、§5.2](https://www.rfc-editor.org/rfc/rfc9001.html#section-4)——QUIC CRYPTO 帧中的 TLS 握手与公开可导出的 Initial 密钥；HTTP/3 的 QUIC 流映射见 [RFC 9114 §6](https://www.rfc-editor.org/rfc/rfc9114.html#section-6)。
+[^tls-record]: 〔RFC〕[RFC 8446 §5.2、附录 B.1](https://www.rfc-editor.org/rfc/rfc8446.html#section-5.2)——TLS 1.3 加密记录的外层类型、兼容版本字段与长度，以及受保护的内容、内层类型和填充。
+
+[^quic-handshake]: 〔RFC〕[RFC 9001 §4、§5.2—5.4](https://www.rfc-editor.org/rfc/rfc9001.html#section-4)——QUIC CRYPTO 帧中的 TLS 握手、公开可导出的 Initial 密钥、包体保护与包号的头部保护；HTTP/3 的 QUIC 流映射见 [RFC 9114 §6](https://www.rfc-editor.org/rfc/rfc9114.html#section-6)。
 
 [^pki]: 〔RFC〕[RFC 5280 §6.1](https://www.rfc-editor.org/rfc/rfc5280.html#section-6.1)——认证路径验证、有效期和约束检查。
 

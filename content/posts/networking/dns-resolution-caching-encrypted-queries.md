@@ -57,6 +57,25 @@ sequenceDiagram
 
 客户端请求递归服务（置位 `RD=1`），意思是让解析器完成后续工作，而不是只返回下一站。解析器对权威服务器通常进行非递归查询，沿委派继续向下。委派响应可能附带服务器地址，其中为打破委派解析依赖而提供的地址称为**胶水记录**（glue）；不能把所有附加段地址都笼统叫作胶水。
 
+### 把查询过程展开成实际报文
+
+上图中的每一条查询箭头都有自己的 IP、UDP 与 DNS 头。设存根为 `192.168.1.10`，递归解析器为 `192.168.1.53`；递归器已经取得委派信息，需要向权威服务器 `203.0.113.53` 补查 `example.com. A`。下面是一个已配置好往返路由、没有 NAT 或透明接管的实验网络，权威地址与答案 `198.51.100.20` 均为文档示例，不代表真实公网服务。
+
+本例选用 UDP，客户端源端口分别为 `53001` 和 `54002`，DNS 服务端口为 `53`。DNS 头中的 `ID` 标识一次查询，`QR=0` 表示查询、`QR=1` 表示响应；响应复制对应查询的 ID，问题段说明在查哪个名字、哪种记录[^dns-message]：
+
+```mermaid title="两段 DNS 查询分别使用哪些地址与事务 ID" description="按处理顺序展示四份不同报文，箭头不是同一个 IP 包的转发路径。递归器向已找到的权威发起独立查询，并按存根的原查询形成响应；省略根、TLD、重试、链路头和其他 DNS 字段。IP、端口、ID、答案和 TTL 都是本例取值；DNS 记录 TTL 的单位是秒，不是 IP 转发预算。"
+flowchart TB
+ stub_query["① 存根 → 递归器<br/>IPv4 源：192.168.1.10<br/>IPv4 目的：192.168.1.53<br/>UDP：53001 → 53<br/>DNS：ID=0x1201 · QR=0 · RD=1<br/>Question：example.com. IN A"]
+ upstream_query["② 递归器 → 权威<br/>IPv4 源：192.168.1.53<br/>IPv4 目的：203.0.113.53<br/>UDP：54002 → 53<br/>DNS：ID=0x8a30 · QR=0 · RD=0<br/>Question：example.com. IN A"]
+ upstream_reply["③ 权威 → 递归器<br/>IPv4 源：203.0.113.53<br/>IPv4 目的：192.168.1.53<br/>UDP：53 → 54002<br/>DNS：ID=0x8a30 · QR=1<br/>Answer：example.com. IN A<br/>198.51.100.20 · TTL=300 s"]
+ stub_reply["④ 递归器 → 存根<br/>IPv4 源：192.168.1.53<br/>IPv4 目的：192.168.1.10<br/>UDP：53 → 53001<br/>DNS：ID=0x1201 · QR=1<br/>Answer：example.com. IN A<br/>198.51.100.20 · TTL=300 s"]
+ stub_query -->|缓存未命中，发起上游查询| upstream_query
+ upstream_query -->|权威构造对应应答| upstream_reply
+ upstream_reply -->|递归器形成对存根的响应| stub_reply
+```
+
+递归器在这里接收并解释 DNS 消息，再用自己的地址、源端口与事务 ID 发起上游查询；它没有把存根的原 IP 包原样送到权威端。本例为便于区分选了两个不同 ID，协议并不要求两段 ID 必须不同。缓存命中时，中间这对上游报文可以完全不出现；返回的记录 TTL 还会受缓存剩余期限等条件影响。
+
 传统 DNS over UDP 未使用 EDNS 时的消息上限为 512 字节。请求方可在 **DNS 扩展机制**（extension mechanisms for DNS，EDNS(0)）的 `OPT` 伪记录中声明可接收的 UDP 载荷大小。声明值反映接收能力，实际请求还应考虑路径 MTU 与分片。若响应不能完整装入可用的 UDP 大小，服务端可用 `TC=1` 表示截断，请求方可通过 TCP 重新取得完整答案。通用 DNS 实现须支持 UDP 与 TCP，TCP 也可直接使用或复用已有连接[^edns][^dns-tcp]。
 
 ## 缓存、TTL 与错误结果
@@ -243,6 +262,8 @@ DNS 的输出是带类型、状态与缓存条件的记录，不只是一个 IP�
 [^ech-dns]: 〔RFC〕[RFC 9848 §3](https://www.rfc-editor.org/rfc/rfc9848.html#section-3)——`ech` 服务参数携带 ECHConfigList；与 RFC 9460 的通用服务绑定框架分工
 
 [^http3]: 〔RFC〕[RFC 9114 §3.1](https://www.rfc-editor.org/rfc/rfc9114.html#section-3.1)——HTTP/3 端点发现、替代服务与后续 QUIC 连接；HTTPS 记录通告 `h3` 的具体示例见[RFC 9460 §10.4.1](https://www.rfc-editor.org/rfc/rfc9460.html#section-10.4.1)
+
+[^dns-message]: 〔RFC〕[RFC 1035 §4.1.1—4.1.3、§4.2.1](https://www.rfc-editor.org/rfc/rfc1035.html#section-4.1.1)——DNS 头中的 ID、QR、RD，问题段与资源记录格式，以及 UDP 服务端口 53。
 
 [^dns-tcp]: 〔RFC〕[RFC 7766 §5、§6](https://www.rfc-editor.org/rfc/rfc7766.html#section-5)——通用 DNS 对 TCP 的支持要求，以及直接使用与复用 TCP 连接
 

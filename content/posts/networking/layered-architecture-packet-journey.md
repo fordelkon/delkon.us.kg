@@ -51,25 +51,39 @@ tags: ["networking"]
 
 **以太网帧**（Ethernet Frame）是以太网在数据链路层的传输单位。以基于 TCP 的 HTTPS 为例，TCP 报文段承载 TLS 编码后的部分字节，IP 数据报封装 TCP 报文段，以太网帧再把这一跳要发送的 IP 数据报装进载荷。物理层把数据编码为链路上的信号。以太网帧也可以直接承载 ARP，接收端通过 EtherType 区分载荷协议[^4]。
 
-```mermaid mobile-direction="TB" title="以太网承载 TCP/IP 的封装结构" description="外层容器包含内层载荷：帧头与 FCS 在 IP 包之外，IP 头在 TCP 段之外。常见路径中，应用处理 TLS/HTTP，内核处理 TCP/IP，驱动与硬件处理链路成帧。图不按字节比例，也不表示消息、TLS 记录和 TCP 报文段一一对应。"
-flowchart LR
- subgraph ethernet[以太网帧]
-  eth["帧头"]
-  subgraph ip_packet[IP 数据报]
-   ip["IP 头"]
-   subgraph tcp_segment[TCP 报文段]
-    tcp["TCP 头"]
-    payload["载荷"]
-    tcp --- payload
-   end
-   ip --- tcp
-  end
-  fcs["FCS"]
-  eth --- ip
-  payload --- fcs
+下面按帧首到帧尾的方向纵向展开，每个头部框内再列出字段。箭头表示排列顺序，不表示数据依次经过几个设备；框的大小不代表实际字节数。
+
+```mermaid title="以太网承载 TCP/IP 的封装结构" description="未加 VLAN 标签的 Ethernet II 承载 IPv4/TCP。纵向依次是 Ethernet 头、IPv4 头、TCP 头、TCP 数据和 Ethernet 帧尾，每层框内只展开关键字段。HTTPS over TCP 的数据部分是 TLS 编码后的字节。图不按字节比例，省略选项与必要的以太网填充，不表示应用消息、TLS 记录和 TCP 段一一对应。"
+flowchart TB
+ subgraph ethernet_header[Ethernet Header · 二层]
+  destination_mac["Destination MAC<br/>目的 MAC · 6 字节"]
+  source_mac["Source MAC<br/>源 MAC · 6 字节"]
+  ether_type["EtherType · 2 字节<br/>例如 IPv4 = 0x0800"]
+  destination_mac --- source_mac
+  source_mac --- ether_type
  end
- linkStyle default stroke:none
+ subgraph ipv4_header[IPv4 Header · 三层 · 至少 20 字节]
+  source_ip["Source IP<br/>源 IP · 4 字节"]
+  destination_ip["Destination IP<br/>目的 IP · 4 字节"]
+  ip_control["TTL · Protocol<br/>Header Checksum 等<br/>生存时间、上层协议、头部校验和"]
+  source_ip --- destination_ip
+  destination_ip --- ip_control
+ end
+ subgraph tcp_header[TCP Header · 四层 · 至少 20 字节]
+  ports["Source Port / 源端口<br/>Destination Port / 目的端口<br/>各 2 字节"]
+  tcp_control["Sequence Number / 序号<br/>Acknowledgment Number / 确认号<br/>Flags · Window · Checksum 等"]
+  ports --- tcp_control
+ end
+ payload["Application Data / TCP 载荷<br/>HTTP 数据，或 TLS 编码字节"]
+ fcs["Ethernet Trailer / 帧尾<br/>FCS · 4 字节"]
+ ethernet_header --> ipv4_header
+ ipv4_header --> tcp_header
+ tcp_header --> payload
+ payload --> fcs
+ linkStyle 0,1,2,3,4 stroke:none
 ```
+
+这张图展开的是协议的逻辑布局。帧的载荷包含整个 IP 数据报，IP 的载荷又包含整个 TCP 报文段；以太网头与 FCS 都在 IP 包之外。它不要求包在内核内存中连续排成一整块，例如 Linux 的包缓冲可以关联线性数据区与分散的页片段[^skb]。MAC、IP 和端口分别处于不同层的头部中，路由器换掉外层帧，不代表它同时换掉了内层的目的 IP。
 
 常见的未加 VLAN 标签的 Ethernet II 帧由以下字段组成[^ethernet-frame]：
 
@@ -171,6 +185,8 @@ flowchart TB
 
 1. **链路层帧头是逐跳重写的**（hop-by-hop）：同一份 IP 数据报从你的电脑到家用路由器、再到运营商接入设备，每经过一次三层路由转发，外层的源/目的 MAC 地址都会被替换成当前这段链路的收发双方。
 2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。NAT 按配置转换地址，而代理服务器在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
+
+先看普通转发的具体字段对照，见[第三篇同一个 IP 包经过三段以太网链路](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：源 / 目的 MAC 分别随接口改变，源 / 目的 IP 保留，TTL 则逐跳递减。这张图把“保持地址”与“保持整个包头”分开。
 
 家庭路由器常用的是 NAT 中的**网络地址端口转换**（Network Address Port Translation，NAPT）：除转换 IP 地址外，还维护 TCP/UDP 端口的映射，让多台内网设备共用一个公网 IP 地址[^napt]。具体的地址端口映射与回包转换，见[第三篇的 NAT 与 NAPT 示例](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)。
 
@@ -345,3 +361,5 @@ curl -q -4 --noproxy '*' --http1.1 \
 [^napt]: 〔RFC〕[RFC 3022 §2.2、§4.1](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.2)——NAPT 的全称、地址与端口映射，以及多台内网设备共用外部地址的机制。
 
 [^napi]: 〔平台与实现〕[Linux 内核文档：NAPI](https://docs.kernel.org/networking/napi.html)——中断通知与轮询处理的关系；名称在 Linux 2.4 时称 New API，现已不再对应特定全称。
+
+[^skb]: 〔平台与实现〕[Linux 内核文档：struct sk_buff](https://docs.kernel.org/networking/skbuff.html)——包的元数据与数据缓冲分离，数据可以由线性区、页片段及关联缓冲组成；协议封装顺序不等于物理内存连续布局。

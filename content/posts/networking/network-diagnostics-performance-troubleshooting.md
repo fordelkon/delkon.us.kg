@@ -95,6 +95,30 @@ $$
 
 PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经[区分 TUN、代理重建连接与 IP 隧道](/posts/networking/routing-forwarding-nat-virtual-interfaces/)：TUN 只是一种接口，不能从“启用了 TUN”推出每个原包都被完整加上外层头。若代理终结本地 TCP 后创建出站 TCP，两段连接各有自己的 MSS 与路径 MTU；若 VPN 承载完整内层包，才要进一步计算内外层封装开销。
 
+先用两份具体包看“变小”的含义。假定 IPv4 与 TCP 都不带选项，路径允许的 IP 包长从 1500 降到 1400 字节；发送端获知这个限制后，对后续发送或重传重新分段：
+
+```mermaid mobile-direction="TB" title="路径 MTU 变小时缩减的是哪部分数据" description="比较发送端按两种已知路径预算生成的 IPv4/TCP 包，不表示中间路由器把一个 DF=1 的大包裁短后转发。IP 头与 TCP 头各取无选项的 20 字节；MTU 只覆盖 IP 包，外部 Ethernet 头、填充与 FCS 不计入。较小包承载较少的 TCP 流字节，剩余字节由其他包继续发送；没有改变应用字节流本身。"
+flowchart LR
+ subgraph large[IP 总长度 1500 字节]
+  large_ip["IPv4 头：20<br/>Total Length = 1500"]
+  large_tcp["TCP 头：20"]
+  large_data["TCP 数据：1460"]
+  large_ip --- large_tcp
+  large_tcp --- large_data
+ end
+ subgraph small[IP 总长度 1400 字节]
+  small_ip["IPv4 头：20<br/>Total Length = 1400"]
+  small_tcp["TCP 头：20"]
+  small_data["TCP 数据：1360"]
+  small_ip --- small_tcp
+  small_tcp --- small_data
+ end
+ large --- small
+ linkStyle default stroke:none
+```
+
+这里 `20 + 20 + 1360 = 1400`，所以新的单包 TCP 数据预算为 1360 字节。若还有 TCP 时间戳选项、IPv6 扩展头或 VPN 外层封装，就要扣除相应的实际头部开销；不能把图中的 1360 当作所有连接都应设置的 MSS。
+
 ### IPv4 与 IPv6 的发现机制
 
 IP 分片在 NAT、防火墙等环境中有脆弱性，协议设计常尽量控制包长[^fragmentation]。经典**路径 MTU 发现**（Path MTU Discovery，PMTUD）在两个地址族中使用不同反馈：
