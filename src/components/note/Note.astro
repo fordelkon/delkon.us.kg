@@ -1,5 +1,5 @@
 ---
-import { type CollectionEntry, render } from "astro:content";
+import type { CollectionEntry } from "astro:content";
 import type { HTMLTag, Polymorphic } from "astro/types";
 import FormattedDate from "@/components/FormattedDate.astro";
 import SeriesBadge from "@/components/SeriesBadge.astro";
@@ -17,7 +17,6 @@ type Props<Tag extends HTMLTag> = Polymorphic<{ as: Tag }> & {
 };
 
 const { as: Tag = "div", note, isPreview = false, compact = false, series } = Astro.props;
-const { Content } = await render(note);
 const isLinkedRow = isPreview && compact;
 const Container = isLinkedRow ? "a" : "article";
 ---
@@ -73,7 +72,7 @@ const Container = isLinkedRow ? "a" : "article";
 			class="prose prose-sm mt-3 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:overflow-x-auto"
 			class:list={{ "line-clamp-6": isPreview }}
 		>
-			<Content />
+			<slot />
 		</div>
 	)}
 </Container>

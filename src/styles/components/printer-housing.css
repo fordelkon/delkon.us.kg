@@ -73,6 +73,38 @@ html[data-theme="dark"] .thermal-texture {
 	background-image: radial-gradient(circle, rgba(255, 255, 255, 0.03) 0.6px, transparent 0.6px);
 }
 
+/* Paint up to 60 perforations per edge on the moving sheet. */
+.paper-feed::before,
+.paper-feed::after {
+	--perforation-radius: 0.1875rem;
+	--perforation-pitch: 1.875rem;
+	--perforation-ink: color-mix(in oklab, var(--color-printer-ink) 30%, transparent);
+	content: "";
+	position: absolute;
+	inset-block-start: 1rem;
+	inline-size: calc(2 * var(--perforation-radius));
+	block-size: min(calc(100% - 1rem), calc(60 * var(--perforation-pitch)));
+	background-image: radial-gradient(
+		circle at 50% var(--perforation-radius),
+		transparent calc(var(--perforation-radius) - 1.25px),
+		var(--perforation-ink) calc(var(--perforation-radius) - 0.75px),
+		var(--perforation-ink) calc(var(--perforation-radius) - 0.25px),
+		transparent calc(var(--perforation-radius) + 0.25px)
+	);
+	background-size: 100% var(--perforation-pitch);
+	background-repeat: repeat-y;
+	opacity: 0.2;
+	pointer-events: none;
+}
+
+.paper-feed::before {
+	inset-inline-start: 0.3125rem;
+}
+
+.paper-feed::after {
+	inset-inline-end: 0.3125rem;
+}
+
 /* Torn/zigzag perforated edge at the bottom of the paper. The colour
    follows the swapped --color-printer-paper token, so it works in dark. */
 .paper-edge-bottom {

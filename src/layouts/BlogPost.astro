@@ -20,9 +20,10 @@ interface Props {
 	neighborhood: PostNeighborhood | undefined;
 	headings: MarkdownHeading[];
 	readingTime: string;
+	hasMath: boolean;
 }
 
-const { post, neighborhood, headings, readingTime } = Astro.props;
+const { post, neighborhood, headings, readingTime, hasMath } = Astro.props;
 const { ogImage, title, description, updatedDate, publishDate } = post.data;
 const socialImage = ogImage ?? ogImageUrl(post.id);
 const articleDate = updatedDate?.toISOString() ?? publishDate.toISOString();
@@ -32,6 +33,7 @@ const explainer = getPostExplainer(post.id);
 ---
 
 <BaseLayout
+	hasMath={hasMath}
 	meta={{
 		articleDate,
 		description,

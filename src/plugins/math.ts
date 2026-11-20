@@ -1,6 +1,6 @@
 import type { RootContent } from "hast";
 import katex from "katex";
-import { htmlToHast, type MdastPluginDefinition } from "satteri";
+import { htmlToHast, type MdastPluginDefinition, type MdastVisitorContext } from "satteri";
 
 // KaTeX emits visual HTML, semantic MathML, and a TeX annotation for one formula.
 // Index only the semantic text while preserving all three for rendering and AT.
@@ -15,11 +15,13 @@ function excludeDuplicateMath(node: RootContent): void {
 	for (const child of node.children) excludeDuplicateMath(child);
 }
 
-function renderMathChildren(value: string, displayMode: boolean) {
+function renderMathChildren(value: string, displayMode: boolean, ctx: MdastVisitorContext) {
 	const html = katex.renderToString(value, { displayMode, throwOnError: true });
 	const tree = htmlToHast(html, { fragment: true });
 
 	if (tree.type !== "root") throw new Error("Expected a KaTeX HTML fragment root.");
+
+	if (ctx.data.astro) ctx.data.astro.frontmatter.hasMath = true;
 
 	for (const child of tree.children) excludeDuplicateMath(child);
 
@@ -46,7 +48,7 @@ export function satteriMathPlugin(): MdastPluginDefinition {
 						role: "region",
 						ariaLabel: "数学公式",
 					},
-					hChildren: renderMathChildren(node.value, true),
+					hChildren: renderMathChildren(node.value, true, ctx),
 				},
 			});
 		},
@@ -57,7 +59,7 @@ export function satteriMathPlugin(): MdastPluginDefinition {
 				data: {
 					hName: "span",
 					hProperties: { className: ["not-prose"] },
-					hChildren: renderMathChildren(node.value, false),
+					hChildren: renderMathChildren(node.value, false, ctx),
 				},
 			});
 		},

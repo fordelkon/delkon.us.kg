@@ -3,30 +3,120 @@ import "@/styles/blocks/search.css";
 ---
 
 <script>
-	import type { PagefindModal } from "@pagefind/component-ui";
+	import type { PagefindModal, PagefindModalTrigger } from "@pagefind/component-ui";
+	import dialogStyles from "@/styles/blocks/search-dialog.css?url";
 
-	(() => {
-		if (import.meta.env.DEV) return;
-		const onIdle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
-		onIdle(async () => {
-			const { getInstanceManager } = await import("@pagefind/component-ui");
-			// Pagefind 1.5 reinitializes reconnected elements and wraps an existing
-			// dialog again. Use fresh elements and a fresh registry for each page;
-			// otherwise triggers retain detached modals after ClientRouter swaps.
-			document.addEventListener("astro:before-swap", () => {
-				for (const modal of document.querySelectorAll<PagefindModal>("pagefind-modal")) {
-					modal.close();
-				}
+	let pagefind: typeof import("@pagefind/component-ui") | undefined;
+	let stylesheet: HTMLLinkElement | undefined;
+	let stylesReady: Promise<void> | undefined;
 
-				getInstanceManager().removeInstance("site-search");
-			});
+	function loadDialogStyles() {
+		return new Promise<void>((resolve, reject) => {
+			const link = document.createElement("link");
+			link.rel = "stylesheet";
+			link.href = dialogStyles;
+			link.addEventListener("load", () => resolve(), { once: true });
+			link.addEventListener("error", () => {
+				link.remove();
+				stylesheet = undefined;
+				reject(new Error("Could not load the search stylesheet."));
+			}, { once: true });
+			stylesheet = link;
+			document.head.append(link);
 		});
-	})();
+	}
+
+	async function startSearch(trigger: PagefindModalTrigger, button: HTMLButtonElement) {
+		if (button.hasAttribute("aria-busy")) return;
+
+		const status = document.getElementById("search-load-status");
+		button.setAttribute("aria-busy", "true");
+
+		if (status) status.textContent = "Loading search…";
+
+		try {
+			await (stylesReady ??= loadDialogStyles());
+
+			if (!trigger.isConnected) return;
+
+			pagefind ??= await import("@pagefind/component-ui");
+
+			// The upgrade replaces the initial button with Pagefind's own trigger.
+			if (!trigger.isConnected) return;
+
+			trigger.buttonEl?.focus({ preventScroll: true });
+			trigger.openModal();
+
+			if (status) status.textContent = "";
+		} catch {
+			if (!stylesheet) stylesReady = undefined;
+
+			if (status) status.textContent = "Search could not load. Reload the page to try again.";
+		} finally {
+			button.removeAttribute("aria-busy");
+		}
+	}
+
+	document.addEventListener("click", (event) => {
+		if (!(event.target instanceof Element)) return;
+
+		const button = event.target.closest<HTMLButtonElement>("button[data-search-start]");
+		const trigger = button?.closest<PagefindModalTrigger>("pagefind-modal-trigger");
+
+		if (button && trigger) void startSearch(trigger, button);
+	});
+
+	document.addEventListener("keydown", (event) => {
+		if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return;
+
+		const isMac = /mac/i.test(navigator.userAgent);
+		const usesShortcut = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+
+		if (!usesShortcut || event.key.toLowerCase() !== "k") return;
+
+		const activeElement = document.activeElement;
+
+		if (
+			activeElement?.matches("input, textarea") ||
+			(activeElement instanceof HTMLElement && activeElement.isContentEditable)
+		) return;
+
+		// Pagefind handles the shortcut itself once its trigger upgrades.
+		const button = document.querySelector<HTMLButtonElement>("#search [data-search-start]");
+
+		if (!button) return;
+
+		event.preventDefault();
+		button.click();
+	});
+
+	document.addEventListener("astro:before-swap", (event) => {
+		// Keep the loaded link matched across Astro's head swaps.
+		if (stylesheet) event.newDocument.head.append(stylesheet.cloneNode());
+
+		if (!pagefind) return;
+
+		// Fresh elements and registry entries keep triggers from finding detached dialogs.
+		document.querySelector<PagefindModal>("pagefind-modal")?.close();
+		pagefind.getInstanceManager().removeInstance("site-search");
+	});
 </script>
 
 <pagefind-config
 	instance="site-search"
 	baseUrl={`${import.meta.env.BASE_URL}`}
 	bundle-path={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/pagefind/`}></pagefind-config>
-<pagefind-modal-trigger instance="site-search" id="search" class="ms-auto shrink-0" hide-shortcut compact></pagefind-modal-trigger>
+<pagefind-modal-trigger instance="site-search" id="search" class="ms-auto shrink-0" hide-shortcut compact>
+	<button
+		aria-haspopup="dialog"
+		aria-keyshortcuts="Control+K Meta+K"
+		aria-label="Search"
+		class="pf-trigger-btn"
+		data-search-start
+		type="button"
+	>
+		<span aria-hidden="true" class="pf-trigger-icon"></span>
+	</button>
+</pagefind-modal-trigger>
+<span class="sr-only" id="search-load-status" role="status"></span>
 <pagefind-modal instance="site-search"></pagefind-modal>

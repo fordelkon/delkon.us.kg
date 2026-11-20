@@ -1,5 +1,5 @@
 ---
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 import type { GetStaticPaths, InferGetStaticPropsType } from "astro";
 import Note from "@/components/note/Note.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
@@ -21,6 +21,7 @@ export type Props = InferGetStaticPropsType<typeof getStaticPaths>;
 
 const { note } = Astro.props;
 const series = await getSeriesContext(note);
+const { Content, remarkPluginFrontmatter } = await render(note);
 
 const meta = {
 	description:
@@ -30,7 +31,9 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta}>
-	<Note as="h1" note={note} series={series} />
+<PageLayout meta={meta} hasMath={remarkPluginFrontmatter.hasMath === true}>
+	<Note as="h1" note={note} series={series}>
+		<Content />
+	</Note>
 	<SeriesNav entry={note} />
 </PageLayout>

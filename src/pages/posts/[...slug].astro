@@ -23,6 +23,12 @@ const { Content, headings, remarkPluginFrontmatter } = await render(post);
 const readingTime: string = remarkPluginFrontmatter.readingTime;
 ---
 
-<PostLayout post={post} neighborhood={neighborhood} headings={headings} readingTime={readingTime}>
+<PostLayout
+	post={post}
+	neighborhood={neighborhood}
+	headings={headings}
+	readingTime={readingTime}
+	hasMath={remarkPluginFrontmatter.hasMath === true}
+>
 	<Content />
 </PostLayout>

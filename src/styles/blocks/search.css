@@ -1,5 +1,3 @@
-@import "@pagefind/component-ui/css" layer(pagefind);
-
 :root {
 	--pf-text-muted: var(--color-printer-ink);
 	--pf-background: var(--color-printer-paper);
@@ -24,8 +22,14 @@
 	height: calc(var(--spacing) * 9);
 	padding: 8px;
 	accent-color: var(--color-printer-accent);
+	color: var(--pf-text-muted);
 	border: 0;
 	border-radius: 0;
+	cursor: pointer;
+
+	&[aria-busy="true"] {
+		cursor: wait;
+	}
 
 	/* Mobile header control row: match the 40px touch target the theme
 	   toggle and burger use in the header's icon-button cluster. The
@@ -49,6 +53,10 @@
 	.pf-trigger-icon {
 		width: calc(var(--spacing) * 7);
 		height: calc(var(--spacing) * 7);
+		flex-shrink: 0;
+		background: currentColor;
+		mask-image: var(--pf-icon-search);
+		mask-size: 100%;
 	}
 }
 

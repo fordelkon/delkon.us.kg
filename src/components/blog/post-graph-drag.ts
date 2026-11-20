@@ -42,10 +42,10 @@ function keepInside(position: number, size: number) {
 	return Math.max(nodePadding, Math.min(size - nodePadding, position));
 }
 
-class PostLinkGraph extends HTMLElement {
+export class PostLinkGraph extends HTMLElement {
 	#disconnect: (() => void) | undefined;
 
-	connectedCallback() {
+	activate() {
 		const graph = this.querySelector("svg");
 		const label = this.querySelector("[data-graph-label]");
 

@@ -67,7 +67,38 @@ const points = layoutPostGraph(postId, neighborhood);
 </aside>
 
 <script>
-	import "./post-graph-drag";
+	const observer = new IntersectionObserver((entries) => {
+		const entry = entries.find(({ isIntersecting, target }) => isIntersecting && target.isConnected);
+
+		if (!entry) return;
+
+		const { target } = entry;
+		observer.unobserve(target);
+		void import("./post-graph-drag")
+			.then(({ PostLinkGraph }) => {
+				if (!(target instanceof PostLinkGraph) || !target.isConnected) return;
+
+				if (target.getClientRects().length) target.activate();
+				else observer.observe(target);
+			})
+			.catch(() => {
+				console.error("Could not load article graph interactions.");
+			});
+	});
+
+	function observeGraph() {
+		observer.disconnect();
+
+		const graph = document.querySelector("post-link-graph");
+
+		if (graph) observer.observe(graph);
+	}
+
+	document.addEventListener("astro:page-load", observeGraph);
+
+	document.addEventListener("astro:before-swap", () => observer.disconnect());
+
+	observeGraph();
 </script>
 
 <style>

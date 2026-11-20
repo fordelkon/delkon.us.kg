@@ -28,13 +28,10 @@ import { PRINTER_ACCENT, PRINTER_DESK } from "./src/styles/tokens/printer-palett
 // https://astro.build/config
 export default defineConfig({
 	site: siteConfig.url,
-	// Replaces the former inline speculationrules script: Astro's prefetch
-	// regenerates its rules on every astro:page-load, so client-side
-	// navigation keeps prefetching (a re-inserted static rules script is
-	// ignored by Chrome as "previously inserted into another document").
+	// Wait for navigation intent before fetching pages from link-heavy archives.
 	prefetch: {
 		prefetchAll: true,
-		defaultStrategy: "load",
+		defaultStrategy: "hover",
 	},
 	image: {
 		domains: ["webmention.io"],

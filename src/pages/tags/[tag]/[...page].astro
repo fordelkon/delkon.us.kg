@@ -33,7 +33,8 @@ const { tag } = Astro.params;
 const tagMeta = await getTagMeta(tag);
 
 const relatedSeries = (await getSeriesGroups()).filter((group) => group.tags.includes(tag));
-const TagContent = tagMeta ? (await render(tagMeta)).Content : null;
+const tagDocument = tagMeta ? await render(tagMeta) : null;
+const TagContent = tagDocument?.Content;
 const tagTitle = tagMeta?.data.title ?? tag;
 
 const meta = {
@@ -42,7 +43,7 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta}>
+<PageLayout meta={meta} hasMath={tagDocument?.remarkPluginFrontmatter.hasMath === true}>
 	<nav aria-label="Breadcrumbs" class="mb-6 print-label">
 		<ul class="flex items-center gap-1.5">
 			<li>

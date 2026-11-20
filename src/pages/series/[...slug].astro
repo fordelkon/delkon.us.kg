@@ -23,10 +23,12 @@ const sections = group.sections.length
 	? group.sections
 	: [{ id: "chapters", title: "阅读顺序", entries: group.entries }];
 
-const Content = definition ? (await render(definition)).Content : null;
+const seriesDocument = definition ? await render(definition) : null;
+const Content = seriesDocument?.Content;
 ---
 
 <PageLayout
+	hasMath={seriesDocument?.remarkPluginFrontmatter.hasMath === true}
 	meta={{ title: group.title, description: group.description ?? `按顺序阅读${group.title}。` }}
 >
 	<nav aria-label="Breadcrumbs" class="mb-6 print-label">

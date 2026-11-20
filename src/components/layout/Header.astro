@@ -29,7 +29,7 @@ import { menuLinks } from "@/site.config";
 			))}
 		</nav>
 		<div class="flex shrink-0 items-center justify-end gap-2">
-			<Search />
+			{import.meta.env.PROD && <Search />}
 			<!-- size="cluster": uniform 40px touch target at mobile widths and
 			     no extra start margin, matching the burger beside it. -->
 			<ThemeToggle size="cluster" />

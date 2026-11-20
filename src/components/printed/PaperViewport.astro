@@ -1,9 +1,6 @@
 ---
 import Footer from "@/components/layout/Footer.astro";
 
-// Perforation marks down both paper edges.
-const PERFORATION_DOTS = 60;
-
 // The footer's printed stamp marks the home page's paper.
 const showStamp = Astro.url.pathname === "/";
 ---
@@ -36,17 +33,6 @@ const showStamp = Astro.url.pathname === "/";
 	<div>
 		<div class="paper-feed bg-printer-paper thermal-texture relative z-0 flex min-h-(--paper-min-height) flex-col overflow-hidden shadow-(--paper-shadow)">
 			<div aria-hidden="true" class="absolute -top-1 left-0 right-0 h-1 bg-printer-paper"></div>
-			<!-- Perforation marks down both edges -->
-			{["left", "right"].map((side) => (
-				<div
-					aria-hidden="true"
-					class={`pointer-events-none absolute bottom-0 ${side}-0 top-0 flex w-4 flex-col items-center justify-start gap-6 pt-4 opacity-20`}
-				>
-					{Array.from({ length: PERFORATION_DOTS }).map(() => (
-						<div class="h-1.5 w-1.5 shrink-0 rounded-full border border-printer-ink/30" />
-					))}
-				</div>
-			))}
 			<main id="main" class="relative z-10 flex-1 px-(--receipt-content-inset) py-8">
 				<slot />
 			</main>

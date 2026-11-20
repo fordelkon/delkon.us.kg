@@ -1,5 +1,5 @@
 ---
-import { type CollectionEntry } from "astro:content";
+import { type CollectionEntry, render } from "astro:content";
 import type { GetStaticPaths, Page } from "astro";
 import { Icon } from "astro-icon/components";
 import Note from "@/components/note/Note.astro";
@@ -28,6 +28,11 @@ interface Props {
 }
 
 const { page, seriesGroups } = Astro.props;
+const notes = await Promise.all(page.data.map(async (note) => ({ note, ...(await render(note)) })));
+
+const hasMath = notes.some(
+	({ remarkPluginFrontmatter }) => remarkPluginFrontmatter.hasMath === true,
+);
 
 const meta = {
 	description: "Read my collection of notes",
@@ -35,7 +40,7 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta}>
+<PageLayout meta={meta} hasMath={hasMath}>
 	<header class="mb-(--receipt-page-heading-gap) flex items-center gap-3">
 		<h1 class="receipt-title">Notes</h1>
 		<a class="text-printer-accent hover:text-printer-ink" href="/notes/rss.xml" target="_blank">
@@ -44,11 +49,13 @@ const meta = {
 		</a>
 	</header>
 	{page.currentPage === 1 && <SeriesArchive groups={seriesGroups} />}
-	{page.data.length > 0 && (
+	{notes.length > 0 && (
 		<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
-			{page.data.map((note) => (
+			{notes.map(({ note, Content }) => (
 				<li>
-					<Note note={note} as="h2" isPreview />
+					<Note note={note} as="h2" isPreview>
+						<Content />
+					</Note>
 				</li>
 			))}
 		</ul>

@@ -32,16 +32,20 @@ const toc = generateToc(headings);
 	// https://github.com/withastro/starlight/blob/main/packages/starlight/src/components-internals/TableOfContents/starlight-toc.ts
 	const tocHeadingSelector = ":where(h2, h3, h4)[id]";
 	let cleanup: (() => void) | undefined;
+	let activeNav: HTMLElement | null = null;
 
 	function stop(): void {
 		cleanup?.();
 		cleanup = undefined;
+		activeNav = null;
 	}
 
 	function initToc(): void {
-		stop();
-
 		const nav = document.querySelector<HTMLElement>("nav[data-toc]");
+
+		if (nav === activeNav) return;
+
+		stop();
 		const scrollRegion = nav?.closest<HTMLElement>("[data-post-disclosure-scroll]");
 		const details = nav?.closest("details");
 
@@ -51,6 +55,7 @@ const toc = generateToc(headings);
 
 		if (!links.length) return;
 
+		activeNav = nav;
 		const marker = nav.querySelector<HTMLElement>("[data-toc-marker]");
 		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 		const bindings = new AbortController();
@@ -142,6 +147,10 @@ const toc = generateToc(headings);
 
 		const observe = (): void => {
 			observer?.disconnect();
+			observer = undefined;
+
+			if (!details.open || !nav.getClientRects().length) return;
+
 			const headerHeight = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
 			const top = headerHeight + 32;
 			// A narrow band below the pinned housing tracks sections across long paragraphs.
@@ -163,15 +172,18 @@ const toc = generateToc(headings);
 
 		const onResize = (): void => {
 			observer?.disconnect();
+			observer = undefined;
 			clearTimeout(resizeTimer);
 			resizeTimer = setTimeout(observe, 200);
-			scheduleMeasure();
 		};
 
 		window.addEventListener("resize", onResize, { signal: bindings.signal });
-		details.addEventListener("toggle", scheduleMeasure, { signal: bindings.signal });
-		// Container size changes include breakpoint visibility and font reflow.
-		const geometry = new ResizeObserver(scheduleMeasure);
+		details.addEventListener("toggle", observe, { signal: bindings.signal });
+
+		const geometry = new ResizeObserver(() => {
+			if (observer) scheduleMeasure();
+		});
+
 		geometry.observe(nav);
 		geometry.observe(scrollRegion);
 		observe();

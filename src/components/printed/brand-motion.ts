@@ -182,8 +182,14 @@ function titleRenderer(root: HTMLElement) {
 
 export function animateBrand(root: HTMLElement) {
 	const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-	const orbit = orbitRenderer(root);
-	let title: ReturnType<typeof titleRenderer>;
+
+	let artwork:
+		| {
+				orbit: ReturnType<typeof orbitRenderer>;
+				title: ReturnType<typeof titleRenderer>;
+		  }
+		| undefined;
+
 	let frame = 0;
 	let elapsed = 0;
 	let previous = 0;
@@ -201,14 +207,14 @@ export function animateBrand(root: HTMLElement) {
 		previous = now;
 
 		if (elapsed >= PLAYBACK_DURATION) {
-			orbit?.finish();
-			title?.finish();
+			artwork?.orbit?.finish();
+			artwork?.title?.finish();
 
 			return;
 		}
 
-		orbit?.render(elapsed);
-		title?.render(elapsed);
+		artwork?.orbit?.render(elapsed);
+		artwork?.title?.render(elapsed);
 		frame = requestAnimationFrame(render);
 	};
 
@@ -217,22 +223,23 @@ export function animateBrand(root: HTMLElement) {
 		previous = 0;
 
 		if (reducedMotion.matches) {
-			orbit?.reset();
-			title?.finish();
+			artwork?.orbit?.reset();
+			artwork?.title?.finish();
 
 			return;
 		}
 
-		if (!ready || disconnected || elapsed >= PLAYBACK_DURATION) return;
+		if (!ready || disconnected || document.hidden || elapsed >= PLAYBACK_DURATION) return;
 
-		if (!document.hidden) frame = requestAnimationFrame(render);
+		artwork ??= { orbit: orbitRenderer(root), title: titleRenderer(root) };
+		frame = requestAnimationFrame(render);
 	};
 
 	// Wait for the actual font before sampling ink. Static HTML remains visible
 	// while it loads, and neither decoration gets ahead of the other.
 	void document.fonts.ready.then(() => {
 		if (disconnected) return;
-		title = titleRenderer(root);
+
 		ready = true;
 		sync();
 	});
@@ -246,6 +253,6 @@ export function animateBrand(root: HTMLElement) {
 		cancelAnimationFrame(frame);
 		reducedMotion.removeEventListener("change", sync);
 		document.removeEventListener("visibilitychange", sync);
-		title?.finish();
+		artwork?.title?.finish();
 	};
 }

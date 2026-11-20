@@ -1,5 +1,6 @@
 ---
 import { ClientRouter } from "astro:transitions";
+import katexStyles from "katex/dist/katex.min.css?url";
 import BaseHead from "@/components/BaseHead.astro";
 import Header from "@/components/layout/Header.astro";
 import PaperViewport from "@/components/printed/PaperViewport.astro";
@@ -11,10 +12,12 @@ import type { SiteMeta } from "@/types";
 
 interface Props {
 	meta: SiteMeta;
+	hasMath?: boolean | undefined;
 }
 
 const {
 	meta: { articleDate, description = siteConfig.description, ogImage, title },
+	hasMath = false,
 } = Astro.props;
 
 const hasStartGutter = Astro.slots.has("start-gutter");
@@ -24,6 +27,7 @@ const hasGutter = Astro.slots.has("gutter");
 <html class="scroll-smooth" lang={siteConfig.lang}>
 	<head>
 		<BaseHead articleDate={articleDate} description={description} ogImage={ogImage} title={title} />
+		{hasMath && <link rel="stylesheet" href={katexStyles} />}
 		<ThemeProvider />
 		<ClientRouter />
 	</head>

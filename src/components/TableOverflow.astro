@@ -1,29 +1,32 @@
 <script>
-	let cleanup: (() => void) | undefined;
+	interface ScrollRegion {
+		hint: HTMLParagraphElement;
+		viewport: HTMLDivElement;
+	}
+
+	let observer: ResizeObserver | undefined;
 
 	function initTables(): void {
-		cleanup?.();
-		const observers: ResizeObserver[] = [];
+		observer?.disconnect();
+		const tables = document.querySelectorAll<HTMLTableElement>(".prose table");
 
-		for (const table of document.querySelectorAll<HTMLTableElement>(".prose table")) {
-			const existing = table.closest<HTMLElement>(".table-overflow");
-			const wrapper = existing ?? document.createElement("div");
-			wrapper.className = "table-overflow";
-			const hint = wrapper.querySelector<HTMLParagraphElement>(".table-scroll-hint") ?? document.createElement("p");
-			hint.className = "table-scroll-hint";
-			hint.textContent = "左右滑动查看完整表格 · 键盘聚焦后可用方向键";
-			hint.setAttribute("data-pagefind-ignore", "all");
-			const viewport = wrapper.querySelector<HTMLDivElement>(".table-scroll") ?? document.createElement("div");
-			viewport.className = "table-scroll";
+		if (!tables.length) return;
 
-			if (!existing) {
-				table.before(wrapper);
-				wrapper.append(hint, viewport);
-				viewport.append(table);
+		const regions = new Map<Element, ScrollRegion>();
+		observer = new ResizeObserver((entries) => {
+			const changed = new Map<ScrollRegion, boolean>();
+
+			// Read every affected width before changing visibility or ARIA attributes.
+			for (const { target } of entries) {
+				const region = regions.get(target);
+
+				if (region && !changed.has(region)) {
+					const { viewport } = region;
+					changed.set(region, viewport.scrollWidth > viewport.clientWidth + 1);
+				}
 			}
 
-			const measure = (): void => {
-				const overflowing = viewport.scrollWidth > viewport.clientWidth + 1;
+			for (const [{ hint, viewport }, overflowing] of changed) {
 				hint.hidden = !overflowing;
 
 				if (overflowing) {
@@ -35,23 +38,41 @@
 					viewport.removeAttribute("role");
 					viewport.removeAttribute("aria-label");
 				}
-			};
+			}
+		});
 
-			const observer = new ResizeObserver(measure);
+		for (const table of tables) {
+			const existing = table.closest<HTMLElement>(".table-overflow");
+			const wrapper = existing ?? document.createElement("div");
+			wrapper.className = "table-overflow";
+			const hint = wrapper.querySelector<HTMLParagraphElement>(".table-scroll-hint") ?? document.createElement("p");
+			hint.className = "table-scroll-hint";
+			hint.textContent = "左右滑动查看完整表格 · 键盘聚焦后可用方向键";
+			hint.setAttribute("data-pagefind-ignore", "all");
+			const viewport = wrapper.querySelector<HTMLDivElement>(".table-scroll") ?? document.createElement("div");
+			viewport.className = "table-scroll";
+
+			if (!existing) {
+				hint.hidden = true;
+				table.before(wrapper);
+				wrapper.append(hint, viewport);
+				viewport.append(table);
+			}
+
+			const region = { hint, viewport };
+			regions.set(viewport, region);
+			regions.set(table, region);
 			observer.observe(viewport);
 			observer.observe(table);
-			observers.push(observer);
-			measure();
 		}
-
-		cleanup = () => {
-			for (const observer of observers) observer.disconnect();
-		};
 	}
 
 	document.addEventListener("astro:page-load", initTables);
 
-	document.addEventListener("astro:before-swap", () => cleanup?.());
+	document.addEventListener("astro:before-swap", () => {
+		observer?.disconnect();
+		observer = undefined;
+	});
 </script>
 
 <style is:global>
