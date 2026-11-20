@@ -40,14 +40,16 @@ tags: ["networking"]
 
 不同层次的**协议数据单元**（Protocol Data Unit，PDU）有各自的名称，RFC 9293 在描述 TCP 时就明确区分了应用看到的字节流、网络上传输的 TCP 报文段以及承载它的 IP 数据报[^2]：
 
-| 所在层次 | 数据单元名称 | 头部携带的关键控制信息 |
+| 所在层次 | 数据单元名称 | 携带的关键控制信息 |
 | --- | --- | --- |
 | 应用层 | 消息（Message）或字节流（Byte Stream） | HTTP 方法、路径、Host、状态码；TLS 记录头与密文载荷 |
 | 传输层 | **报文段**（Segment，TCP）或**数据报**（Datagram，UDP） | 源端口、目的端口、序号、确认号、校验和 |
 | 网络层 | **IP 数据报**（Packet / Datagram） | 源 IP、目的 IP、协议号（Protocol / Next Header）、**生存时间**（Time to Live，TTL）/ **跳数限制**（Hop Limit） |
 | 链路层 | **帧**（Frame） | 源 MAC、目的 MAC、**以太网类型**（EtherType）、**帧校验序列**（Frame Check Sequence，FCS） |
 
-下面是普通 TCP/IP 发送路径的单向封装示意。它只展示头部关系：一条应用消息可能跨越多条 TLS 记录或 TCP 报文段，一个报文段也可能承载不同消息的片段，三者不存在固定的一一对应。
+### 以太网帧的封装与结构
+
+**以太网帧**（Ethernet Frame）是以太网在数据链路层的传输单位。以基于 TCP 的 HTTPS 为例，TCP 报文段承载 TLS 编码后的部分字节，IP 数据报封装 TCP 报文段，以太网帧再把这一跳要发送的 IP 数据报装进载荷。物理层把数据编码为链路上的信号。以太网帧也可以直接承载 ARP，接收端通过 EtherType 区分载荷协议[^4]。
 
 ```mermaid mobile-direction="TB" title="以太网承载 TCP/IP 的封装结构" description="外层容器包含内层载荷：帧头与 FCS 在 IP 包之外，IP 头在 TCP 段之外。常见路径中，应用处理 TLS/HTTP，内核处理 TCP/IP，驱动与硬件处理链路成帧。图不按字节比例，也不表示消息、TLS 记录和 TCP 报文段一一对应。"
 flowchart LR
@@ -68,6 +70,22 @@ flowchart LR
  end
  linkStyle default stroke:none
 ```
+
+常见的未加 VLAN 标签的 Ethernet II 帧由以下字段组成[^ethernet-frame]：
+
+| 字段 | 大小 | 作用 |
+| --- | --- | --- |
+| 目的 MAC 地址 | 6 字节 | 标识当前二层链路上的接收方或接收范围 |
+| 源 MAC 地址 | 6 字节 | 标识当前二层链路上的发送接口 |
+| EtherType | 2 字节 | 指明载荷协议，例如 IPv4 |
+| 载荷与必要的填充 | 46 至 1500 字节 | 承载上层数据，过短时补足最小帧长 |
+| FCS | 4 字节 | 位于帧尾，用于检测传输错误 |
+
+从目的 MAC 到 FCS，14 字节帧头、46 至 1500 字节的载荷与填充、4 字节帧尾合计 64 至 1518 字节。前导码、帧起始定界符与帧间间隔均在这个计数范围之外。单个 802.1Q VLAN 标签增加 4 字节的头部开销，带单标签的标准帧上限为 1522 字节[^ethernet-frame]。
+
+**最大传输单元**（Maximum Transmission Unit，MTU）在这里指接口可在一个帧内承载的最大 IP 数据报大小，常见以太网 IP MTU 为 1500 字节，包含 IP 头。1518 字节则是计入未加标签的以太网头和 FCS 后的帧长上限。支持**巨型帧**（Jumbo Frame）的链路可以配置更大的 MTU[^ethernet-frame]。
+
+图中的包含关系描述一次封装。通过 TCP 传输一个 10 MB 文件时，TCP 会把字节流分成多个报文段，经多个 IP 数据报和链路帧完成传输。每个帧只负责当前链路的交付，路由器如何为下一跳重新封装见[主机、交换机与路由器的分工](#端到端与逐跳主机交换机与路由器的分工)。
 
 ### 接收端怎样选择上层协议
 
@@ -299,6 +317,8 @@ curl -q -4 --noproxy '*' --http1.1 \
 [^3]: 〔RFC〕[RFC 791: Internet Protocol](https://www.rfc-editor.org/info/rfc791/)——定义 IPv4 数据报格式、Protocol 协议号复用字段、TTL 与跨网络转发机制
 
 [^4]: 〔RFC〕[IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
+
+[^ethernet-frame]: 〔RFC 与设备文档〕[RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)——IPv4 在以太网上的载荷大小和填充规则；[Cisco 的以太网帧格式](https://www.cisco.com/en/US/docs/internetworking/troubleshooting/guide/tr1904.pdf)说明帧字段、最小帧长和前导码，[802.1Q 帧格式](https://www.cisco.com/c/en/us/support/docs/lan-switching/8021q/17056-741-4.html)说明标签开销，[接口 MTU 文档](https://www.cisco.com/c/en/us/td/docs/iosxr/cisco8000/interfaces-and-hardware-component/configuration-guide/interfaces-and-hardware-component-config-cisco8000/mtu-overview/ethernet-mtu.html)给出巨型帧支持示例。
 
 [^5]: 〔RFC〕[RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
 
