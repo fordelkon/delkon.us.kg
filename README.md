@@ -44,8 +44,20 @@ collapsible menu; focus and menu changes keep the same sticky offset. A stationa
 scrolling sheet, including when resizing the window or expanding the mobile menu.
 The workbench texture shares a fixed viewport origin with that backdrop. The
 housing has an open feed slot that exposes the same scrolling sheet, so no fixed
-paper strip or shading separates from the moving text. The implementation keeps the existing theme switch; the reference
-site's lamp, snail, and draggable stickers are outside this version.
+paper strip or shading separates from the moving text. The housing decals can
+be dragged around the printer face without covering the brand, status light,
+navigation, or feed slot. On wide screens, the workbench decals start around
+mid-height beside the printer except on post detail pages, where the gutters are
+reserved for article navigation. Drag a decal to move it. Pull a visible edge
+inward past the gesture threshold to peel it; short edge moves stay flat. A
+partially attached decal flattens on
+release. Once fully peeled, the loose decal follows the pointer until release,
+then flies off and springs back into the same spot with a sweep of light. The
+curl loads vgpu on demand and has a CSS fallback. Reduced motion keeps dragging
+without the peel or snap animations. Drag and arrow-key moves are saved in the
+browser across reloads. Escape resets a decal and clears its saved position;
+Enter previews the snap and return. `public/stickers/` contains only the resized transparent WebP files
+served by the site, with lossless copies for the housing.
 
 ## Content
 
@@ -80,7 +92,8 @@ The deployment target is configured in [wrangler.jsonc](wrangler.jsonc). Build o
 ## Credits
 
 - [Astro Cactus](https://github.com/chrismwilliams/astro-theme-cactus) provides the original blog foundation.
-- [nooc.me](https://nooc.me) provides the visual reference for the thermal printer design.
+- [nooc.me](https://nooc.me) provides the visual reference for the thermal printer and its housing stickers.
+- [Sticker Forge](https://github.com/CatsJuice/sticker-forge) inspired the workbench sticker curl.
 - [ascii.rest](https://ascii.rest/) provides the static language logos, Tux, and 404 artwork; its MIT notice is preserved in [public/ascii/LICENSE](public/ascii/LICENSE).
 
 MIT license; see [LICENSE](LICENSE).

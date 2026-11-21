@@ -66,6 +66,10 @@
 	},
 	"overrides": [
 		{
+			"includes": ["CLAUDE.md"],
+			"formatter": { "enabled": false }
+		},
+		{
 			"includes": ["content/**/*.md", "content/**/*.mdx"],
 			"formatter": { "enabled": false }
 		},

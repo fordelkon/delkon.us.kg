@@ -11,8 +11,11 @@ overrides:
 allowBuilds:
   "@biomejs/biome": true
   "@tailwindcss/oxide": true
+  # Stickers use browser WebGPU; native Node adapters are not built.
+  "@vgpu/adapter-node": false
   esbuild: true
   sharp: true
+  webgpu: false
   workerd: true
 minimumReleaseAgeExclude:
   - "@oxlint/binding-android-arm-eabi@1.88.0"

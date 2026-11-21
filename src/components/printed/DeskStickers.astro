@@ -1,0 +1,279 @@
+---
+import { stickerOutline } from "./desk-sticker-outline";
+
+// Alternate gutters so the shorter layout shows a pair on each side.
+const stickers = [
+	{
+		id: "deepseek",
+		label: "DeepSeek",
+		column: 1,
+		row: 0,
+		stagger: 0,
+		offset: -24,
+		tilt: -9,
+		height: 120,
+	},
+	{
+		id: "doubao",
+		label: "Doubao",
+		column: 3,
+		row: 0,
+		stagger: 14,
+		offset: 18,
+		tilt: 8,
+		height: 132,
+	},
+	{
+		id: "gemini",
+		label: "Gemini",
+		column: 1,
+		row: 1,
+		stagger: 3,
+		offset: 26,
+		tilt: 7,
+		height: 138,
+	},
+	{ id: "grok", label: "Grok", column: 3, row: 1, stagger: 20, offset: -17, tilt: -6, height: 120 },
+	{ id: "kimi", label: "Kimi", column: 1, row: 2, stagger: 0, offset: -15, tilt: -8, height: 128 },
+	{
+		id: "qianwen",
+		label: "Qwen",
+		column: 3,
+		row: 2,
+		stagger: 15,
+		offset: 25,
+		tilt: 10,
+		height: 140,
+	},
+];
+---
+
+<desk-stickers>
+	{
+		stickers.map(async ({ id, label, column, row, stagger, offset, tilt, height }) => (
+			<button
+				aria-hidden="true"
+				aria-label={`${label} sticker`}
+				class="desk-sticker"
+				data-sticker-id={id}
+				data-sticker-label={label}
+				data-sticker-outline={await stickerOutline(id)}
+				data-sticker-side={column === 1 ? "left" : "right"}
+				data-sticker-src={`/stickers/${id}.webp`}
+				disabled
+				style={`--sticker-image: url('/stickers/${id}.webp'); --sticker-column: ${column}; --sticker-row: ${row}; --sticker-stagger: ${stagger}px; --sticker-offset: ${offset}px; --sticker-tilt: ${tilt}deg; --sticker-height: ${height}px`}
+				type="button"
+			>
+				<span aria-hidden="true" class="desk-sticker-lift" />
+				<span aria-hidden="true" class="desk-sticker-flight">
+					{Array.from({ length: 5 }, (_, band) => (
+						<span class="desk-sticker-band" style={`--band: ${band}`} />
+					))}
+					<span class="desk-sticker-sweep" />
+				</span>
+			</button>
+		))
+	}
+</desk-stickers>
+
+<script>
+	import { bindDeskPeel } from "./desk-sticker-peel";
+
+	class DeskStickers extends HTMLElement {
+		private cleanup: (() => void) | undefined;
+
+		connectedCallback(): void {
+			this.cleanup?.();
+			this.cleanup = bindDeskPeel(this);
+		}
+
+		disconnectedCallback(): void {
+			this.cleanup?.();
+		}
+	}
+
+	if (!customElements.get("desk-stickers")) {
+		customElements.define("desk-stickers", DeskStickers);
+	}
+</script>
+
+<style>
+	desk-stickers {
+		display: none;
+		pointer-events: none;
+	}
+
+	@media (min-width: 70rem) and (min-height: 27rem) {
+		desk-stickers {
+			--desk-center-row: 0.5;
+			--desk-pitch: clamp(9.5rem, 23dvh, 11.5rem);
+			--desk-scale: 1;
+			position: fixed;
+			inset: 50dvh 0 auto;
+			z-index: 1;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) var(--container-3xl) minmax(0, 1fr);
+			grid-template-rows: 0;
+		}
+
+		.desk-sticker {
+			--desk-height: calc(var(--sticker-height) * var(--desk-scale));
+			position: relative;
+			grid-row: 1;
+			grid-column: var(--sticker-column);
+			justify-self: center;
+			align-self: start;
+			margin-block-start: calc(
+				(var(--sticker-row) - var(--desk-center-row)) * var(--desk-pitch) + var(--sticker-stagger) -
+					var(--desk-height) / 2 - 9px
+			);
+			block-size: var(--desk-height);
+			aspect-ratio: 2 / 3;
+			transform: translate(calc(var(--sticker-offset) + var(--drag-x, 0px)), var(--drag-y, 0px))
+				rotate(var(--sticker-tilt));
+			-webkit-user-drag: none;
+			user-select: none;
+		}
+
+		.desk-sticker::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			background: var(--sticker-image) center / contain no-repeat;
+			filter: drop-shadow(0 2px 2px rgb(0 0 0 / 27%));
+		}
+
+		.desk-sticker:enabled {
+			cursor: grab;
+			pointer-events: auto;
+			touch-action: none;
+		}
+
+		.desk-sticker:focus {
+			outline: 2px solid var(--color-printer-accent);
+			outline-offset: 4px;
+		}
+
+		.desk-sticker[data-grab] {
+			cursor: grabbing;
+		}
+
+		.desk-sticker[data-curl]::before,
+		.desk-sticker[data-detached]::before {
+			opacity: 0;
+		}
+
+		.desk-sticker-flight {
+			position: absolute;
+			display: none;
+			inset: 0;
+			background: var(--sticker-image) center / contain no-repeat;
+			filter: drop-shadow(0 4px 3px rgb(0 0 0 / 30%));
+			pointer-events: none;
+		}
+
+		.desk-sticker[data-restoring] .desk-sticker-flight {
+			display: block;
+			background-image: none;
+			filter: drop-shadow(0 2px 2px rgb(0 0 0 / 27%));
+		}
+
+		.desk-sticker[data-restoring] .desk-sticker-band {
+			position: absolute;
+			inset: 0;
+			background: var(--sticker-image) center / contain no-repeat;
+			clip-path: inset(calc(var(--band) * 20% - 0.25px) 0 calc((4 - var(--band)) * 20% - 0.25px));
+			animation: sticker-band-return 520ms calc(var(--band) * 50ms) both;
+		}
+
+		.desk-sticker[data-restoring] .desk-sticker-sweep {
+			position: absolute;
+			inset: 0;
+			mask: var(--sticker-image) center / contain no-repeat;
+		}
+
+		.desk-sticker[data-restoring] .desk-sticker-sweep::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			background: linear-gradient(
+				transparent 35%,
+				rgb(249 218 173 / 30%) 47%,
+				rgb(255 250 234 / 80%) 50%,
+				transparent 55%
+			);
+			animation: sticker-light-sweep 420ms 60ms linear both;
+		}
+
+		.desk-sticker-lift {
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+		}
+
+		/* The fallback uses the same crease and carries the same backing into flight. */
+		.desk-sticker[data-curl="css"] .desk-sticker-lift::before,
+		.desk-sticker[data-curl="css"] .desk-sticker-lift::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			background: var(--sticker-image) center / contain no-repeat;
+		}
+
+		.desk-sticker[data-curl="css"] .desk-sticker-lift::before {
+			clip-path: var(--peel-attached);
+		}
+
+		.desk-sticker[data-curl="css"] .desk-sticker-lift::after {
+			clip-path: var(--peel-loose);
+			transform: var(--peel-reflection);
+			transform-origin: 0 0;
+			filter: grayscale(1) brightness(0) invert(0.88) sepia(0.13);
+		}
+
+		.desk-sticker :global(.desk-peel-canvas) {
+			position: absolute;
+			pointer-events: none;
+		}
+
+		.desk-sticker:nth-child(n + 5) {
+			display: none;
+		}
+	}
+
+	@keyframes sticker-band-return {
+		0% { transform: scaleX(0.6); }
+		34% { transform: scaleX(1.1); }
+		58% { transform: scaleX(0.986); }
+		77% { transform: scaleX(1.02); }
+		100% { transform: scaleX(1); }
+	}
+
+	@keyframes sticker-light-sweep {
+		from { transform: translateY(-68%); }
+		to { transform: translateY(68%); }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.desk-sticker[data-restoring] .desk-sticker-band,
+		.desk-sticker[data-restoring] .desk-sticker-sweep::before {
+			animation: none;
+		}
+
+		.desk-sticker[data-restoring] .desk-sticker-sweep {
+			display: none;
+		}
+	}
+
+	@media (min-width: 90rem) and (min-height: 42rem) {
+		desk-stickers {
+			--desk-center-row: 1;
+			--desk-pitch: clamp(11rem, 22dvh, 13rem);
+			--desk-scale: 1.2;
+		}
+
+		.desk-sticker:nth-child(n + 5) {
+			display: block;
+		}
+	}
+</style>

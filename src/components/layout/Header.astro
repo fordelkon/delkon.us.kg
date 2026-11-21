@@ -22,13 +22,14 @@ import { menuLinks } from "@/site.config";
 				<a
 					aria-current={Astro.url.pathname === link.path ? "page" : false}
 					class="printer-btn whitespace-nowrap"
+					data-sticker-obstacle
 					href={link.path}
 				>
 					<span class="leading-none">{link.title}</span>
 				</a>
 			))}
 		</nav>
-		<div class="flex shrink-0 items-center justify-end gap-2">
+		<div class="flex shrink-0 items-center justify-end gap-2 self-end sm:self-auto" data-sticker-obstacle>
 			{import.meta.env.PROD && <Search />}
 			<!-- size="cluster": uniform 40px touch target at mobile widths and
 			     no extra start margin, matching the burger beside it. -->

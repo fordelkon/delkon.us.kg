@@ -3,6 +3,7 @@ import { ClientRouter } from "astro:transitions";
 import katexStyles from "katex/dist/katex.min.css?url";
 import BaseHead from "@/components/BaseHead.astro";
 import Header from "@/components/layout/Header.astro";
+import DeskStickers from "@/components/printed/DeskStickers.astro";
 import PaperViewport from "@/components/printed/PaperViewport.astro";
 import SkipLink from "@/components/SkipLink.astro";
 import TableOverflow from "@/components/TableOverflow.astro";
@@ -13,11 +14,13 @@ import type { SiteMeta } from "@/types";
 interface Props {
 	meta: SiteMeta;
 	hasMath?: boolean | undefined;
+	showDeskStickers?: boolean;
 }
 
 const {
 	meta: { articleDate, description = siteConfig.description, ogImage, title },
 	hasMath = false,
+	showDeskStickers = true,
 } = Astro.props;
 
 const hasStartGutter = Astro.slots.has("start-gutter");
@@ -80,6 +83,7 @@ const hasGutter = Astro.slots.has("gutter");
 			</div>
 		</div>
 		<TableOverflow />
+		{showDeskStickers && <DeskStickers />}
 		<slot name="floating-controls" />
 	</body>
 </html>
