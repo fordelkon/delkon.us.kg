@@ -39,11 +39,13 @@ fn curlAt(point: vec2f, q: f32) -> vec4f {
 		return vec4f(0.0);
 	}
 
-	let angle = asin(clamp(q / radius, 0.0, 1.0));
+	let sine = clamp(q / radius, 0.0, 1.0);
+	let angle = asin(sine);
+	let cosine = sqrt((1.0 - sine) * (1.0 + sine));
 	let front = printAt(point + direction * (q - angle * radius));
 	let back = printAt(point + direction * (q - (pi - angle) * radius));
-	let frontLight = 0.78 + 0.22 * cos(angle);
-	let backLight = 0.64 + 0.34 * cos(angle);
+	let frontLight = 0.78 + 0.22 * cosine;
+	let backLight = 0.64 + 0.34 * cosine;
 	return over(backing(back, backLight), vec4f(front.rgb * frontLight, front.a));
 }
 
@@ -55,9 +57,14 @@ fn curlAt(point: vec2f, q: f32) -> vec4f {
 		return ink;
 	}
 
-	let shadowPoint = point - vec2f(1.5, 3.0);
-	let shadowDistance = fold.z - dot(shadowPoint, fold.xy);
+	let shadowOffset = vec2f(1.5, 3.0);
+	let shadowDistance = q + dot(shadowOffset, fold.xy);
+	// The contact shadow is zero past the ramp; skip sampling the texture there.
+	if (shadowDistance >= 3.0) {
+		return ink;
+	}
+
 	let contact = 1.0 - smoothstep(0.0, 3.0, shadowDistance);
-	let shadow = 0.23 * contact * printAt(shadowPoint).a;
+	let shadow = 0.23 * contact * printAt(point - shadowOffset).a;
 	return over(ink, vec4f(0.0, 0.0, 0.0, shadow));
 }

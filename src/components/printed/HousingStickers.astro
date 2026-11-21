@@ -14,7 +14,7 @@ const stickers = [
 				aria-label={`Move ${label} sticker with the arrow keys; Escape resets it`}
 				data-sticker-id={id}
 				disabled
-				style={`--sticker-image: url('/stickers/${id}.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
+				style={`--sticker-image-compact: url('/stickers/${id}-compact.webp'); --sticker-image-full: url('/stickers/${id}.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
 				title={`Drag ${label} around the printer`}
 				type="button"
 			/>
@@ -67,7 +67,7 @@ const stickers = [
 			flex: none;
 			block-size: var(--sticker-height);
 			aspect-ratio: 2 / 3;
-			background: var(--sticker-image) center / contain no-repeat;
+			background: var(--sticker-image-compact) center / contain no-repeat;
 			transform: translate(var(--drag-x, 0px), calc(var(--sticker-offset) + var(--drag-y, 0px)))
 				rotate(var(--sticker-tilt));
 			filter: drop-shadow(0 1px 1px rgb(0 0 0 / 18%));
@@ -105,6 +105,12 @@ const stickers = [
 			gap: 0.625rem;
 			padding-inline: 0.5rem;
 			margin-inline-end: 1.25rem;
+		}
+	}
+
+	@media (min-width: 40rem) and (min-resolution: 1.5dppx) {
+		housing-stickers button {
+			background-image: var(--sticker-image-full);
 		}
 	}
 </style>

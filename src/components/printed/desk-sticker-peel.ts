@@ -77,6 +77,7 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 	let active: Move | Peel | undefined;
 	let flight: Animation | undefined;
 	let frameId = 0;
+	let fitFrame = 0;
 	let gpuUnavailable = !navigator.gpu;
 	let renderer: StickerRenderer | undefined;
 	let rendererJob: Promise<StickerRenderer> | undefined;
@@ -484,7 +485,18 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 	const options = { signal: listeners.signal };
 
 	reducedMotion.addEventListener("change", syncMotion, options);
-	window.addEventListener("resize", fit, options);
+	window.addEventListener(
+		"resize",
+		() => {
+			if (fitFrame) return;
+
+			fitFrame = requestAnimationFrame(() => {
+				fitFrame = 0;
+				fit();
+			});
+		},
+		options,
+	);
 
 	for (const button of buttons) {
 		button.disabled = false;
@@ -574,7 +586,13 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 
 	return () => {
 		listeners.abort();
+		cancelAnimationFrame(fitFrame);
 		stop(true);
 		renderer?.dispose();
+
+		for (const button of buttons) {
+			button.disabled = true;
+			button.setAttribute("aria-hidden", "true");
+		}
 	};
 }

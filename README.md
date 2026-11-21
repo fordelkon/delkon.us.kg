@@ -53,11 +53,13 @@ inward past the gesture threshold to peel it; short edge moves stay flat. A
 partially attached decal flattens on
 release. Once fully peeled, the loose decal follows the pointer until release,
 then flies off and springs back into the same spot with a sweep of light. The
-curl loads vgpu on demand and has a CSS fallback. Reduced motion keeps dragging
+curl loads vgpu on demand and has a CSS fallback. Workbench controls only load
+when their viewport gutters are visible. Reduced motion keeps dragging
 without the peel or snap animations. Drag and arrow-key moves are saved in the
 browser across reloads. Escape resets a decal and clears its saved position;
-Enter previews the snap and return. `public/stickers/` contains only the resized transparent WebP files
-served by the site, with lossless copies for the housing.
+Enter previews the snap and return. `public/stickers/` contains the transparent WebP
+files served by the site, including compact lossless versions for the smaller
+housing decals and full-size versions for high-density desktop displays.
 
 ## Content
 

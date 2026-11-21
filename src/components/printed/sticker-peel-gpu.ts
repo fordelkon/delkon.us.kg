@@ -10,6 +10,10 @@ export interface StickerRenderer {
 
 const padding = 8;
 const pixelBudget = 65_536;
+const maxPixelRatio = 1.5;
+
+// The tallest desk sticker is 168 CSS pixels, or 252 pixels at the render cap.
+const artworkHeight = 256;
 
 function bucket(value: number): number {
 	return Math.ceil(value / 32) * 32;
@@ -56,7 +60,10 @@ export async function createStickerRenderer(
 
 			if (!response.ok) throw new Error("Sticker image could not be loaded");
 
-			const bitmap = await createImageBitmap(await response.blob());
+			const bitmap = await createImageBitmap(await response.blob(), {
+				resizeHeight: artworkHeight,
+				resizeQuality: "high",
+			});
 
 			try {
 				signal.throwIfAborted();
@@ -105,7 +112,7 @@ export async function createStickerRenderer(
 
 				const dpr = Math.min(
 					window.devicePixelRatio,
-					1.5,
+					maxPixelRatio,
 					Math.sqrt(pixelBudget / (viewWidth * viewHeight)),
 				);
 

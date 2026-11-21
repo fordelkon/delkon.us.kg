@@ -77,18 +77,46 @@ const stickers = [
 </desk-stickers>
 
 <script>
-	import { bindDeskPeel } from "./desk-sticker-peel";
-
 	class DeskStickers extends HTMLElement {
 		private cleanup: (() => void) | undefined;
 
 		connectedCallback(): void {
 			this.cleanup?.();
-			this.cleanup = bindDeskPeel(this);
+
+			// Match the CSS breakpoint so hidden stickers never load the interaction code.
+			const visible = matchMedia("(min-width: 70rem) and (min-height: 27rem)");
+			const lifetime = new AbortController();
+			let unbind: (() => void) | undefined;
+
+			const sync = async (): Promise<void> => {
+				if (!visible.matches) {
+					unbind?.();
+					unbind = undefined;
+
+					return;
+				}
+
+				try {
+					const { bindDeskPeel } = await import("./desk-sticker-peel");
+
+					if (!lifetime.signal.aborted && visible.matches && !unbind) unbind = bindDeskPeel(this);
+				} catch {
+					// Keep the decorative artwork visible if the optional module cannot load.
+				}
+			};
+
+			visible.addEventListener("change", sync, { signal: lifetime.signal });
+			this.cleanup = () => {
+				lifetime.abort();
+				unbind?.();
+			};
+
+			void sync();
 		}
 
 		disconnectedCallback(): void {
 			this.cleanup?.();
+			this.cleanup = undefined;
 		}
 	}
 
@@ -149,7 +177,7 @@ const stickers = [
 			touch-action: none;
 		}
 
-		.desk-sticker:focus {
+		.desk-sticker:focus-visible {
 			outline: 2px solid var(--color-printer-accent);
 			outline-offset: 4px;
 		}
