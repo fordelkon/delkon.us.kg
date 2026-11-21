@@ -12,8 +12,8 @@ const padding = 8;
 const pixelBudget = 65_536;
 const maxPixelRatio = 1.5;
 
-// The tallest desk sticker is 168 CSS pixels, or 252 pixels at the render cap.
-const artworkHeight = 252;
+// Size cached textures for the tallest desk sticker across responsive layouts.
+const maxStickerHeight = 168;
 
 // For each edge perpendicular to this axis, its deepest corner moves furthest.
 // Travel is convex in depth, so the sheet between those corners cannot overshoot both.
@@ -67,14 +67,14 @@ export async function createStickerRenderer(
 		let targetBounds: readonly [number, number, number, number] | undefined;
 		let lastFold: Fold | undefined;
 
-		async function upload(srcset: string): Promise<Texture> {
+		async function upload(srcset: string, height: number): Promise<Texture> {
 			const source = new Image();
 			source.srcset = srcset;
 			await source.decode();
 			signal.throwIfAborted();
 
 			const bitmap = await createImageBitmap(source, {
-				resizeHeight: artworkHeight,
+				resizeHeight: height,
 				resizeQuality: "high",
 			});
 
@@ -104,13 +104,15 @@ export async function createStickerRenderer(
 
 		return {
 			load(srcset: string): Promise<Texture> {
-				const existing = uploads.get(srcset);
+				const height = maxStickerHeight * (window.devicePixelRatio <= 1 ? 1 : maxPixelRatio);
+				const key = `${srcset}@${height}`;
+				const existing = uploads.get(key);
 
 				if (existing) return existing;
 
-				const pending = upload(srcset);
+				const pending = upload(srcset, height);
 
-				uploads.set(srcset, pending);
+				uploads.set(key, pending);
 
 				return pending;
 			},

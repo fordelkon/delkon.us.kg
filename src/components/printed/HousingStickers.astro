@@ -14,7 +14,7 @@ const stickers = [
 				aria-label={`Move ${label} sticker with the arrow keys; Escape resets it`}
 				data-sticker-id={id}
 				disabled
-				style={`--sticker-image-compact: url('/stickers/${id}-compact.webp'); --sticker-image-full: url('/stickers/${id}.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
+				style={`--sticker-image-small: url('/stickers/${id}-small.webp'); --sticker-image-compact: url('/stickers/${id}-compact.webp'); --sticker-image-full: url('/stickers/${id}.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
 				title={`Drag ${label} around the printer`}
 				type="button"
 			/>
@@ -105,6 +105,13 @@ const stickers = [
 			gap: 0.625rem;
 			padding-inline: 0.5rem;
 			margin-inline-end: 1.25rem;
+		}
+	}
+
+	/* The 66px artwork covers the 32px mobile decal at 2x and the 56px desktop decal at 1x. */
+	@media (width < 40rem) and (max-resolution: 2dppx), (min-width: 40rem) and (max-resolution: 1dppx) {
+		housing-stickers button {
+			background-image: var(--sticker-image-small);
 		}
 	}
 

@@ -65,6 +65,7 @@ function displayFold(peel: Peel, time: number): Fold {
 
 export function bindDeskPeel(root: HTMLElement): () => void {
 	const buttons = root.querySelectorAll<HTMLButtonElement>("button[data-sticker-srcset]");
+	const returnSurface = root.querySelector<HTMLElement>(".desk-sticker-flight");
 	const housing = document.querySelector("[data-sticker-housing]");
 	const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 	const placement = stickerPlacement("desk");
@@ -128,7 +129,7 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 
 	function restoreSticker(peel: Peel): void {
 		const { button } = peel;
-		const surface = button.querySelector<HTMLElement>(".desk-sticker-flight");
+		const surface = returnSurface;
 		const exit = flight;
 
 		if (!surface) {
@@ -138,6 +139,7 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 		}
 
 		flatten(peel);
+		button.append(surface);
 		button.dataset.restoring = "";
 
 		// The strips expand in X at staggered times; scaling Y on their shared

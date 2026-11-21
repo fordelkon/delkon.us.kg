@@ -115,7 +115,7 @@ export function pullFold(grip: Grip, drag: Vector, previous: Fold): Fold {
 		? previous.direction
 		: unit(ix * (1 - blend) + aim[0] * blend, iy * (1 - blend) + aim[1] * blend);
 
-	const span = foldExtent(grip, direction);
+	const span = isCarried ? previous.span : foldExtent(grip, direction);
 	const radius = Math.max(0.5, span * 0.19);
 	const travel = Math.max(0, dot(drag, direction));
 	const end = gripTravel(span, radius);

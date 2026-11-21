@@ -31,6 +31,9 @@ fn curlAt(point: vec2f, q: f32) -> vec4f {
 	let radius = fold.w;
 	if (q <= 0.0) {
 		let tail = printAt(point - direction * (pi * radius - 2.0 * q));
+		if (tail.a == 1.0) {
+			return backing(tail, 0.98);
+		}
 		let ink = printAt(point);
 		let contact = 1.0 - 0.19 * exp(q / max(1.0, radius * 0.55));
 		return over(backing(tail, 0.98), vec4f(ink.rgb * contact, ink.a));
@@ -42,11 +45,15 @@ fn curlAt(point: vec2f, q: f32) -> vec4f {
 	let sine = clamp(q / radius, 0.0, 1.0);
 	let angle = asin(sine);
 	let cosine = sqrt((1.0 - sine) * (1.0 + sine));
-	let front = printAt(point + direction * (q - angle * radius));
 	let back = printAt(point + direction * (q - (pi - angle) * radius));
 	let frontLight = 0.78 + 0.22 * cosine;
 	let backLight = 0.64 + 0.34 * cosine;
-	return over(backing(back, backLight), vec4f(front.rgb * frontLight, front.a));
+	let underside = backing(back, backLight);
+	if (back.a == 1.0) {
+		return underside;
+	}
+	let front = printAt(point + direction * (q - angle * radius));
+	return over(underside, vec4f(front.rgb * frontLight, front.a));
 }
 
 @fragment fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
