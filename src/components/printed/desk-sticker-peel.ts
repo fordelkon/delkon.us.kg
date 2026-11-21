@@ -64,7 +64,7 @@ function displayFold(peel: Peel, time: number): Fold {
 }
 
 export function bindDeskPeel(root: HTMLElement): () => void {
-	const buttons = root.querySelectorAll<HTMLButtonElement>("button[data-sticker-src]");
+	const buttons = root.querySelectorAll<HTMLButtonElement>("button[data-sticker-srcset]");
 	const housing = document.querySelector("[data-sticker-housing]");
 	const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 	const placement = stickerPlacement("desk");
@@ -211,9 +211,9 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 	}
 
 	async function prepare(peel: Peel): Promise<void> {
-		const src = peel.button.dataset.stickerSrc;
+		const srcset = peel.button.dataset.stickerSrcset;
 
-		if (!src || gpuUnavailable || peel.artwork) return;
+		if (!srcset || gpuUnavailable || peel.artwork) return;
 
 		active = { ...peel, artwork: "loading" };
 
@@ -236,7 +236,7 @@ export function bindDeskPeel(root: HTMLElement): () => void {
 		}
 
 		try {
-			const artwork = await renderer.load(src);
+			const artwork = await renderer.load(srcset);
 
 			if (active?.kind !== "peel" || active.button !== peel.button) return;
 			active = { ...active, artwork };

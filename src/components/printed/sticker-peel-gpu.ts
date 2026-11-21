@@ -3,7 +3,7 @@ import curlShader from "./sticker-peel.wgsl";
 import { type Fold, gripTravel, type Vector } from "./sticker-peel-geometry";
 
 export interface StickerRenderer {
-	load(src: string): Promise<Texture>;
+	load(srcset: string): Promise<Texture>;
 	paint(artwork: Texture, size: Vector, fold: Fold, remounted: boolean): void;
 	dispose(): void;
 }
@@ -13,10 +13,22 @@ const pixelBudget = 65_536;
 const maxPixelRatio = 1.5;
 
 // The tallest desk sticker is 168 CSS pixels, or 252 pixels at the render cap.
-const artworkHeight = 256;
+const artworkHeight = 252;
 
-function bucket(value: number): number {
-	return Math.ceil(value / 32) * 32;
+// For each edge perpendicular to this axis, its deepest corner moves furthest.
+// Travel is convex in depth, so the sheet between those corners cannot overshoot both.
+function curlOverhang(
+	axis: number,
+	length: number,
+	depth: number,
+	radius: number,
+	reach: number,
+): number {
+	const component = Math.abs(axis);
+	const farDepth = Math.max(0, depth - component * length);
+	const beyond = Math.max(component * reach - length, component * gripTravel(farDepth, radius));
+
+	return Math.ceil(Math.max(0, beyond - padding) / 32) * 32;
 }
 
 export async function createStickerRenderer(
@@ -55,12 +67,13 @@ export async function createStickerRenderer(
 		let targetBounds: readonly [number, number, number, number] | undefined;
 		let lastFold: Fold | undefined;
 
-		async function upload(src: string): Promise<Texture> {
-			const response = await fetch(src, { signal });
+		async function upload(srcset: string): Promise<Texture> {
+			const source = new Image();
+			source.srcset = srcset;
+			await source.decode();
+			signal.throwIfAborted();
 
-			if (!response.ok) throw new Error("Sticker image could not be loaded");
-
-			const bitmap = await createImageBitmap(await response.blob(), {
+			const bitmap = await createImageBitmap(source, {
 				resizeHeight: artworkHeight,
 				resizeQuality: "high",
 			});
@@ -90,25 +103,28 @@ export async function createStickerRenderer(
 		}
 
 		return {
-			load(src: string): Promise<Texture> {
-				const existing = uploads.get(src);
+			load(srcset: string): Promise<Texture> {
+				const existing = uploads.get(srcset);
 
 				if (existing) return existing;
 
-				const pending = upload(src);
+				const pending = upload(srcset);
 
-				uploads.set(src, pending);
+				uploads.set(srcset, pending);
 
 				return pending;
 			},
 			paint(artwork, [width, height], fold, remounted): void {
 				const [nx, ny] = fold.direction;
 				const from = Math.min(0, nx * width) + Math.min(0, ny * height);
-				const reach = gripTravel(Math.max(0, fold.crease - from), fold.radius);
-				const left = -padding - bucket(Math.max(0, -nx * reach - padding));
-				const top = -padding - bucket(Math.max(0, -ny * reach - padding));
-				const viewWidth = width + padding - left + bucket(Math.max(0, nx * reach - padding));
-				const viewHeight = height + padding - top + bucket(Math.max(0, ny * reach - padding));
+				const depth = Math.max(0, fold.crease - from);
+				const reach = gripTravel(depth, fold.radius);
+				const extraX = curlOverhang(nx, width, depth, fold.radius, reach);
+				const extraY = curlOverhang(ny, height, depth, fold.radius, reach);
+				const left = -padding - (nx < 0 ? extraX : 0);
+				const top = -padding - (ny < 0 ? extraY : 0);
+				const viewWidth = width + 2 * padding + extraX;
+				const viewHeight = height + 2 * padding + extraY;
 
 				const dpr = Math.min(
 					window.devicePixelRatio,
