@@ -7,13 +7,13 @@ tags: ["networking", "go"]
 
 前六篇沿客户端访问的主线介绍了寻址、路由、传输、DNS 与 Web 通信。代理把这些机制组合到新的连接路径中：应用先连接谁、域名由谁解析、代理选哪个出站，以及目标 TLS 在哪里终止，都取决于这条连接的实际路径。
 
-本篇以 Mihomo 为配置参照，先画清代理的连接，再分别追踪 HTTP CONNECT、SOCKS5 和第三篇介绍的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)怎样把流量交给代理。最后用 Go 标准库演示最小 CONNECT 代理，再用 `curl` 对照解析位置与连接路径。
+本篇以 Mihomo 为配置参照，先说明代理的连接模型，再追踪 HTTP CONNECT、SOCKS5 和第三篇介绍的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)如何交付流量，以及代理如何识别目标、选择出站和交付响应。最后用 Go 标准库演示最小 CONNECT 代理，再用 `curl` 对照解析位置与连接路径。
 
 ## 代理的入站、出站与 TLS 终止
 
-以普通 TCP CONNECT 为例，客户端先与代理建立 TCP 连接，代理再与目标建立一条独立的 TCP 连接。两段连接各自维护序号、确认与关闭状态。代理在两段之间搬运字节时，目标 TLS 仍可由客户端与目标服务建立，证书也由客户端校验。连接端点与加密终止点的对照见[第六篇的可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)[^1]。
+### 两段 TCP 与目标 TLS
 
-对显式入站，应用把目标写进代理请求。对 TUN 入站，路由把 IP 包交给代理程序，目标域名可能要靠 DNS 映射或可见的协议字段补足。下面按入站方式、目标信息与出站决策的顺序展开。
+以普通 TCP CONNECT 为例，客户端先与代理建立 TCP 连接，代理再与目标建立一条独立的 TCP 连接。两段连接各自维护序号、确认与关闭状态。代理在两段之间搬运字节时，目标 TLS 仍可由客户端与目标服务建立，证书也由客户端校验。连接端点与加密终止点的对照见[第六篇的可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)[^1]。
 
 ### 入站、运行模式、DNS 与出站
 
@@ -41,11 +41,11 @@ tags: ["networking", "go"]
 
 这两种协议的地址与协商格式分别见 RFC 9110 和 RFC 1928[^1][^2]。客户端把域名交给本地代理，也不等于域名一定在远端节点解析：本地代理的规则判断或出站协议仍可能要求先取得真实 IP。
 
-CONNECT 请求已经向代理提供目标主机与端口。隧道建立后，客户端可以在其中发起目标 TLS 握手，邻接的两段 TCP 负责把握手和后续密文送到对端。
+使用 CONNECT 访问 HTTPS 时，客户端收到成功响应后才在隧道内发起目标 TLS 握手。[命令行实验](#实验一观察-http-connect)可以观察这两个阶段的先后顺序。
 
 ## 透明接管：TUN 提供 IP 包，域名需要额外关联
 
-先把应用配合方式与内核接管方式放在同一张表中，避免把透明接管等同于 TUN：
+应用采用显式代理时会发出代理协议请求。透明接管则由系统把流量交给代理，交付的对象取决于入口。
 
 | 入口 | 交给处理程序的对象 | 主要前提与限制 |
 | --- | --- | --- |
@@ -63,13 +63,15 @@ REDIRECT 与 TPROXY 的上述区别依据 Linux 内核文档，不能复制为 m
 
 代理内核需要把这些包转换为可处理的传输流或 UDP 会话。Mihomo 文档中，`system` 使用系统协议栈，`gvisor` 使用用户态协议栈，`mixed` 的 TCP 使用 system、UDP 使用 gvisor；文档还列有自研 `mips` 栈。因此 `system` 本身不是“混合栈”，可用选项和默认值应结合安装版本确认[^4]。
 
-TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP 包封装成 VPN 隧道。代理可以终结传输流再建立出站连接；MTU 开销也应按实际出站封装计算，参见[第八篇的 MTU 排查](/posts/networking/network-diagnostics-performance-troubleshooting/)。
+TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP 包封装成 VPN 隧道。代理可以终结传输流再建立出站连接；MTU 开销也应按实际出站封装计算，参见[第八篇的 MTU、MSS 与 PMTUD 排查](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)。
 
 ## 接管后怎样补足目标域名
 
+目标只以 IP 地址交给代理时，域名规则需要额外的线索。代理可以在回答 DNS 查询时先建立地址映射，也可以在接到流量后从可识别的协议字段中取得域名。线索不足时，后续能用哪些规则取决于代理还掌握什么目标信息。
+
 ### Fake-IP：在 DNS 阶段建立映射
 
-在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回域名关联的虚拟映射地址，而不必在这个响应阶段取得真实目标 IP。这一思路在原型上可追溯至 RFC 3089 提出的应用层虚拟地址映射机制[^fakeip-rfc]，Mihomo 官方配置示例则借用 RFC 2544 预留的基准测试网段 `198.18.0.0/15`（具体默认配置如 `198.18.0.1/16`）作为地址池；它属于特殊用途地址空间，并不是网站真实的公网地址[^3][^fakeip-rfc]。
+在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回与域名关联的地址，而不必在这个响应阶段取得真实目标 IP。RFC 3089 描述的 SOCKS IPv6/IPv4 网关使用了类似的临时地址与域名映射，并未为 Fake-IP 分配地址段[^fakeip-rfc]。Mihomo 文档的 IPv4 地址池示例是 `fake-ip-range: 198.18.0.1/16`，其前缀位于 IANA 登记的 `198.18.0.0/15` 基准测试网段内。这个网段不是为 Fake-IP 分配的，也不是全球可达的地址空间[^3][^fakeip-benchmark]。
 
 应用连接映射地址，流量再进入代理时，内核可通过映射关系恢复域名。随后是否需要本地真实解析，仍取决于规则和出站：若二者都不要求本地目标 IP，可以把域名交给远端；若目标 IP 规则、直连或特定出站要求真实 IP，则仍需在相应阶段查询。
 
@@ -104,13 +106,25 @@ sequenceDiagram
 | 代理节点自身域名 | `proxy-server-nameserver`，未设置时按文档回退到其他解析配置 |
 | DNS 服务自身域名 | `default-nameserver` 负责引导，避免解析器地址也依赖尚未建立的解析路径 |
 
-`direct-nameserver` 未设置时也会有文档规定的回退路径，不能写成“DIRECT 只能使用这一项”。第五篇的[DNS 引导与解析路径](/posts/networking/dns-resolution-caching-encrypted-queries/)说明了这些依赖为什么可能绕成环。
+`direct-nameserver` 未设置时也会有文档规定的回退路径，不能写成“DIRECT 只能使用这一项”。第五篇的[加密 DNS 与引导解析](/posts/networking/dns-resolution-caching-encrypted-queries/#dotdoh-与-doq-保护查询通道)说明了为什么加密 DNS 服务自身也需要先取得地址，以及加密保护哪一段查询链路。
 
 `dns-hijack` 把匹配的 DNS 连接送进内部模块，不是所有名称解析的总开关：普通 `any:53` 写法默认匹配 UDP，TCP 需要相应配置；浏览器 DoH 等加密 DNS 也不能仅凭端口 53 的规则接管。macOS、Windows 的局域网 DNS 劫持还存在文档列出的限制[^4]。因此，`dig @某服务器` 只指定了请求的表面目的地址，不能单凭参数证明实际处理者。
 
-### 映射没有命中时怎么办
+会把解析结果上报给其他设备的应用，可能无法使用仅在本机代理内有意义的 Fake-IP。可按 `fake-ip-filter` 及其过滤模式让相关域名返回真实 IP，再按真实 IP 路径处理[^3]。
 
-成功路径要求 DNS 应答、Fake-IP 映射与 TUN 接管保持一致。下面从“代理已收到连接”开始分支；如果应用流量根本没有进入代理，应先检查路由，而不是在规则引擎里寻找原因。
+### 域名嗅探：读取可见的协议元数据
+
+连接指向真实 IP 且缺少域名时，启用**域名嗅探**（domain sniffing）后，代理可以从部分协议数据取得目标名[^5]：
+
+- 明文 HTTP 请求中的 `Host`。
+- TLS ClientHello 中未被 ECH 隐藏的 SNI。
+- QUIC Initial 中可解析的 ClientHello 信息。
+
+这里的“首包”指读取连接开头的数据。TCP 分段、TLS 记录及 QUIC 数据可能需要重组才能得到完整字段。嗅探仅使用可见的协议元数据。在[第六篇的 ECH 场景](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)下，外层公开名无法可靠地指向实际目标，已有的 DNS 映射仍可独立使用[^5]。
+
+### 域名线索不足时如何处理
+
+流量已经进入代理后，先区分目标是 Fake-IP 还是真实 IP。Fake-IP 失去映射时，虚拟地址本身无法指向目标服务。真实 IP 没有可用域名时，代理仍可用目标 IP、进程等已有信息匹配规则。`fake-ip-filter` 返回的真实地址也按这条路径处理[^3][^5]。
 
 ```mermaid title="目标域名关联的成功与失败分支" description="限定连接已进入代理。Fake-IP 必须有可用映射，不能作为普通公网地址连接；真实 IP 可以按配置尝试嗅探，但 ECH 或自定义协议可能不提供真实域名。图中的停止表示没有足够目标信息，具体报错和恢复由实现决定，不保证自动补回映射。"
 flowchart TB
@@ -125,47 +139,16 @@ flowchart TB
 
 | 条件 | 缺少什么 | 下一步证据 |
 | --- | --- | --- |
-| 代理重启或映射被清理，应用仍缓存 Fake-IP | 虚拟地址到原域名的可用映射 | 对照 DNS 回答时间、映射持久化和连接日志；不能向公网连接该地址 |
-| 应用自行使用 DoH，绕过内部 DNS | DNS 阶段的 Fake-IP 关联 | 检查应用 DNS 设置与实际收到的真实 IP；端口 53 劫持不覆盖 DoH |
-| 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 按 IP、进程等规则验证，不能凭 IP 断言唯一域名 |
-| TLS / QUIC 使用 ECH | 真实的内部 SNI | 外层公开名不能冒充真实目标名；其他已知映射仍可独立使用 |
-| IPv4 被接管，IPv6 地址或路由未配套 | 另一地址族的接管路径 | 分别核对 A/AAAA、IPv6 路由和代理日志，不能拿 IPv4 成功证明双栈完整 |
+| 代理重启或映射被清理，应用仍缓存 Fake-IP | 虚拟地址到原域名的可用映射 | 对照 DNS 回答时间、映射持久化和连接日志 |
+| 应用自行使用 DoH，绕过内部 DNS | DNS 阶段的 Fake-IP 关联 | 检查应用 DNS 设置与实际使用的目标地址 |
+| 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 核对代理收到的目标 IP 及命中的 IP 或进程规则 |
+| TLS / QUIC 使用 ECH | 真实的内部 SNI | 核对代理是否另有可用的域名映射 |
 
-持久化映射可减少某些重启场景的失配，却不保证应用缓存与代理状态永远同步。`fake-ip-filter` 命中的域名返回真实地址时，本来就应走真实 IP 的分析路径，而不是当作映射故障[^3]。
+持久化映射能减少部分重启导致的失配。若应用还在使用旧地址，需要对照它实际连入代理的地址和当前映射[^3]。
 
-### 域名嗅探：读取可见的协议元数据
+## 分流规则与出站选择
 
-没有可用 Fake-IP 关联时，**域名嗅探**（domain sniffing）可以从部分协议数据取得目标名[^5]：
-
-- 明文 HTTP 请求中的 `Host`。
-- TLS ClientHello 中未被 ECH 隐藏的 SNI。
-- QUIC Initial 中可解析的 ClientHello 信息。
-
-这里的“首包”是处理阶段的简称，不保证一个网络包就包含完整字段：TCP 分段、TLS 记录及 QUIC 数据可能需要重组。嗅探也不是对 HTTPS 内容的解密；在[第六篇的 ECH 场景](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)下，外层信息不能可靠揭示内部目标域名。
-
-:::caution[映射地址与嗅探都有适用条件]
-会把解析结果上报给其他设备的应用，可能无法使用仅在本机代理内有意义的 Fake-IP。此时可按 `fake-ip-filter` 及其过滤模式让相关域名返回真实 IP，而不是把整个 DNS 模式都改掉。嗅探则依赖可见且可识别的元数据；硬编码 IP、自定义协议或 ECH 都可能使它无法取得真实域名[^3][^5]。
-:::
-
-### 按地址族验证接管与出站
-
-应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。AAAA 只说明这是 IPv6 形式的结果。内核使用实际目标地址选路，IPv4 的覆盖路由对 IPv6 不生效，双栈竞速还可能改变最终使用的地址族。虚拟地址必须由生成映射的核心恢复目标名，真实地址则依赖独立的域名元数据或 IP 规则[^3][^4]。
-
-```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
-flowchart TB
- dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
- route -->|TUN| tun["内核交付 IPv6 包"]
- route -->|物理接口| native["按系统路由出站"]
- route -.->|无有效路由| stop["本次尝试失败"]
- tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
- core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
-```
-
-排查意外绕行时，在同一次请求记录实际目标地址、出接口、核心是否记录了该入站，以及代理自己的出站连接。可以用同一域名的 `curl -4` 和 `curl -6` 对照并记录 `remote_ip`，再用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实。若显式代理在另一端解析目标，curl 的远端地址和地址族选项可能只反映它到代理的连接，两段要分别观察[^curl]。
-
-## 规则引擎、出站与返回路径
-
-在 `rule` 模式下，可以按下面的顺序理解一次处理：
+代理先整理入站提供的目标地址、补足的域名以及可用的进程信息。在 `rule` 模式下，规则依次使用这些信息，选出直连、拒绝或节点出站。命中策略组时，还要由组内策略选定最终出站。
 
 ```mermaid title="规则匹配、出站选择与响应返回" description="规则按顺序检查，还需核对出站适用性；真实目标 IP 按规则和出站需要获取。REJECT 在此终止，策略组选择需落实到最终出站，非拒绝结果按实际选择建立直连或代理会话。响应通过对应的出站会话和入站转发状态返回原应用，不是把远端 TCP 包原样塞回原连接。"
 flowchart TB
@@ -184,15 +167,15 @@ flowchart TB
  inbound --> original["原应用"]
 ```
 
-代理规则列表通常按书写顺序取首个匹配，和路由表的最长前缀匹配不同。还要检查所选出站是否适用：官方文档指出，UDP 请求命中不支持 UDP 的节点时会继续匹配后续规则，不能把“首条匹配立即停止”写成无条件保证[^6]。
+代理按书写顺序检查规则，每次命中后还要判断出站是否适用。例如，UDP 请求命中不支持 UDP 的节点时会继续检查后续规则[^6]。
 
-`no-resolve` 也有明确的作用范围：当连接元数据含域名而尚无真实目标 IP 时，目标 IP 类规则可能为匹配而触发解析。给这条规则加 `no-resolve`，只阻止它主动触发这次解析；若之前已经取得 IP，这条规则仍可匹配。后续规则和出站阶段仍可能查询 DNS[^6]。
+当连接已有目标域名、尚无真实目标 IP 时，目标 IP 类规则可能触发 DNS 解析。给这条规则加 `no-resolve`，会阻止它发起解析。已有的 IP 仍可用于此次匹配，后续规则和出站阶段仍可按需查询 DNS[^6]。
 
-选中名为 `Proxy` 的策略组不代表一定建立 TLS/QUIC 隧道：`Proxy` 常常只是用户命名，实际行为取决于所选节点。HTTP 出站就有可选的 TLS 配置；其他出站使用的加密机制也各不相同[^http-outbound]。应用的 HTTPS 保护应用与目标 TLS 终止端之间的内容，代理传输的加密则保护其覆盖的代理链路，需要分别判断。
+`Proxy` 可以是用户给策略组起的名字。连接选中的节点时，代理使用该节点的出站协议和配置，例如 HTTP 出站可选用 TLS[^http-outbound]。判断实际保护范围时，要分别确认目标 TLS 的终止位置和代理传输所覆盖的链路。
 
-### TUN 代理如何建立出站并交付回包
+## TUN 代理如何建立出站并交付回包
 
-以一个被 TUN 接管并由本地代理终结的 TCP 流为例。应用侧的 SYN、ACK 与 FIN 由本地连接状态处理，远端连接使用独立的序号空间；这两段 TCP 仍可搬运同一条端到端 TLS 字节流。
+出站选定后，代理通过直连或节点会话发送数据，再按保存的入站状态把响应交回应用。以一个被 TUN 接管并由本地代理终结的 TCP 流为例，应用侧的 SYN、ACK 与 FIN 由本地连接状态处理，出站连接使用独立的序号空间。这两段 TCP 仍可搬运同一条端到端 TLS 字节流。
 
 沿用前面的 Fake-IP `198.18.0.8 ↔ example.com`，设本机应用端点为 `192.168.1.10:50001`。本次规则选择 DIRECT，核心另行解析得到文档示例目标 `198.51.100.20:443`，并从物理接口 `192.168.1.10:53000` 建立独立出站。两段 TCP 均已建立，以下观察本机上游 NAT 之前的包；示例序号均为绝对值。
 
@@ -232,24 +215,44 @@ flowchart TB
 如果出站 Socket 产生的流量又被送回同一个 TUN 入口，可能形成回环。常见处理包括为远端端点配置更具体路由、使用 socket 标记配合策略路由，或按平台能力绑定接口、排除进程。它们的效果取决于平台和整套规则；“绑定物理网卡”不能脱离实际查表结果被当作统一的绕过保证。
 :::
 
+### 按地址族验证接管与出站
+
+应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。要从应用实际尝试的目标地址查路由，因为双栈竞速可能改变最后使用的地址族。即便 IPv4 已进入 TUN，IPv6 仍需要自己的接管路由。进入代理后，核心再按出站策略单独选择地址族[^3][^4]。
+
+```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
+flowchart TB
+ dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
+ route -->|TUN| tun["内核交付 IPv6 包"]
+ route -->|物理接口| native["按系统路由出站"]
+ route -.->|无有效路由| stop["本次尝试失败"]
+ tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
+ core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
+```
+
+排查意外绕行时，先核对 A、AAAA 回答，再对同一域名分别运行 `curl -4` 和 `curl -6`，记录 `remote_ip`。用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实出接口，并用代理日志确认对应的入站与出站。经显式代理时，`remote_ip` 记录 curl 连到的代理地址。若目标域名也交给代理处理，另一段连接使用的地址族要在出站侧另行核实[^curl]。
+
 ## 实验：用 Go 实现最小 HTTP CONNECT 代理
 
 ### Go 示例：保留预读数据与两个方向的结束状态
 
-下面的教学代理只监听回环地址。它先读取 CONNECT 头部，再建立目标 TCP 连接，随后双向复制。错误响应共用一个格式化函数，状态行之后的字段从行首开始，并以空行结束字段区[^http-wire]。这里保留 `bufio.Reader`，因为 HTTP 解析器可能已经从连接预读了后续字节；转发时跳回原始连接会漏掉 reader 中尚未消费的数据。
+下面的教学代理只监听回环地址，目标也只接受 `127.0.0.1:<port>`。程序校验请求行里的原始 CONNECT 目标，不用 `Host` 字段补齐，也不使用解析后的 URL 重建拨号地址。`net.SplitHostPort` 只拆分主机与端口，程序还检查主机的确切写法和端口范围（十进制 `1` 到 `65535`）。不符合本实验限制的目标返回 `400`。限制到 IPv4 回环是本实验的约束；CONNECT 协议本身也可以指定其他主机，但没有默认端口[^1][^go-net]。错误响应的状态行和字段以空行与后续内容分隔[^http-wire]。
 
-两个方向也有独立生命周期：某方向正常读到 EOF 后，对另一连接执行 `CloseWrite`，继续等待反向复制；出错时关闭两端以解除另一个阻塞的复制，再收束两个 goroutine。为使实验有结束边界，头部读取与建连各有 5 秒期限。错误响应另有一秒写入期限，以免建连耗尽时间时无法尝试返回 502；转发阶段采用 30 秒的绝对期限。`SetDeadline` 不是自动续期的空闲超时[^go-net][^go-http]。
+隧道建立后，客户端到目标方向继续从原来的 `bufio.Reader` 读取，因为 HTTP 解析器可能已预读了后续字节；跳回原始连接会漏掉仍在缓冲区里的数据[^go-http]。某个方向正常读到 EOF 后，代理对另一连接执行 `CloseWrite`，继续等待反向复制。首次转发出错时记录错误并关闭两端，解除另一个方向可能阻塞的复制；随后只略过这次清理预期产生的 `net.ErrClosed`，其他错误仍记录。等待反向复制是为了演示第四篇的[半关闭契约](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)。完整的 HTTP CONNECT 实现还须遵循规范里的隧道关闭要求[^1][^go-net]。
+
+头部读取与建连各有 5 秒期限。错误响应另有一秒写入期限，以便建连超时后仍能尝试返回 502。转发阶段采用 30 秒的绝对期限，期间的读写活动不会自动延长 `SetDeadline` 设置的时间[^go-net][^go-http]。
 
 ```go
 package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -270,18 +273,25 @@ func handleClient(client *net.TCPConn) {
 	reader := bufio.NewReader(client)
 	req, err := http.ReadRequest(reader)
 	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			writeError(client, http.StatusBadRequest)
+		}
 		return
 	}
 	if req.Method != http.MethodConnect {
 		writeError(client, http.StatusMethodNotAllowed)
 		return
 	}
-	if _, _, err := net.SplitHostPort(req.Host); err != nil {
+	host, port, err := net.SplitHostPort(req.RequestURI)
+	portNumber, portErr := strconv.ParseUint(port, 10, 16)
+	address := net.JoinHostPort("127.0.0.1", port)
+	if err != nil || host != "127.0.0.1" || req.RequestURI != address ||
+		portErr != nil || portNumber == 0 {
 		writeError(client, http.StatusBadRequest)
 		return
 	}
 
-	conn, err := net.DialTimeout("tcp", req.Host, 5*time.Second)
+	conn, err := net.DialTimeout("tcp4", address, 5*time.Second)
 	if err != nil {
 		writeError(client, http.StatusBadGateway)
 		return
@@ -311,9 +321,15 @@ func handleClient(client *net.TCPConn) {
 	go copyTo(target, reader)
 	go copyTo(client, target)
 
+	aborted := false
 	for range 2 {
-		if err := <-done; err != nil {
-			log.Printf("relay ended: %v", err)
+		err := <-done
+		if err == nil || (aborted && errors.Is(err, net.ErrClosed)) {
+			continue
+		}
+		log.Printf("relay ended: %v", err)
+		if !aborted {
+			aborted = true
 			_ = client.Close()
 			_ = target.Close()
 		}
@@ -340,9 +356,15 @@ func main() {
 }
 ```
 
-将上面的程序保存为 `connect_proxy.go`，在该文件所在目录打开本机终端，用 Go 1.22 或更新版本运行 `go run connect_proxy.go`。保持代理运行，再在另一终端执行下面的回环验证。
+:::warning[教学代理的使用范围]
+只在受信任的本机环境运行。能访问监听端口的进程无需认证，就能通过它连接其他 IPv4 回环端口；回环监听不等于只有当前用户能访问。程序也未实现头部大小限制、并发配额或完整关停。不要对外监听，实验结束后停止代理。
+:::
 
-先做不访问外网的回环验证（Python 3.8 或更新版本）：在另一终端把下面的完整程序保存为 `connect_local_check.py`，运行 `python3 connect_local_check.py`。这里用 Python 标准库同时创建一次性目标服务和客户端，避免另外部署 Web 服务；目标地址是动态分配的 `127.0.0.1` 端口，CONNECT 也只传这个数字地址，不需要 DNS。
+### 回环验证：预读载荷与半关闭
+
+将上面的程序保存为 `connect_proxy.go`，在该文件所在目录打开终端，用 Go 1.22 或更新版本运行 `go run connect_proxy.go`。
+
+保持代理运行。在另一终端把下面的程序保存为 `connect_local_check.py`，用 Python 3.8 或更新版本运行 `python3 connect_local_check.py`。程序先检查无效目标是否返回 `400`，再用标准库的一次性目标服务验证转发与半关闭。有效 CONNECT 直接使用目标服务在 `127.0.0.1` 上动态分配的端口，整个实验只走回环，无需 DNS 和外网。
 
 ```python
 import socket
@@ -350,6 +372,33 @@ from concurrent.futures import ThreadPoolExecutor
 
 PAYLOAD = b"first-frame|second-frame"
 RESPONSE = b"response after EOF"
+
+
+def check_bad_connects(host, port):
+    authority = f"{host}:{port}"
+    bad_targets = (
+        f":{port}",
+        host,
+        f"{host}:",
+        f"{host}:https",
+        f"{host}:+{port}",
+        f"{host}:0",
+        f"{host}:65536",
+        "/",
+        f"{authority}/",
+        f"{authority}?",
+        f"user@{authority}",
+        f"example.com:{port}",
+        f"[::1]:{port}",
+    )
+    for target in bad_targets:
+        request = f"CONNECT {target} HTTP/1.1\r\nHost: {authority}\r\n\r\n"
+        with socket.create_connection(("127.0.0.1", 17890), timeout=5) as client:
+            client.sendall(request.encode("ascii"))
+            with client.makefile("rb") as reader:
+                status = reader.readline().split(maxsplit=2)
+            assert status[:2] == [b"HTTP/1.1", b"400"], (target, status)
+    print(f"{len(bad_targets)} rejected CONNECT targets returned 400")
 
 
 def serve_once(listener):
@@ -371,6 +420,7 @@ def main():
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)
         host, port = listener.getsockname()
+        check_bad_connects(host, port)
         with ThreadPoolExecutor(max_workers=1) as pool:
             target = pool.submit(serve_once, listener)
             with socket.create_connection(("127.0.0.1", 17890), timeout=5) as client:
@@ -397,17 +447,12 @@ if __name__ == "__main__":
 预期输出为：
 
 ```text
+13 rejected CONNECT targets returned 400
 target received 24 bytes, then EOF
 client received: response after EOF
 ```
 
-客户端把 CONNECT 头与首段载荷放在同一次 `sendall` 中，再关闭写方向；即使头部解析已经预读载荷，代理也必须继续使用同一个 reader。这个验证检查目标收到完整字节、收到 EOF 后客户端仍能得到反向响应；一次运行不保证每次都会触发预读，也不证明两段连接使用相同分包。验证结束后，在代理终端按 Ctrl+C 停止监听。
-
-:::warning[教学代理的使用范围]
-这个程序只用于本机实验，未实现认证、目标访问控制、头部大小限制、并发配额或完整的服务关停协议。不要将监听地址改为对外开放后直接用于公共服务。30 秒期限也会中止长连接；生产转发器需要根据协议与资源预算设计相应行为。
-:::
-
-这里选择等待反向复制，是为了展示第四篇的[半关闭契约](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)。HTTP CONNECT 规范本身另有隧道关闭要求，不能把这段教学代码当成所有 HTTP 代理的完整一致性实现[^1]。
+无效请求仍带有合法的 `Host` 字段，以确认它不能替代请求行里的目标。正常请求用一次 `sendall` 写入 CONNECT 头与首段载荷，随后关闭写方向。验证检查目标能否收到完整载荷，以及目标读到 EOF 后客户端能否继续收到响应。头部解析是否在本次运行中预读了载荷取决于实际读取时机，两段连接的 TCP 分段也各自决定。验证结束后，在代理终端按 Ctrl+C 停止监听。
 
 在回环实验中，目标看到的对端是代理的出站 Socket。对照[第三篇的 NAT 映射](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)，也可以从连接状态判断地址改写和代理重建连接各自发生在哪里。
 
@@ -466,15 +511,17 @@ curl --noproxy '' --proxy socks5h://127.0.0.1:7890 \
 
 [^2]: 〔RFC〕[RFC 1928 §3–7](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 方法协商、目标地址类型、TCP 连接与 UDP 中继。
 
-[^go-net]: 〔软件实现〕[Go `TCPConn.CloseWrite`](https://pkg.go.dev/net#TCPConn.CloseWrite)、[`Conn.SetDeadline`](https://pkg.go.dev/net#Conn)、[`DialTimeout`](https://pkg.go.dev/net#DialTimeout)——关闭写方向、绝对读写期限及含 DNS 阶段的建连超时。
+[^go-net]: 〔软件实现〕[Go `SplitHostPort`](https://pkg.go.dev/net#SplitHostPort)、[`TCPConn.CloseWrite`](https://pkg.go.dev/net#TCPConn.CloseWrite)、[`ErrClosed`](https://pkg.go.dev/net#ErrClosed)、[`Conn.SetDeadline`](https://pkg.go.dev/net#Conn)、[`DialTimeout`](https://pkg.go.dev/net#DialTimeout)——地址拆分、关闭写方向、关闭后未完成 I/O 的错误、绝对读写期限及含 DNS 阶段的建连超时。
 
 [^go-http]: 〔软件实现〕[Go `http.ReadRequest`](https://pkg.go.dev/net/http#ReadRequest)与[`bufio.Reader`](https://pkg.go.dev/bufio#Reader)——从缓冲 reader 解析 HTTP 请求及 reader 的预读边界。
 
-[^mode]: 〔软件实现〕[Mihomo：运行模式](https://wiki.metacubex.one/config/general/#_4)——`rule`、`global`、`direct` 的出站选择职责。
+[^mode]: 〔软件实现〕[Mihomo：Operation Mode](https://wiki.metacubex.one/en/config/general/#operation-mode)——`rule`、`global`、`direct` 的出站选择职责。
 
 [^3]: 〔软件实现〕[Mihomo：DNS 配置](https://wiki.metacubex.one/config/dns/)——Fake-IP、过滤模式、目标解析、直连解析、节点解析与 DNS 服务的引导解析。
 
-[^fakeip-rfc]: 〔RFC〕[RFC 3089: A SOCKS-based IPv6/IPv4 Gateway Mechanism](https://www.rfc-editor.org/rfc/rfc3089.html)与[RFC 2544: Benchmarking Methodology for Network Interconnect Devices](https://www.rfc-editor.org/rfc/rfc2544.html)——前者提出用虚拟地址映射域名实现透明接管的原型思路，后者定义了常被代理软件借用作 Fake-IP 地址池的 `198.18.0.0/15` 基准测试网段。
+[^fakeip-rfc]: 〔RFC〕[RFC 3089 §3, DNS Name Resolving Procedure](https://www.rfc-editor.org/rfc/rfc3089.html#section-3)——在 SOCKS IPv6/IPv4 网关中用临时地址恢复对应域名。
+
+[^fakeip-benchmark]: 〔地址登记〕[IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml)——`198.18.0.0/15` 对应 RFC 2544，登记用途为基准测试，标记为非全球可达。
 
 [^4]: 〔软件实现〕[Mihomo：TUN 入站](https://wiki.metacubex.one/config/inbound/tun/)——协议栈选项、自动路由、排除地址及 DNS 劫持的平台边界。
 

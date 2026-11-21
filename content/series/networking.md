@@ -40,7 +40,7 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 
 ## 本地实验与平台命令
 
-第二篇的[子网计算](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)、第四篇的[半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)、第七篇的[CONNECT 回环验证](/posts/networking/proxies-tunnels-transparent-interception/#go-示例保留预读数据与两个方向的结束状态)和第八篇的[响应等待对照](/posts/networking/network-diagnostics-performance-troubleshooting/#控制变量实验只改变服务端响应前的等待)均不依赖外网，适合先在本机运行。抓包实验另需捕获权限，并注意接口、过滤器和捕获时机。
+第二篇的[子网计算](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)、第四篇的[半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)、第七篇的[CONNECT 回环验证](/posts/networking/proxies-tunnels-transparent-interception/#回环验证预读载荷与半关闭)和第八篇的[响应等待对照](/posts/networking/network-diagnostics-performance-troubleshooting/#控制变量实验只改变服务端响应前的等待)均不依赖外网，适合先在本机运行。抓包实验另需捕获权限，并注意接口、过滤器和捕获时机。
 
 Windows 读者可先查第八篇的[平台命令对照](/posts/networking/network-diagnostics-performance-troubleshooting/#平台命令对照)，再回到对应机制。平台命令是功能上的近似对应；Linux 的策略路由、TPROXY 与 Apple Network Extension 有各自的系统边界。
 

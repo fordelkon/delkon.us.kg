@@ -64,7 +64,7 @@ tags: ["networking"]
 1. 接收入站帧，检查并移除链路层封装。
 2. 按目的 IP 和适用策略查找转发表，确定下一跳与出接口。
 3. 递减 IPv4 TTL；若减至 0 且非发往本机则丢弃，并按适用规则生成差错报文[^ttl]。
-4. 因头部字段改变而更新 IPv4 头部校验和。IPv6 的 Hop Limit 同样逐跳递减，IPv6 基础头部没有校验和字段[^ipv6-hdr]。
+4. 因 TTL 改变而更新 IPv4 头部校验和。IPv6 转发递减 Hop Limit，其基本首部没有校验和字段。TCP、UDP 等上层协议仍按各自规则校验；Hop Limit 不属于它们使用的 IPv6 伪首部[^ipv6-hdr]。
 5. 对下一跳完成必要的邻居解析，重新封装该出口链路的帧后发送（帧头的源/目的 MAC 地址每一跳都会被改写）。
 
 实际设备还可能执行防火墙、NAT、排队或硬件卸载，这里只保留理解逐跳交付需要的部分。TTL 是有限的转发预算，避免路由环路让同一个包长期存活；它能经过多少跳取决于初始值。
@@ -130,7 +130,7 @@ flowchart TB
 
 所以“IP 地址不变”并不等于“整个 IP 头不变”。路由器转发的是去掉旧链路封装后的 IP 包；TCP 确认与重传由两端的 TCP 处理，见[第四篇的序号与确认示例](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的序号确认与重传)[^forward-packet]。
 
-### TTL 耗尽后怎样反馈
+### ICMP 差错与探测反馈
 
 **互联网控制报文协议**（Internet Control Message Protocol，ICMP）用来报告 IP 层状态与差错。下表列出 IPv4 的常见 ICMP 报文。**IPv6 互联网控制报文协议**（Internet Control Message Protocol for IPv6，ICMPv6）使用独立的类型编号[^2][^3]。
 
@@ -140,13 +140,15 @@ flowchart TB
 | 超时（Time Exceeded，类型 11） | 报告 TTL 等超时；传统 `traceroute` 借助递增 TTL 观察响应者 |
 | 目的不可达（Destination Unreachable，类型 3） | 报告目标或端口不可达，以及设置**不分片标志**（Don't Fragment，DF）后仍需分片等情况 |
 
-IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过出接口允许的大小时会返回**数据包过大**（Packet Too Big）报文[^3]。**路径最大传输单元**（Path Maximum Transmission Unit，PMTU）取路径上各链路 MTU 的最小值。源端可用这类报文调整对 PMTU 的估计，参见第八篇的[路径 MTU 诊断](/posts/networking/network-diagnostics-performance-troubleshooting/)[^pmtu]。
+IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过出接口允许的大小时会返回**数据包过大**（Packet Too Big）报文[^3]。**路径最大传输单元**（Path Maximum Transmission Unit，PMTU）取路径上各链路 MTU 的最小值。源端可用这类报文调整对 PMTU 的估计，参见第八篇的[路径 MTU 诊断](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)[^pmtu]。
 
 :::tip[怎样解读 traceroute 的星号]
 `*` 表示对应探测在等待窗口内没有获得预期回应，可能涉及控制报文限速、过滤、回程丢失或路径变化。它不能单独证明业务包在该处丢弃；后续跳或目标有响应时，尤其不能把中间星号当作转发故障。响应包的源地址也未必就是探测包经过的入口接口。
 :::
 
 ## NAT：多台内网设备如何共用一个公网 IP
+
+### NAT 类型与改写字段
 
 [私网地址](/posts/networking/ip-addressing-subnet-lan-delivery/#ip-地址的作用范围公网私网与共享地址)不用于普通全球公网路由。家庭网络若用多个私网 IPv4 地址共享一个公网 IPv4 地址，出口常采用 NAPT，同时改写地址与端口。这种做法也常称为**端口地址转换**（Port Address Translation，PAT）[^pat]。**基本网络地址转换**（Basic NAT）只转换地址，保留端口[^4]。
 
@@ -160,6 +162,8 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 | 端口转发 | 常见的静态入向 DNAT 配置场景 | `203.0.113.5:8443 → 192.168.1.20:443` |
 
 家用设备往往同时执行 NAT 与防火墙规则：前者改写地址端口，后者决定是否放行，两者都不提供传输加密。如果家庭 NAT 外还有[运营商的 CGNAT](/posts/networking/ip-addressing-subnet-lan-delivery/#ip-地址的作用范围公网私网与共享地址)，在家庭路由器上配置端口转发只解决入站路径中的一层。
+
+### NAPT：地址端口映射与回包转换
 
 假设路由器公网地址为文档示例地址 `203.0.113.5`，两台内网主机访问同一个 TCP 服务，源端口恰好相同。下面是本次通信的一种可能转换：
 
@@ -202,55 +206,53 @@ flowchart TB
  linkStyle 0,1,3,4,6 stroke:none
 ```
 
-路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。响应到达 `203.0.113.5:61002` 后，路由器按有效映射和过滤策略处理，再把目的地址恢复为 `192.168.1.11:50001`，转发至内网。公网端口如何分配、多久过期，取决于实现、协议与配置，不由这张示例表统一规定。
+路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。沿用图中的第一条映射：响应到达 `203.0.113.5:61001` 后，若映射仍有效且过滤允许，路由器就把目的地址与端口恢复为 `192.168.1.10:50001`，再转发至内网。公网端口如何分配、多久过期，取决于实现、协议与配置。
 
-这里必须分开理解三件事：
+### 映射、过滤与连接跟踪
+
+有了映射，不等于任意远端的包都会被放行。判断 NAT 设备怎样处理流量，需要分清三件事：
 
 - **映射**（mapping）：内网地址端口对应哪个外部地址端口，以及联系不同远端时能否复用映射。
 - **入向过滤**（inbound filtering）：已存在映射时，允许哪些远端发来的包进入。
 - **连接跟踪**（connection tracking）：设备为会话维护什么状态；常见模型使用源/目的地址、源/目的端口和协议组成的五元组，但不能把所有 NAT 映射的键都定义为五元组。
 
-RFC 4787 分别描述 UDP 的映射与过滤行为。它指出，旧分类中的**完全锥形 NAT**（Full Cone NAT）、**受限锥形 NAT**（Restricted Cone NAT）和**对称型 NAT**（Symmetric NAT）等名称不足以准确描述实际实现。这份文档的行为要求针对 UDP[^5]。
+没有动态映射或静态转发安排时，外部主机通常不能主动访问内部服务。**对等通信**（Peer-to-Peer，P2P）还需考虑地址发现与中继，不能凭一个“NAT 类型”判断能否直连。RFC 4787 分别描述 UDP 的映射与过滤，指出**完全锥形 NAT**（Full Cone NAT）、**受限锥形 NAT**（Restricted Cone NAT）和**对称型 NAT**（Symmetric NAT）等旧分类不足以描述实际行为。这份文档的行为要求针对 UDP[^5]。
 
 在 Linux Netfilter 中，连接跟踪可关联原方向与应答方向。状态防火墙可拿这些状态作放行条件，NAT 可据此沿用映射，二者分别受规则控制。**透明代理**（transparent proxy）还需要在本地接收流量并处理出站。例如 Linux 的 `TPROXY` 机制可以保留包的原目的信息，并把包交给透明套接字（transparent socket），通常需配合标记与策略路由。相关入口对照见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/#透明接管tun-提供-ip-包域名需要额外关联)[^netfilter]。
 
 一个常见例子是 Linux 上 Docker 的**桥接网络**（bridge network）。一对**虚拟以太网设备**（Virtual Ethernet Device，`veth`）分别位于容器的网络命名空间与宿主机，宿主端连到网桥，同一网桥内可以二层交付。访问外部网络时由宿主机路由转发，默认桥接配置常用**地址伪装**（masquerade），把出站包的源地址转换为宿主机的出口地址。发布端口则是另外的入站配置。具体规则还取决于网关模式与防火墙后端[^bridge]。
 
-### NAT 与应用代理改变了什么
+### NAT 与 TCP 代理：改写包头还是重建连接
 
-没有动态映射或静态转发安排时，外部主机通常无法主动找到某台内部主机的服务；有了映射也不意味着所有入站包都会放行。**对等通信**（Peer-to-Peer，P2P）的 NAT 穿透还需考虑映射、过滤、地址发现与中继等机制，不能只根据一个“NAT 类型”推断连接一定成功。
-
-**普通 NAT 转换保留了两端的 TCP 连接，应用代理则通常建立两段独立连接。** NAT 改写包头，不因为执行转换就成为 TCP 接收端。使用 HTTP `CONNECT` 或 SOCKS5 建立 TCP 会话时，代理接收客户端连接，再建立自己的出站连接[^proxy-protocols]。网站看到的源地址可能都发生了变化，但 TCP 确认、缓冲和连接关闭的边界不同。第四篇会解释 [套接字与传输连接](/posts/networking/transport-tcp-udp-socket-quic/)，第七篇再展开代理的双向转发。
+**普通 NAT 改写包头但不终结两端的 TCP 连接；TCP 代理分别处理两段独立连接。** 使用 HTTP `CONNECT` 或 SOCKS5 建立 TCP 会话时，代理接收客户端连接，再建立自己的出站连接[^proxy-protocols]。网站看到的源地址可能都发生了变化，但 TCP 确认、缓冲和连接关闭的边界不同。第四篇会解释 [Socket 的读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)，[第七篇的出站与回包示例](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)再把两段连接放在同一条路径上比较。
 
 ## 虚拟网络接口：TUN 与 TAP 如何接入协议栈
 
-路由选择得到一个出口接口，这个接口可以由软件提供。TUN 与**二层虚拟以太网接口**（Ethernet Tunnel Interface，TAP）都能把内核网络栈连接到用户态程序。**虚拟专用网络**（Virtual Private Network，VPN）可通过外部网络提供私有连接。三层 VPN 可使用 TUN 收发 IP 包，二层桥接可使用 TAP 收发以太网帧[^tun-name][^6]。
+路由选择得到的出口可以是软件接口。TUN 与**二层虚拟以太网接口**（Ethernet Tunnel Interface，TAP）都能把内核网络栈连接到用户态程序，但交付的数据单元不同[^tun-name][^6]。
 
-| 接口类型 | 用户态处理的数据单元 | 常见用途 |
+### TUN 与 TAP：用户态读写哪些数据
+
+TUN 的“三层”指接口在网络层交付 IP 包。内核把 TUN 选为出口后，程序从接口读取要发出的 IP 包；程序把包写入 TUN 时，内核将其当作该接口收到的入站包处理。读、写方向都以操作接口的程序为参照[^6]。
+
+| 接口 | 用户态读写的数据 | 内核如何处理 |
 | --- | --- | --- |
-| TAP | 以太网帧，包含链路层头部 | 虚拟机桥接、二层网络模拟 |
-| TUN | IP 包，不含以太网帧头 | 三层 VPN、通过 IP 包入口工作的透明代理 |
+| TUN | 完整 IP 包 | 读出选路交给 TUN 的包；写入的包进入 IP 接收路径 |
+| TAP | 带链路层头部的以太网帧 | 读出发往 TAP 的帧；写入的帧进入链路层接收路径，可用于虚拟机桥接 |
+| 普通 TCP Socket | TCP 连接的应用字节流 | 内核维护 TCP 连接，负责分段、确认与重传 |
 
-平台接口不同：Linux 常通过 `/dev/net/tun` 创建 TUN/TAP，macOS 的三层隧道接口通常显示为 `utunX`；Linux 的设备配置接口（Application Programming Interface，API）不应被解释为所有平台的统一创建方式。用户态读写时还可能有平台专用元数据，表中描述的是核心网络数据单元。Apple 的 Network Extension 提供 `NEPacketTunnelProvider` / `packetFlow` 等隧道接口及包含、排除路由配置，但并非所有 `utun` 都由同一种 API 创建[^apple-tunnel]。
+表中描述的是网络数据单元，接口还可单独或随包提供元数据。Linux 通过 `/dev/net/tun` 创建 TUN/TAP；未设置 `IFF_NO_PI` 时，每包前带 4 字节信息（标志和协议）[^6]。macOS 原生 `utun` 控制套接字的包以 4 字节网络字节序的协议族字段开头；Apple 的 Network Extension `packetFlow` 则可通过 `readPackets` 和 `writePackets` 分别传递包数据与协议族[^apple-tunnel]。
 
-| 目的 | Linux | macOS |
-| --- | --- | --- |
-| 查看 IPv4 / IPv6 路由 | `ip route` / `ip -6 route` | `netstat -rn -f inet` / `netstat -rn -f inet6` |
-| 查询特定目标 | `ip route get <IPv4>` / `ip -6 route get <IPv6>` | `route -n get <IPv4>` / `route -n get -inet6 <IPv6>` |
-| 检查策略控制 | `ip rule`、`fwmark` 和相应路由表 | 接口作用域、系统路由与具体 Network Extension 配置 |
-| 三层接口 | TUN 设备及其创建程序 | `utunX` 及其创建程序或扩展 |
-
-macOS 的接口作用域与网络扩展策略有自己的实现，表中的命令只按观察目的对应。判断出站是否绕过虚拟入口，仍需结合该平台的选路结果。
-
-TUN 本身只确定“程序可以读写 IP 包”。它既不规定加密协议，也不规定是否终结 TCP，更不保证所有应用流量都会进入该接口。范围由 IPv4/IPv6 路由、策略规则和排除项共同决定。
+IPv4/IPv6 路由、策略规则和排除项决定哪些包进入 TUN。接入 TUN 后，程序再决定如何处理 IP 包，包括是否终结应用侧 TCP、是否采用加密隧道。普通 TCP Socket 的应用接口见[第四篇的读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)。
 
 ### TUN、代理与 IP 隧道的处理区别
+
+三层**虚拟专用网络**（Virtual Private Network，VPN）可用 TUN 收发内层 IP 包，再通过外部网络连接远端隧道端点。
 
 | 机制 | 接口之后的主要处理 | 回程如何回到应用 |
 | --- | --- | --- |
 | TUN 接口 | 交付 IP 包，后续由使用它的程序决定 | 程序向接口写入符合该平台要求的入站 IP 包，交给内核处理 |
 | 通过 TUN 接管的代理 | 可终结应用侧传输连接，取出载荷，再建立独立的直连或代理出站 | 把出站结果交回应用侧协议栈，构造相应包写回 TUN |
-| IP VPN 隧道 | 通常将内层 IP 包封装或保护后，传给远端隧道端点 | 收到外层流量后解封装，把内层回包写回接口 |
+| 三层 VPN 隧道 | 将内层 IP 包封装后传给远端隧道端点 | 收到外层流量后解封装，把内层回包写回接口 |
 
 这几行可以组合，但不能混为同一机制。代理重建连接时，不一定把原始 IP 包逐个套上外层头；因此，第八篇讨论 MTU 时不能仅凭“启用了 TUN”推导固定的隧道头开销。应用自身的 HTTPS、代理链路加密与 VPN 封装也分别由相应协议决定。
 
@@ -264,19 +266,19 @@ flowchart TB
  outer --> peer["远端解密并去掉外层头<br/>继续转发内层 IP 包"]
 ```
 
-再把右支的封装展开。设本机物理接口地址为 `192.168.1.10`，VPN 对端使用文档地址 `203.0.113.9`，内层仍要访问 `198.51.100.20`。下面选用“完整内层 IP 包经 VPN 加密后由 UDP 承载”的一种模型，观察本机物理出口、上游可能执行的 NAT 之前：
+再把右支的封装展开。应用建立连接时选用本机隧道地址 `10.0.0.2` 访问 `198.51.100.20`；VPN 程序通过物理接口地址 `192.168.1.10` 向对端 `203.0.113.9` 发送流量。这里观察的是靠近本机的两个位置：TUN 读出的内层包，以及上游 NAT 之前的物理出口。
 
-```mermaid mobile-direction="TB" title="TUN 原包与 IP VPN 外层包的包含关系" description="左侧是程序从 TUN 读到的 IP 包，右侧是本机随后生成的一个 UDP/IP 外层包的逻辑结构。内层 IP 与 TCP 头在加密前具有标出的值，物理线路上的 VPN 保护区为密文，旁观者不能直接读取这些内层字段。端口仅为示例，省略 VPN 元数据、认证标签和外层链路封装，不推导固定开销或所有 VPN 的封装方式。"
-flowchart LR
- original["TUN 原包（内层 IPv4/TCP）<br/>源 IP = 192.168.1.10<br/>目的 IP = 198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
- subgraph outer_packet[物理出口的外层 IPv4 包]
-  outer_ip["外层 IPv4 头<br/>源 = 192.168.1.10<br/>目的 = 203.0.113.9<br/>Protocol = 17（UDP）"]
-  outer_udp["外层 UDP 头<br/>端口 = 52000 → 51820"]
-  ciphertext["VPN 元数据与保护后的载荷<br/>密文内部承载原 IP 包<br/>解密后：内层 IP 仍指向 198.51.100.20"]
+```mermaid title="TUN 原包与 IP VPN 外层包的包含关系" description="TUN 读出的原包经加密后进入 VPN 密文区，内层 IP 头、TCP 头和原始载荷都在密文中。外框内从上到下是外层 IPv4 头、UDP 头和 VPN 数据，不表示分别发送。端口仅为示例，省略认证标签的具体格式和外层链路封装。"
+flowchart TB
+ original["TUN 原包 · IPv4/TCP<br/>源：10.0.0.2<br/>目的：198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
+ subgraph outer_packet[物理出口的外层包]
+  outer_ip["IPv4 头<br/>Protocol = 17<br/>源：192.168.1.10<br/>目的：203.0.113.9"]
+  outer_udp["UDP 头<br/>52000 → 51820"]
+  ciphertext["VPN 元数据与密文<br/>密文：加密后的原包"]
   outer_ip --- outer_udp
   outer_udp --- ciphertext
  end
- original -->|VPN 加密并封装| ciphertext
+ original -->|加密封装| ciphertext
  linkStyle 0,1 stroke:none
 ```
 
@@ -290,20 +292,16 @@ flowchart LR
 
 ### 实验一：查看完整路由表与特定目标的选路结果
 
-在 macOS 上查看 IPv4 路由表，再查询一个具体目标。这里的地址只是用于选路对照，不代表它一定提供可用的网站服务：
+先查看路由表，再查询 `198.51.100.20` 这个示例目标在当前配置下的出口。如果要判断双栈接管范围，再用 `2001:db8::20` 另做一次 IPv6 查询。两者都只用于查表对照。
 
-```bash frame="code"
-netstat -rn -f inet
-route -n get 198.51.100.20
-```
+| 观察目的 | Linux | macOS |
+| --- | --- | --- |
+| 查看 IPv4 路由表 | `ip route show` | `netstat -rn -f inet` |
+| 查询 IPv4 目标 | `ip route get 198.51.100.20` | `route -n get 198.51.100.20` |
+| 查看 IPv6 路由表 | `ip -6 route show` | `netstat -rn -f inet6` |
+| 查询 IPv6 目标 | `ip -6 route get 2001:db8::20` | `route -n get -inet6 2001:db8::20` |
 
-Linux 对应为：
-
-```bash frame="code"
-ip route show
-ip route get 198.51.100.20
-ip rule show
-```
+Linux 有策略路由时，按地址族补查 `ip rule show` 或 `ip -6 rule show` 与相应的路由表。macOS 上还需结合接口作用域和具体 Network Extension 的路由配置。
 
 macOS 的 `route -n get` 常见字段包括：
 
@@ -351,7 +349,7 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^3]: 〔RFC〕[RFC 4443 §3](https://www.rfc-editor.org/rfc/rfc4443.html#section-3)——ICMPv6 差错报文，包括 Packet Too Big 与 Time Exceeded。
 
-[^4]: 〔RFC〕[RFC 3022 §2、§4](https://www.rfc-editor.org/rfc/rfc3022.html#section-2)——Basic NAT 与 NAPT、双向地址端口转换及校验和调整。
+[^4]: 〔RFC〕[RFC 3022 §2.1–2.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.1)区分 Basic NAT 与 NAPT，[§4.1–4.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-4.1)说明双向包头改写与校验和调整。
 
 [^5]: 〔RFC〕[RFC 4787 §3、§4.1、§5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——旧 NAT 分类的不足，以及 UDP 地址/端口映射和入向过滤的独立描述。
 
@@ -369,9 +367,9 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^forward-packet]: 〔RFC〕[RFC 1812 §5.2.1、§5.3.1](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.2.1)——IPv4 转发、出接口封装、TTL 与头部校验和更新；[RFC 9293 §3.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.1)定义 TCP 校验和覆盖的伪头部，其中不包含 IPv4 TTL。
 
-[^ipv6-hdr]: 〔RFC〕[RFC 8200 §3、§4.5](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)——IPv6 固定 40 字节基础头部取消头部校验和字段，仅保留 Hop Limit 逐跳递减。
+[^ipv6-hdr]: 〔RFC〕[RFC 8200 §3](https://www.rfc-editor.org/rfc/rfc8200.html#section-3)列出 IPv6 基本首部字段和 Hop Limit 的转发规则，[§8.1](https://www.rfc-editor.org/rfc/rfc8200.html#section-8.1)定义上层校验使用的 IPv6 伪首部。
 
-[^apple-tunnel]: 〔平台与实现〕[Apple: NEPacketTunnelProvider](https://developer.apple.com/documentation/networkextension/nepackettunnelprovider)、[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)与[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)——Packet Tunnel 的包读写及包含、排除路由；不把 Linux TUN API 套用为 macOS 的统一实现。
+[^apple-tunnel]: 〔平台与实现〕[Apple XNU：`if_utun.c`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_utun.c)说明原生控制套接字的协议族字段。[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)提供分开读取或写入包数据和协议族的方法，[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)定义包含、排除路由配置。
 
 [^netfilter]: 〔平台与实现〕[nftables 官方手册：Connection tracking](https://netfilter.org/projects/nftables/manpage.html)与[Linux 内核文档：透明代理](https://docs.kernel.org/networking/tproxy.html)——连接状态匹配、状态 NAT 与 TPROXY 的路由和套接字要求。
 

@@ -7,7 +7,7 @@ tags: ["networking"]
 
 在浏览器里打开一个网址，应用交给操作系统的是什么，路由器看到的又是什么？我们跟着一次 HTTPS 请求，看看数据怎样在应用、传输、网络和链路四层之间交付，再顺着一条具体路径追踪哪些字段会变、哪些会留到对端。这是[计算机网络系列](/series/networking/)的第一篇，实验以 macOS 和 Linux 为例。
 
-先建立分层与封装的概念，再看主机通过什么接口发包、沿途设备怎样转发，最后按 DNS、TCP、TLS、HTTP 的实际阶段走通一次请求。前半篇按概念依赖展开，完整请求一节再把它们放回运行顺序，也会对照缓存命中和连接复用时哪些步骤可以省去。
+先建立分层与封装的概念，再看主机通过什么接口发包、沿途设备怎样转发，最后按 DNS、TCP、TLS、HTTP 的实际阶段走通一次请求。后续篇章按机制依赖展开，先解释承载数据的链路、路由与传输，再讨论 DNS 和 Web 通信；阅读顺序不是一次请求的执行顺序。
 
 ## 为什么需要分层模型
 
@@ -83,7 +83,7 @@ flowchart TB
  linkStyle 0,1,2,3,4 stroke:none
 ```
 
-这张图展开的是协议的逻辑布局。帧的载荷包含整个 IP 数据报，IP 的载荷又包含整个 TCP 报文段；以太网头与 FCS 都在 IP 包之外。它不要求包在内核内存中连续排成一整块，例如 Linux 的包缓冲可以关联线性数据区与分散的页片段[^skb]。MAC、IP 和端口分别处于不同层的头部中，路由器换掉外层帧，不代表它同时换掉了内层的目的 IP。
+这张图展开的是未分片时的协议布局。帧的载荷包含整个 IP 数据报，IP 的载荷又包含整个 TCP 报文段；以太网头与 FCS 都在 IP 包之外。路由器换掉外层帧，不代表它同时换掉了内层的目的 IP。
 
 常见的未加 VLAN 标签的 Ethernet II 帧由以下字段组成[^ethernet-frame]：
 
@@ -148,24 +148,27 @@ TCP 向上交付有序字节流，TLS 则依据记录头中的 `length` 字段�
 
 **套接字**（socket）是应用读写网络数据的操作系统接口。Unix-like 系统常用文件描述符访问它，再调用 `connect`、`send` 或 `recv`。常见的 Internet `SOCK_STREAM` 套接字使用 TCP，`SOCK_DGRAM` 套接字使用 UDP，具体仍取决于地址族与协议。Unix 域套接字则不经过 IP 网络[^6]。
 
-前面介绍的是协议数据格式，现在看应用如何把数据交给本机发送路径。Linux、macOS 和 Windows 都有套接字、协议栈和网络接口的抽象，钩子位置与驱动接口各有不同；下图采用普通主机的物理接口路径。
+前面介绍的是协议数据格式，现在看应用如何把数据交给本机发送路径。Linux、macOS 和 Windows 都有套接字、协议栈和网络接口的抽象，钩子位置与驱动接口各有不同；下图对照回环、TUN 和物理接口三种出口。
 
-```mermaid title="从套接字到物理介质的发送路径" description="普通 TCP/IP 套接字经物理接口发送的概念图。箭头表示数据沿实现边界交付，不描述任何内核的固定钩子顺序。回环接口在本机折返；路由若选择 TUN，则把 IP 包交给对应程序。"
+```mermaid title="从套接字到物理介质的发送路径" description="应用调用 write 或 send，把数据交给内核。路由和策略选出一条出口：回环回到本机协议栈，TUN 将 IP 包交给读取接口的用户态程序，物理接口则经驱动和网卡在链路上发送信号。箭头表示交付方向，不规定内核钩子的顺序。"
 flowchart TB
- app["用户态应用"] -->|write / send| socket["套接字和发送缓冲"]
- socket --> stack["内核传输与 IP 处理"]
- stack --> route["路由与适用的过滤策略"]
- route -->|物理接口| device["接口与驱动"]
- device -->|网卡读取发送数据| nic["网卡与物理层"]
- nic -->|介质相关的信号| wire["双绞线、光纤或无线链路"]
- route -->|本机路径| loop["回环接口"]
- route -->|虚拟出口| tun["TUN：IP 包交给程序"]
+ app["用户态应用"]
+ subgraph kernel[内核态]
+  socket["Socket 发送缓冲"] --> route["TCP/IP 处理<br/>路由与过滤策略"]
+  route --> loop["回环<br/>本机"]
+  route --> tun["TUN"]
+  route --> driver["驱动"]
+ end
+ app -->|write / send| socket
+ tun -->|IP 包| reader["用户态<br/>程序"]
+ driver --> nic["网卡"]
+ nic --> wire["链路"]
 ```
 
-网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。Linux 的**网络事件处理机制**（NAPI，早期称 New API，即“新接口”）通常在设备中断通知后调度轮询，批量处理收发事件；硬件中断合并则是减少中断频率的另一项机制[^napi]。驱动、卸载与虚拟接口会改变主机抓包所见，参见[第八篇的捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)。
+协议图描述的是线上字节的排列，不要求包在内核内存中连续存放。例如 Linux 的包缓冲可以关联线性数据区与分散的页片段[^skb]；网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。Linux 的**网络事件处理机制**（NAPI，早期称 New API，即“新接口”）通常在设备中断通知后调度轮询，批量处理收发事件；硬件中断合并则是减少中断频率的另一项机制[^napi]。驱动、卸载与虚拟接口会改变主机抓包所见，参见[第八篇的捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)。
 
 :::important[本地写入成功与远端处理完成]
-普通 TCP Socket 的 `write`/`send` 成功，只说明返回值所计的字节被本地发送路径接受，既不证明已经发出，也不证明远端业务处理完成。一次调用还可能只接受部分数据，详见第四篇的[Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/)。这与并发系列的[消息交付与处理完成](/posts/concurrency/message-passing-workers-backpressure/)是相似的责任边界，具体保证仍由各自接口规定。
+普通 TCP Socket 的 `write`/`send` 成功，只说明返回值所计的字节被本地发送路径接受，既不证明已经发出，也不证明远端业务处理完成。一次调用还可能只接受部分数据，详见第四篇的 [Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)。这与并发系列的[消息交付与处理完成](/posts/concurrency/message-passing-workers-backpressure/)是相似的责任边界，具体保证仍由各自接口规定。
 :::
 
 再看流量怎样进入代理；这里只标出入口，具体流程留在第七篇：
@@ -200,31 +203,29 @@ flowchart LR
  router -->|再次换帧，地址端口保持| server["服务端<br/>按连接交付数据<br/>服务进程处理请求"]
 ```
 
-## 走通一次 HTTPS 请求的完整路径
+## 一次 HTTPS 请求：冷启动与状态复用
 
-下面固定一个便于追踪的模型：本机 IPv4 为 `192.168.1.10`，使用普通局域网、默认网关和家庭 NAT；浏览器访问 `https://example.com/`，需要解析地址并新建 TCP 连接，使用 TLS 1.3 且未启用 ECH，不经过显式代理或 TUN 接管。下文的 `198.51.100.20` 只是远端地址示意，实验必须使用当次解析或连接的实际地址。HTTP/3、缓存命中和连接复用会改变阶段顺序，分别在第五、六篇展开。
+先看一次没有可用缓存或连接的访问：本机 IPv4 为 `192.168.1.10`，通过普通局域网、默认网关和家庭 NAT 访问 `https://example.com/`。浏览器需要解析地址、新建 TCP 连接并完成 TLS 1.3 握手；本例不使用 ECH、显式代理或 TUN。`198.51.100.20` 是前文转发示例中的目标地址，实际实验以当次连接报告的地址为准。
 
-### 1. 准备目标地址（应用层触发 DNS）
+**请求阶段和逐层封装回答的是两个问题。** DNS、TCP、TLS 和 HTTP 说明这次访问先后要完成什么；封装说明每次发送的数据怎样上链路。拿到网站地址前，主机就可能已经把 DNS 查询封装为 UDP 数据报、IP 包和链路帧。随后 TCP 的 SYN 也会独立封装成 IP 包和链路帧，里面没有要等到 TLS 建立后才发送的 HTTP 请求。
 
-浏览器从 URL 取得协议、服务名和端口。需要新连接且没有可用地址时，由系统解析服务或应用内置解析器取得目标地址。解析器角色、缓存和加密方式见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/)[^7]。
+### DNS 与 TCP：取得地址并建立连接
 
-### 2. 建立传输连接（TCP 三次握手）
+1. **DNS**：浏览器从 URL 取得方案和主机名；`https` 未显式指定端口时默认使用 `443`[^7]。没有可用解析结果时，由系统解析服务或应用内置解析器查询目标地址，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/)。
+2. **TCP**：浏览器按目标 IP 和端口建立连接。本机按路由和邻居映射把报文送给网关，家庭路由器在本例改写出站源地址与端口。具体报文和序号见[第四篇的三次握手](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)[^2]。
 
-浏览器按目标 IP 和端口建立 TCP 连接。本机按路由和邻居映射把数据送给网关，家庭路由器在本例改写出站源地址与端口。握手建立两端的传输状态，具体报文、序号和关闭状态见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/#建立与关闭三次握手和-time-wait)[^2]。
+### TLS 与 HTTP：建立加密信道并交换消息
 
-### 3. 建立加密信道（TLS 握手）
+3. **TLS**：浏览器在 TCP 字节流上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。证书验证与加密起点见[第六篇的 TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
+4. **HTTP**：浏览器将 HTTP/1.1 请求或 HTTP/2 帧交给 TLS 记录层加密，经 TCP 分段并逐层封装。TLS 终止端收齐、解密后解析请求，再经回程送回响应。回程未必与去程相同。
 
-TCP 提供可靠、有序的字节流。浏览器在其上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。未使用 ECH 时，ClientHello 中的 SNI 通常可被观察到。证书验证、加密起点和 ECH 见[第六篇](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
+握手里的 `ClientHello` 和之后的 HTTP 应用数据都经过 TLS 记录层。同一条 TLS 记录可以分散在多个 TCP 段中，抓包时应按字节流重组来判断阶段。分段示例见[两套独立的边界](#tls-记录与-tcp-报文段两套独立的边界)。
 
-### 4. 发送 HTTP 请求与接收响应
+在本例中，浏览器与 TLS 终止端能读取 HTTP 路径和内容。终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，还可能从重组后的 `ClientHello` 读取 SNI。使用 [ECH](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello) 时，真实的 SNI 则位于加密的内层 `ClientHello`。
 
-浏览器将 HTTP/1.1 请求或 HTTP/2 帧交给 TLS 记录层加密，再写入 Socket。普通内核 TCP/IP 发送路径将其分段、封装并送往下一跳；TLS 终止端收到密文后解密、解析请求，再将响应经回程路径送回浏览器。回程未必与去程相同。
+### 状态复用：缓存与已有连接会跳过哪些阶段
 
-在本例的信任与连接模型下，浏览器和 TLS 终止端能读取 HTTP 路径与内容；这个终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，未启用 ECH 时还可能重组 `ClientHello` 读取 SNI；它不一定恰好装在一个包中。可见性取决于观察位置，不能仅凭“经过代理”判断内容是否被解密。
-
-### 已有连接和缓存时，请求怎样变化
-
-前面的四步描述一次冷启动访问。已经访问过的服务可能留下缓存、连接或 TLS 恢复状态，下一次请求的路径也会随之变化：
+上面四个阶段描述一次冷启动访问。已经访问过的服务可能留下缓存、连接或 TLS 恢复状态，下一次请求需要完成的网络工作也会随之变化：
 
 | 本次状态 | 还需要的网络工作 |
 | --- | --- |
@@ -235,27 +236,23 @@ TCP 提供可靠、有序的字节流。浏览器在其上执行 TLS 1.3 握手�
 
 连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。HTTP/3 的传输建立方式另见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)。
 
-下面把运行时的选择画成分支。已有连接是否可用由客户端判断，DNS 缓存只提供仍可用的解析结果，TLS 恢复材料则只参与一次新握手。
+下面从最先能省掉的网络工作开始，依次检查 HTTP 缓存、已有连接和解析结果。TLS 恢复材料只参与新握手，不等同于复用已有连接。
 
-```mermaid title="一次 HTTPS 请求可能跳过哪些阶段" description="一次访问的决策示意，省略地址族竞速、协议回退与重定向。已建立连接或新建立的连接均须满足本次服务身份与协议的要求。TLS 会话恢复用于建立新的安全连接。"
+```mermaid title="一次 HTTPS 请求可能跳过哪些阶段" description="从上往下检查。本地 HTTP 缓存能直接满足时，不发网络请求；有满足本次服务身份和协议要求的连接时，直接在原连接上发请求。否则先取得地址，再按 HTTP 版本新建安全连接。省略地址族竞速、协议回退与重定向。"
 flowchart TB
- start["应用请求"] -.-> cached{"本地 HTTP 缓存可直接满足？"}
- cached -->|是| local["返回缓存响应"]
- cached -.->|否| reuse{"有可用于本次来源的连接？"}
- reuse -->|是| send["发送请求"]
- reuse -.->|否| dns{"有可用的解析结果？"}
- dns -.->|有| protocol{"本次使用哪种传输？"}
- dns -.->|无，先查询| lookup["DNS 解析"]
- lookup -.-> protocol
- protocol -->|HTTP/1.1 或 HTTP/2| tcp["新建 TCP，再执行 TLS"]
- protocol -->|HTTP/3| quic["新建 QUIC，集成 TLS"]
- tcp --> send
- quic --> send
+ cached["1. 检查本地 HTTP 缓存<br/>能直接满足：返回缓存响应"]
+ reuse["2. 检查已有连接<br/>可复用：在原连接上发请求"]
+ dns["3. 取得地址<br/>有可用解析结果：直接用<br/>没有结果：做 DNS 解析"]
+ connect["4. 新建安全连接<br/>HTTP/1.1、HTTP/2：TCP + TLS<br/>HTTP/3：QUIC 集成 TLS"]
+ send["在新连接上发送请求"]
+ cached -->|不能直接满足| reuse
+ reuse -->|无可用连接| dns
+ dns --> connect --> send
 ```
 
 本篇逐跳示例采用 IPv4 以太网。IPv6 在以太网上仍可使用源和目的 MAC，下一跳地址通过 ICMPv6 邻居发现解析。点对点和 TUN 等接口的交付方式另计，详见[第二篇的邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)。
 
-## 观察一次请求：实验能证明什么，不能证明什么
+## 观察一次请求：应用日志与接口抓包
 
 先记录 `curl --version`，再完成应用日志与接口视图的对照。不同 TLS 后端会采用不同日志文字，不要求逐行与本文一致。以下请求会访问真实网络，抓包还依赖本机接口与捕获权限，应在自己的终端运行；在线 Playground 的网络、代理与接口环境不能代表本机。只想先观察 Socket 的读写机制，可以运行第四篇不访问外网的[回环半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)。
 
@@ -271,39 +268,48 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 成功请求通常能找到解析地址、`Connected to`、TLS 版本与证书验证结果，以及以 `>`、`<` 标出的 HTTP 请求和响应。它们分别说明这个进程连接了什么端点、协商了什么协议、收到了什么响应，不能单独证明真实出口或路由器上的 NAT 改写。
 
-启用 TUN/Fake-IP 时，即使日志显示 `Connected to example.com (198.18.0.79)`、TLS 1.3 和 `HTTP/1.1 200 OK`，连接地址也可能只是代理维护的映射地址。“请求成功”不等于“直接连接了网站公网地址”，还需结合选路结果确认实际路径。
+不需要启用代理就能做本实验。若本机已启用 [TUN 与 Fake-IP](/posts/networking/proxies-tunnels-transparent-interception/#fake-ip在-dns-阶段建立映射)，`Connected to example.com (198.18.0.79)` 中的地址可能只是代理维护的映射；握手和请求成功本身不能证明直连了网站的公网地址。
 
 ### 实验二：先确定地址与接口，再抓取协议头部
 
-先取得一次成功请求的连接地址，再查询本机对该地址的选路。以下变量和命令放在同一终端运行；如果第一条请求失败，先处理错误，不要拿空变量继续：
+先在同一个终端取得一次成功请求的连接地址，记下输出的 `remote_ip`。如果请求失败或地址为空，先处理错误，再查询选路：
 
 ```bash frame="code"
-target_ip=$(curl -q -4 --noproxy '*' --http1.1 \
+if target_ip=$(curl -q -4 --noproxy '*' --http1.1 \
   --connect-timeout 5 --max-time 15 -sS -o /dev/null \
-  -w '%{remote_ip}' https://example.com/)
-# macOS
-route -n get "$target_ip"
-# Linux uses: ip route get "$target_ip"
+  -w '%{remote_ip}' https://example.com/) && [ -n "$target_ip" ]; then
+  printf 'remote_ip: %s\n' "$target_ip"
+else
+  unset target_ip
+  printf '%s\n' 'No usable remote_ip. Check the curl error before looking up a route.' >&2
+fi
 ```
 
-从选路输出找到接口名，例如普通 Wi-Fi 环境的 `en0` 或透明接管环境的 `utun4`。把下面变量改为这次输出中的值，不能直接假定物理网卡就是出口：
+取得非空地址后，macOS 执行 `route -n get "$target_ip"`，Linux 执行 `ip route get "$target_ip"`。从输出的 `interface`（macOS）或 `dev`（Linux）读出接口名。普通 Wi-Fi 可能是 `en0`，已接管的 macOS 上可能是 `utun4`；以这次查询为准。在同一终端执行下面的命令，按提示输入接口名：
 
 ```bash frame="code"
-interface=utun4
-sudo tcpdump -i "$interface" -nn -c 10 "host $target_ip and tcp port 443"
+printf 'Interface from route lookup: '
+if IFS= read -r interface && [ -n "$interface" ] && [ -n "${target_ip:-}" ]; then
+  sudo tcpdump -i "$interface" -nn -c 10 "host $target_ip and tcp port 443"
+else
+  printf '%s\n' 'A route interface and a recorded remote_ip are required.' >&2
+fi
 ```
 
-保持捕获运行，在另一终端把刚才的地址赋给 `target_ip`，用 `--resolve` 固定下一次请求连接这个地址，同时保留 URL 的主机名以供 HTTP、SNI 和证书验证使用[^curl]：
+保持捕获运行，在另一终端按提示输入刚才记录的 `remote_ip`。`--resolve` 让这次请求连接同一个地址，同时保留 URL 的主机名以供 HTTP、SNI 和证书验证使用[^curl]：
 
 ```bash frame="code"
-# Replace with the remote_ip recorded in the first terminal.
-target_ip=198.18.0.79
-curl -q -4 --noproxy '*' --http1.1 \
-  --resolve "example.com:443:$target_ip" \
-  --connect-timeout 5 --max-time 15 https://example.com/ -o /dev/null
+printf 'Recorded remote_ip: '
+if IFS= read -r target_ip && [ -n "$target_ip" ]; then
+  curl -q -4 --noproxy '*' --http1.1 \
+    --resolve "example.com:443:$target_ip" \
+    --connect-timeout 5 --max-time 15 https://example.com/ -o /dev/null
+else
+  printf '%s\n' 'Enter the remote_ip reported by curl.' >&2
+fi
 ```
 
-本例中的 Fake-IP 仅在对应映射仍有效时可用；其他机器必须使用自己的观察结果。捕获数量未达到 10 时可按 Ctrl+C 停止。普通新建 TCP 连接通常能看到 `[S]`、`[S.]`、`[.]`；第三次握手也可能携带数据，不能把三条 `length 0` 当作所有握手的必要格式。
+如果记录的是 Fake-IP，重试时还需要原映射有效。`-c 10` 只限制匹配包的捕获数量；需要观察后续交换时可调大上限，也可按 Ctrl+C 停止。在新建连接开始前启动捕获，通常能按 SYN、SYN-ACK、ACK 识别三次握手。第三次握手也可能携带数据。
 
 :::caution[抓包位置决定可解释的范围]
 普通客户端出口捕获不到上游 NAT 改写后的地址。以太网接口上加 `-e` 可观察链路头，TUN 接口没有普通以太网 MAC 头；物理接口上可能只看到代理出站或外层隧道。若权限不足或过滤后没有包，先核对接口、连接端点与捕获时机，不能直接推断网络没有发包。
@@ -332,13 +338,13 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 [^3]: 〔RFC〕[RFC 791: Internet Protocol](https://www.rfc-editor.org/info/rfc791/)——定义 IPv4 数据报格式、Protocol 协议号复用字段、TTL 与跨网络转发机制
 
-[^4]: 〔RFC〕[IANA: IEEE 802 Numbers — Ether Types](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——分别登记 IPv4、ARP 与 IPv6 的 EtherType；IPv4 在以太网上的封装另见 [RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)
+[^4]: 〔编号表〕[IANA: IEEE 802 Numbers — Ethertypes](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——列出 IPv4、ARP 与 IPv6 的 EtherType。
 
-[^ethernet-frame]: 〔RFC 与设备文档〕[RFC 894](https://www.rfc-editor.org/rfc/rfc894.html)——IPv4 在以太网上的载荷大小和填充规则；[Cisco 的以太网帧格式](https://www.cisco.com/en/US/docs/internetworking/troubleshooting/guide/tr1904.pdf)说明帧字段、最小帧长和前导码，[802.1Q 帧格式](https://www.cisco.com/c/en/us/support/docs/lan-switching/8021q/17056-741-4.html)说明标签开销，[接口 MTU 文档](https://www.cisco.com/c/en/us/td/docs/iosxr/cisco8000/interfaces-and-hardware-component/configuration-guide/interfaces-and-hardware-component-config-cisco8000/mtu-overview/ethernet-mtu.html)给出巨型帧支持示例。
+[^ethernet-frame]: 〔RFC 与设备文档〕[RFC 894（含勘误）](https://www.rfc-editor.org/rfc/inline-errata/rfc894.html)说明 IPv4 在以太网上的载荷上限和填充规则。[Cisco 的以太网帧格式](https://www.cisco.com/en/US/docs/internetworking/troubleshooting/guide/tr1904.pdf)说明帧字段、最小帧长和前导码，[802.1Q 帧格式](https://www.cisco.com/c/en/us/support/docs/lan-switching/8021q/17056-741-4.html)说明单标签增加的 4 字节与 1522 字节的帧长上限，[接口 MTU 文档](https://www.cisco.com/c/en/us/td/docs/iosxr/cisco8000/interfaces-and-hardware-component/configuration-guide/interfaces-and-hardware-component-config-cisco8000/mtu-overview/ethernet-mtu.html)给出巨型帧支持示例。
 
 [^5]: 〔RFC〕[RFC 9846 §2、§4、§5](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 握手与记录层边界；2026 年 7 月取代 RFC 8446。SNI 的扩展格式另见 [RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)，ECH 另见第六篇。
 
-[^tls-record]: 〔RFC〕[RFC 8446 §5、§5.2](https://www.rfc-editor.org/rfc/rfc8446.html#section-5)——TLS 1.3 应用数据可跨记录拆分或在记录内合并；受保护记录的外层头部字段与密文长度定义。
+[^tls-record]: 〔RFC〕[RFC 9846 §5.1–5.2](https://www.rfc-editor.org/rfc/rfc9846.html#section-5.1)——TLS 1.3 应用数据可跨记录拆分或在记录内合并，受保护记录的外层头部带有密文长度。
 
 [^reuse]: 〔RFC〕[RFC 9113 §9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)——HTTP/2 连接复用及不同来源共用连接时的权威性和证书要求；[RFC 9111 §4](https://www.rfc-editor.org/rfc/rfc9111.html#section-4)说明直接使用缓存响应与重新验证的条件。
 

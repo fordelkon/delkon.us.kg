@@ -7,9 +7,11 @@ tags: ["networking"]
 
 前七篇从[封装与端点边界](/posts/networking/layered-architecture-packet-journey/)讲到[代理怎样接管连接](/posts/networking/proxies-tunnels-transparent-interception/)。遇到“能连上却打不开网页”“测速很快但页面慢”时，要先把症状对应到请求阶段，再用对照实验缩小范围。一次成功、一次超时或一个偏高的指标，都不足以独立确定根因。
 
-本篇先按症状选观测点，再用性能指标、TCP 窗口和路径 MTU 解释现象，最后用 curl 和 Wireshark 验证判断。排障记录应保留时间、命令版本、连接地址、代理方式、退出码与多次测量结果，让后续比较有共同条件。
+本篇先按请求阶段选观测点，再按症状设计对照。接着用性能指标、TCP 窗口和路径 MTU 解释两种现象：单连接为什么跑不满，以及为什么小包能通过，大包却可能卡住。后面的实验先用 curl 计时，再用 Wireshark 把时间差与报文对应起来。
 
 ## 从症状到观测点
+
+### 按请求阶段选择观测点
 
 排查网页访问，可以沿接口与选路、DNS、传输、TLS、HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始；HTTP/3 的传输分支检查 QUIC。
 
@@ -28,11 +30,7 @@ flowchart TB
  http -->|是但慢| performance["重复测量阶段耗时、吞吐<br/>窗口、重传与应用供数"]
 ```
 
-例如，DNS 返回 Fake-IP 时，后续连接需要本地映射；本地代理已经接受 TCP 连接时，还要查它是否连上远端。这些路径差异会直接影响后面的计时解释。
-
-### 从请求阶段选择观测点
-
-先把“打不开”改写成可以验证的问题：解析到了哪个地址？连接哪个端点超时？TLS 是否完成？首字节还是正文传输慢？下表可以往返使用，不要求每个问题都从第一行开始。
+例如，DNS 返回 Fake-IP 时，后续连接需要本地映射；本地代理已经接受 TCP 连接时，还要查它是否连上远端。这些路径差异会直接影响后面的计时解释。把“打不开”改写成具体问题，如“连接哪个端点时超时”，再从表中选工具。
 
 | 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
 | --- | --- | --- | --- |
@@ -42,7 +40,9 @@ flowchart TB
 | 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
 | TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
 
-把症状与观察位置配对，最好一次只改变一个条件。下表的“支持”仅适用于本次有效样本。
+### 按症状设计下一次对照
+
+选定观测点后，先写下当前证据支持什么，再问怎样区分剩下的解释。每次对照尽量只改变一个条件；下表的判断仅适用于本次有效样本。
 
 | 症状 | 观测点与工具 | 能支持的判断 | 下一次对照 |
 | --- | --- | --- | --- |
@@ -52,7 +52,9 @@ flowchart TB
 | 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与包长 | 包长依赖只是 PMTU 线索 | 降低受控测试的包长，并检查反馈是否抵达发送端 |
 | 建连与握手快，首字节或正文慢 | curl 时间戳、应用日志、RTT 与 TCP 窗口 | 延迟落在可定位的阶段 | 固定连接配置，只改变应用等待或传输大小 |
 
-## 性能诊断的五个常用指标
+## 性能指标与单连接吞吐
+
+### 性能诊断的五个常用指标
 
 这些指标描述不同方面，但会相互影响。例如路由器或网关瓶颈处队列过长引发的**缓冲膨胀**（Bufferbloat），既可能显著推高**往返时延**（Round-Trip Time，RTT）与**时延抖动**（Jitter），也可能导致丢包和吞吐剧烈波动[^bufferbloat]。
 
@@ -66,7 +68,9 @@ flowchart TB
 
 例如测速工具可能以多条连接和较长传输时间测量吞吐；页面加载还受 DNS、握手、资源依赖、缓存和服务端处理影响。前者表现好，不能证明后者的每一阶段都快。实时通话则还受尾延迟、抖动、接收缓冲和解码期限约束。
 
-## BDP 与单条 TCP 连接的吞吐边界
+### BDP 与单条 TCP 连接的吞吐边界
+
+如果慢在正文传输，而且同一路径上的多连接测速明显快于单连接下载，可以先用窗口模型估算单流的吞吐上限。
 
 **带宽时延积**（Bandwidth-Delay Product，BDP）是瓶颈带宽与 RTT 的乘积。带宽用 bit/s、RTT 用秒时，乘积是 bit；除以 8 才得到 byte。它可用于估算持续利用路径容量需要多少在途数据[^throughput]。
 
@@ -88,7 +92,7 @@ $$
 
 ## MTU、MSS 与 PMTUD 黑洞
 
-“小包正常，较大传输停住”是优先排查路径 MTU 的一类症状，也可能来自内容过滤、应用错误或其他传输问题。先分清两个量：
+窗口约束限制的是在途数据总量，路径 MTU 限制的则是单个 IP 包的大小。若小包正常而较大传输反复停顿，应检查路径 MTU，同时保留内容过滤、应用错误或其他传输问题的可能性。先分清两个量：
 
 - **最大传输单元**（Maximum Transmission Unit，MTU）是接口或链路能承载的最大 IP 包总长度，包含 IP 头，不包含外部以太网头。以太网常见 MTU 为 1500 byte，实际路径取各链路约束中的最小值。
 - **最大报文段长度**（Maximum Segment Size，MSS）是 TCP 通告的最大 TCP 数据长度，不包含 IP 和 TCP 头。以 MTU 1500、基本 IPv4/TCP 头各 20 byte 估算，得到 1460 byte；IPv6 基本头为 40 byte，对应 1440 byte。实际发送还要考虑选项、扩展头与路径限制[^mss]。
@@ -125,32 +129,20 @@ IP 分片在 NAT、防火墙等环境中有脆弱性，协议设计常尽量控�
 
 | 场景 | 路由器遇到超大包时 | 发送端依据 |
 | --- | --- | --- |
-| IPv4，包的 DF 位置位 | 不进行分片，丢包并返回 ICMP Type 3 Code 4，通常携带下一跳 MTU | RFC 1191 的 IPv4 PMTUD[^pmtu4] |
+| IPv4，`DF=1` | 不分片，丢包并返回 ICMP Type 3 Code 4；按 RFC 1191 填入下一跳 MTU，旧路由器可能填零 | RFC 1191 的 IPv4 PMTUD[^pmtu4] |
 | IPv6 | 路由器不为转发包分片，丢包并返回 ICMPv6 Packet Too Big | RFC 8201 的 IPv6 PMTUD[^pmtu6] |
 
 如果反馈在路径中被过滤，发送端可能持续发送过大的包并重传，而小包仍正常。这才构成经典 PMTUD 黑洞的机制；是否持续卡住还取决于实现有没有其他探测或回退。
 
-```mermaid title="PMTUD 反馈被过滤时的黑洞与 TCP 对照" description="主流程限定 IPv4、DF=1、1500 字节 IP 包和可用内层 MTU 为 1400 的瓶颈，省略大部分握手与 ACK。ICMP 被过滤且发送端未有效回退时，超大包可持续重传；小包通过不证明大包能通过。IPv6 没有 DF 位，对应反馈是 ICMPv6 Packet Too Big。后半段是另一次 TCP 连接的独立对照，只画限制发送端发包方向的 SYN/ACK MSS 调整，必须依据已知路径和头部预算；不是 UDP/QUIC 的修复。箭头不按耗时绘制。"
-sequenceDiagram
- participant Sender as 发送端
- participant Router as MTU 1400 瓶颈
- participant Filter as ICMP 过滤点
- participant Target as 接收端
- Sender->>Router: 小包握手
- Router->>Target: 小包符合 MTU，继续转发
- Target->>Sender: 握手应答，省略中间回程
- Sender->>Router: IPv4 包长 1500，DF=1
- Note over Router: 超过 MTU：丢弃，不能分片
- Router->>Filter: ICMP Type 3 Code 4<br/>报告下一跳 MTU 1400
- Note over Filter: 假设过滤，反馈没有到达发送端
- Sender->>Router: 未调整包长，继续重传
- Note over Sender,Router: 无有效回退时可能形成 PMTUD 黑洞
- Note over Router: IPv6 无 DF 位<br/>反馈改为 ICMPv6 Packet Too Big
- Note over Sender,Target: 独立 TCP 对照：已知路径预算，在建连时调整 MSS
- Target->>Router: SYN/ACK 中通告接收 MSS
- Router->>Sender: 按该方向预算降低通告 MSS
- Sender->>Router: 据对端通告发送较小 TCP 数据包
- Router->>Target: 符合路径 MTU，继续转发
+```mermaid title="PMTUD 黑洞：包被丢弃，反馈未到达" description="限定 IPv4、DF=1、路径 MTU 1400 字节且发送端没有有效回退。先用独立的小包作对照，再看 1500 字节包的去向。框间箭头表示观察顺序；反馈虚线表示路由器尝试回报，但 ICMP 在到达发送端之前被过滤。"
+flowchart TB
+ small["小包：未超过 MTU<br/>发送端 → 瓶颈路由器<br/>路由器转发 → 接收端"]
+ large["大包：1500 字节 · DF=1<br/>发送端 → 瓶颈路由器<br/>超过 MTU，路由器丢包"]
+ blocked["ICMP 过滤点拦截<br/>反馈未到达发送端"]
+ retry["发送端未缩小包长<br/>重传仍在瓶颈处被丢弃"]
+ small -->|另发一个大包| large
+ large -.->|路由器回报 MTU 1400| blocked
+ blocked -->|无有效回退| retry
 ```
 
 ### 怎样验证，而不是直接改一个 MSS 值
@@ -159,9 +151,11 @@ sequenceDiagram
 
 若可控制隧道两端，可临时降低测试接口或连接的包长做对照，记录变化并恢复配置。**MSS 钳制**（MSS Clamping）通过调整 TCP SYN 中通告的 MSS 影响对端发包，应根据已知路径预算设置，并考虑方向；它不能作为 UDP/QUIC 的通用修复。
 
-**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）通过发送探测包、判断是否被确认来发现可用大小，减少对 ICMP 的依赖。TCP 等传输的框架见 RFC 4821，数据报传输的 DPLPMTUD 见 RFC 8899；是否启用仍需检查具体实现[^plpmtu][^dplpmtu]。
+**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）用不同大小的包探测路径，根据送达确认调整包长，不依赖 ICMP 反馈。RFC 4821 描述了适用于 TCP 等协议的框架；RFC 8899 更新了其中适用于数据报的机制，即 DPLPMTUD。是否实现、启用以及怎样确认送达，仍需检查具体协议与软件[^plpmtu][^dplpmtu]。
 
 ## 用 curl 记录请求耗时
+
+怀疑窗口受限或包长过大时，先确认请求在哪一段变慢。用 curl 记录各阶段的时间，再决定是否要进一步查看窗口、重传和包长。
 
 ### 先限定本次计时模型
 
@@ -195,10 +189,10 @@ flowchart LR
 | `time_starttransfer - time_appconnect` | TLS 完成后到首字节 | 请求发送、往返、排队、丢包恢复和应用处理 |
 | `time_total - time_starttransfer` | 首字节后到传输结束 | 正文传输与停顿，不能单独区分限速、拥塞和接收方影响 |
 
-`time_starttransfer - time_appconnect` 包含请求传输与首个响应字节返回的等待，不能当作纯粹的服务端业务处理时间。首字节等待偏大，只能把关注范围缩到请求发送至首字节返回之间；区分网络等待和服务端处理，还需日志、服务端指标或抓包。使用 HTTP/3、连接复用、并行传输或 `-L` 跟随重定向时，应重新按对应语义解释，不能机械套用这张表。
+明文 HTTP 的直连没有 TLS 阶段，不能把 `time_appconnect` 的零值当作握手完成的时间点。在同样是新建 TCP 连接且无重定向的条件下，改用 `time_starttransfer - time_connect` 估算建连完成后到首字节的等待；这个差值也不是纯服务端处理时间[^curl]。区分网络等待和服务端处理，还需日志、服务端指标或抓包。HTTP/3、连接复用、并行传输或 `-L` 跟随重定向时，不能直接套用这张表。
 
 :::important[计时中的端点是谁]
-普通网关做 IP 转发，不会因此成为 TCP 握手的终点；TUN 接口也不规定 TCP 在哪里终结。显式代理、用户态终结 TCP 的透明代理，以及承载完整 IP 包的 VPN，分别有不同连接关系。先核对第三篇的接口模型和第七篇的接管实现，再解释时间。
+普通网关做 IP 转发，不会因此成为 TCP 握手的终点；TUN 接口也不规定 TCP 在哪里终结。显式代理、用户态终结 TCP 的透明代理，以及承载完整 IP 包的 VPN，分别有不同连接关系。先核对第三篇的 [TUN、代理与 IP 隧道对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)和第七篇的接管实现，再解释时间。
 :::
 
 ### 阶段差值不等于根因
@@ -263,9 +257,11 @@ curl -q --noproxy '*' --http1.1 --max-time 3 -sS -o /dev/null \
 
 ## Wireshark 实验：从一条连接验证阶段边界
 
+curl 能测出 `/fast` 和 `/slow` 的时间差；抓包则能检查差异是否出现在 HTTP 请求与响应之间，而不是 TCP 握手时。这里沿用同一组回环请求，把计时与报文对齐。
+
 ### 实验条件与捕获步骤
 
-目标是把前面的 `/fast`、`/slow` 回环对照与 TCP、HTTP 报文对齐。需要本机 Wireshark、可用的捕获权限及前面的 Python 服务；不访问外网、不修改接口配置。记录 Wireshark 与 curl 版本。macOS 的回环接口为 `lo0`，Linux 为 `lo`；Windows 可使用 Npcap 提供的回环捕获接口，具体名字按接口列表确认[^capture]。
+需要本机 Wireshark、可用的捕获权限及前面的 Python 服务；不访问外网、不修改接口配置。记录 Wireshark 与 curl 版本。macOS 的回环接口为 `lo0`，Linux 为 `lo`；Windows 可使用 Npcap 提供的回环捕获接口，具体名字按接口列表确认[^capture]。
 
 1. 启动前面的 Python HTTP 服务，在 Wireshark 选择回环接口，设置**捕获过滤器** `tcp port 18080` 后开始捕获。
 2. 在另一终端交替执行前面的 `/fast` 与 `/slow` curl 命令，各运行三次。它们每次新建连接，便于分别观察握手和响应前等待。
@@ -308,18 +304,12 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 | --- | --- |
 | 应用侧回环或本地代理入口 | 应用到本机服务或代理的连接，不能证明远端已经建连 |
 | TUN 接口 | 被实际路由选中的内层 IP 流量，可能含 Fake-IP |
-| 物理接口 | 发往实际下一跳的外层网络流量，可能是 UDP 隧道或代理连接 |
-| 代理出站侧 | 核心到目标或节点的独立连接；有复用时需结合会话或连接日志关联 |
-
-## 把排障结果写成可复查的判断
-
-一个有用的结论包含三部分：已经观察到什么、它排除了什么、还需要什么证据。例如：“连续三次成功建连，但 TLS 完成前超时；当前选路经过 TUN，尚未取得远端节点握手日志。”它比“网不好”或“肯定是服务器慢”更便于下一步验证。
-
-至此，本系列选取的客户端访问主线已经串联起来：从[协议分层与封装](/posts/networking/layered-architecture-packet-journey/)、[局域网交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[路由与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)到[传输层与 Socket](/posts/networking/transport-tcp-udp-socket-quic/)，再穿过[域名解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[HTTP 与 TLS 边界](/posts/networking/http-evolution-tls-handshake-https/)以及[代理与透明接管](/posts/networking/proxies-tunnels-transparent-interception/)。排障时沿这些边界回查，就能让每个推断都对应到具体连接、具体观察位置和下一项可证伪的实验。
+| 物理接口 | 此接口实际承载的直连、代理或隧道流量；区分外层 IP 的目的地址与链路层下一跳 |
+| 代理出站侧 | 代理到目标或节点的连接；和应用侧对照时用时间、端点与代理日志关联，不能按两段 TCP 序号匹配 |
 
 ## 平台命令对照
 
-对照平台时，先固定诊断任务。例如，拿到应用实际连接的 IP 后，用表中「特定目标选路」一行检查它命中的接口与下一跳。各平台命令返回的字段以各自实现为准。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
+要在另一台机器复查同一个判断，先固定诊断任务，不必照搬命令。例如，拿到应用实际连接的 IP 后，用表中「特定目标选路」一行检查它命中的接口与下一跳。各平台命令返回的字段以各自实现为准。Windows 一列使用 PowerShell；调用 curl 时写 `curl.exe`，避免旧版 PowerShell 将 `curl` 解释为其他命令。Unix 示例中的 `\` 续行和 `/dev/null` 也不能原样粘贴到 PowerShell，可把 curl 参数写在一行并以 `-o NUL` 丢弃正文。
 
 | 目的 | macOS | Linux | Windows / PowerShell |
 | --- | --- | --- | --- |
@@ -333,7 +323,13 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 | 邻居表 | `arp -a`、`ndp -a` | `ip neigh` | `Get-NetNeighbor` |
 | 抓包 | tcpdump / Wireshark | tcpdump / Wireshark | Wireshark 配合 Npcap |
 
-Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不代表浏览器内置 DoH 或代理连接路径；权限和可用参数应按所用系统确认[^windows]。前面各篇使用的 Rust、Go、Python 程序应保存成文件运行；回环验证不要求改系统路由。
+`Get-DnsClientServerAddress` 显示接口配置的 DNS 服务器，`ipconfig /displaydns` 显示 Windows DNS 客户端解析缓存；两者都不能单独证明浏览器内置 DoH 或代理使用了哪条解析路径。各命令的权限和可用参数应按所用系统确认[^windows]。
+
+## 总结：把排障结果写成可复查的判断
+
+一个有用的结论包含三部分：观察到什么，这些证据排除了什么，还需要什么证据。例如：“连续三次 TCP 建连成功，但都在 TLS 完成前超时，故障不是发生在已观测到的这段 TCP 建连上。当前选路经过 TUN，尚不能确认代理是否连到远端，下一步查出站连接和握手日志。”附上测量时间、命令与工具版本、实际连接地址、代理方式、退出码和多次测量结果，便于在相同条件下复查。
+
+至此，本系列选取的客户端访问主线已经串联起来：从[协议分层与封装](/posts/networking/layered-architecture-packet-journey/)、[局域网交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[路由与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)到[传输层与 Socket](/posts/networking/transport-tcp-udp-socket-quic/)，再穿过[域名解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[HTTP 与 TLS 边界](/posts/networking/http-evolution-tls-handshake-https/)以及[代理与透明接管](/posts/networking/proxies-tunnels-transparent-interception/)。排障时沿这些边界回查，就能让每个推断都对应到具体连接、具体观察位置和下一项可证伪的实验。
 
 ## 延伸阅读
 
@@ -342,7 +338,7 @@ Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不�
 
 [^bufferbloat]: 〔研究资料〕[ACM Queue: Bufferbloat: Dark Buffers in the Internet](https://queue.acm.org/detail.cfm?id=2071893)——瓶颈链路过大缓冲区导致排队延迟激增与抖动恶化的成因分析
 
-[^throughput]: 〔RFC〕[RFC 6349 §3–§4](https://www.rfc-editor.org/rfc/rfc6349.html#section-3)——BDP、带宽、RTT、TCP 窗口与吞吐测试条件
+[^throughput]: 〔RFC〕[RFC 6349 §3.3.1](https://www.rfc-editor.org/rfc/rfc6349.html#section-3.3.1)给出 BDP 与 TCP 接收窗口限制吞吐的计算示例。
 
 [^window]: 〔RFC〕[RFC 7323 §2: TCP Window Scale Option](https://www.rfc-editor.org/rfc/rfc7323.html#section-2)——窗口字段的 16 位限制与建连时的窗口缩放协商
 
@@ -354,13 +350,13 @@ Windows 的路由、DNS 与连接命令分别返回各自模块的状态，不�
 
 [^pmtu6]: 〔RFC〕[RFC 8201 §3](https://www.rfc-editor.org/rfc/rfc8201.html#section-3)——IPv6 的 Packet Too Big 反馈与路径 MTU 更新
 
-[^plpmtu]: 〔RFC〕[RFC 4821 §3–§4](https://www.rfc-editor.org/rfc/rfc4821.html#section-3)——分组层路径 MTU 探测与黑洞恢复框架
+[^plpmtu]: 〔RFC〕[RFC 4821 §2](https://www.rfc-editor.org/rfc/rfc4821.html#section-2)概述分组层探测与 TCP 等协议的适用条件；[§7.6](https://www.rfc-editor.org/rfc/rfc4821.html#section-7.6)说明如何处理探测结果。
 
-[^dplpmtu]: 〔RFC〕[RFC 8899 §4–§5](https://www.rfc-editor.org/rfc/rfc8899.html#section-4)——面向数据报传输的 DPLPMTUD 探测状态与确认机制
+[^dplpmtu]: 〔RFC〕[RFC 8899 §1.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-1.2)说明对 RFC 4821 数据报机制的更新；[§4.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-4.2)定义探测包的送达确认。
 
-[^curl]: 〔工具文档〕[curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——里程碑计时、连接端点、重定向与连接复用的解释边界；本文命令以 curl 8.7.1 核对
+[^curl]: 〔工具文档〕[curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——累计计时、连接端点和重定向的解释边界；`time_appconnect` 的适用阶段见 [CURLINFO_APPCONNECT_TIME](https://curl.se/libcurl/c/CURLINFO_APPCONNECT_TIME.html)。
 
-[^windows]: 〔平台与实现〕Microsoft Learn：[Find-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/find-netroute)、[Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection)、[Resolve-DnsName](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname)与[ipconfig](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig)——Windows 选路、连接、DNS 查询及本地缓存视图。
+[^windows]: 〔平台文档〕Microsoft Learn：接口及缓存 [ipconfig](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig)，路由表 [route](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/route_ws2008)与 [Get-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netroute)，特定目标选路 [Find-NetRoute](https://learn.microsoft.com/en-us/powershell/module/nettcpip/find-netroute)，接口 DNS 配置 [Get-DnsClientServerAddress](https://learn.microsoft.com/en-us/powershell/module/dnsclient/get-dnsclientserveraddress)，DNS 查询 [Resolve-DnsName](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname)，TCP 连接 [Get-NetTCPConnection](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-nettcpconnection)，邻居表 [Get-NetNeighbor](https://learn.microsoft.com/en-us/powershell/module/nettcpip/get-netneighbor)。
 
 [^capture]: 〔工具文档〕[Wireshark User's Guide: Capturing Live Network Data](https://www.wireshark.org/docs/wsug_html_chunked/ChapterCapture.html)与[Npcap: Loopback Packet Capture](https://npcap.com/guide/npcap-users-guide.html#npcap-feature-loopback)——接口选择、捕获权限和 Windows 回环支持。
 
