@@ -2,6 +2,9 @@
 import { stickerOutline } from "./desk-sticker-outline";
 
 // Alternate gutters so the shorter layout shows a pair on each side.
+const fallbackDensity = 3;
+const densities = [1, 1.5, 2, fallbackDensity] as const;
+
 const stickers = [
 	{
 		id: "deepseek",
@@ -51,15 +54,11 @@ const stickers = [
 <desk-stickers>
 	{
 		stickers.map(async ({ id, label, column, row, stagger, offset, tilt, height }) => {
-			const full = `/stickers/${id}.webp`;
-			const candidates = [
-				[`/stickers/${id}-small.webp`, 1],
-				[`/stickers/${id}-compact.webp`, 1.5],
-				[`/stickers/${id}-2x.webp`, 2],
-				[full, 3],
-			] as const;
-			const srcset = candidates.map(([url, density]) => `${url} ${density}x`).join(", ");
-			const imageSet = candidates.map(([url, density]) => `url('${url}') ${density}x`).join(", ");
+			const filename = (density: number) => `${id}-${density}x.webp`;
+			const fallback = filename(fallbackDensity);
+			const candidates = densities.map((density) => ({ url: `/stickers/${filename(density)}`, density }));
+			const srcset = candidates.map(({ url, density }) => `${url} ${density}x`).join(", ");
+			const imageSet = candidates.map(({ url, density }) => `url('${url}') ${density}x`).join(", ");
 
 			return (
 				<button
@@ -68,11 +67,11 @@ const stickers = [
 					class="desk-sticker"
 					data-sticker-id={id}
 					data-sticker-label={label}
-					data-sticker-outline={await stickerOutline(id)}
+					data-sticker-outline={await stickerOutline(fallback)}
 					data-sticker-side={column === 1 ? "left" : "right"}
 					data-sticker-srcset={srcset}
 					disabled
-					style={`--sticker-full: url('${full}'); --sticker-image-set: image-set(${imageSet}); --sticker-column: ${column}; --sticker-row: ${row}; --sticker-stagger: ${stagger}px; --sticker-offset: ${offset}px; --sticker-tilt: ${tilt}deg; --sticker-height: ${height}px`}
+					style={`--sticker-full: url('/stickers/${fallback}'); --sticker-image-set: image-set(${imageSet}); --sticker-column: ${column}; --sticker-row: ${row}; --sticker-stagger: ${stagger}px; --sticker-offset: ${offset}px; --sticker-tilt: ${tilt}deg; --sticker-height: ${height}px`}
 					type="button"
 				>
 					<span aria-hidden="true" class="desk-sticker-lift" />

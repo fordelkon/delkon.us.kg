@@ -4,8 +4,8 @@ import { outlineHeight, outlineWidth } from "./sticker-peel-geometry";
 
 const outlines = new Map<string, Promise<string>>();
 
-async function readOutline(id: string): Promise<string> {
-	const alpha = await sharp(resolve("public", "stickers", `${id}.webp`))
+async function readOutline(filename: string): Promise<string> {
+	const alpha = await sharp(resolve("public", "stickers", filename))
 		.ensureAlpha()
 		.resize(outlineWidth, outlineHeight)
 		.extractChannel(3)
@@ -67,14 +67,14 @@ async function readOutline(id: string): Promise<string> {
 	return encoded;
 }
 
-export function stickerOutline(id: string): Promise<string> {
-	const cached = outlines.get(id);
+export function stickerOutline(filename: string): Promise<string> {
+	const cached = outlines.get(filename);
 
 	if (cached) return cached;
 
-	const result = readOutline(id);
+	const result = readOutline(filename);
 
-	outlines.set(id, result);
+	outlines.set(filename, result);
 
 	return result;
 }

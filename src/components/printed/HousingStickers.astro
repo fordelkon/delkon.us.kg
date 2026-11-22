@@ -14,7 +14,7 @@ const stickers = [
 				aria-label={`Move ${label} sticker with the arrow keys; Escape resets it`}
 				data-sticker-id={id}
 				disabled
-				style={`--sticker-image-small: url('/stickers/${id}-small.webp'); --sticker-image-compact: url('/stickers/${id}-compact.webp'); --sticker-image-full: url('/stickers/${id}.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
+				style={`--sticker-image-44w: url('/stickers/${id}-44w.webp'); --sticker-image-64w: url('/stickers/${id}-64w.webp'); --sticker-image-112w: url('/stickers/${id}-112w.webp'); --sticker-tilt: ${tilt}deg; --sticker-offset: ${offset}px`}
 				title={`Drag ${label} around the printer`}
 				type="button"
 			>
@@ -83,7 +83,7 @@ const stickers = [
 		housing-stickers button > span {
 			block-size: var(--sticker-height);
 			aspect-ratio: 2 / 3;
-			background: var(--sticker-image-compact) center / contain no-repeat;
+			background: var(--sticker-image-64w) center / contain no-repeat;
 			transform: rotate(var(--sticker-tilt));
 			filter: drop-shadow(0 1px 1px rgb(0 0 0 / 18%));
 		}
@@ -128,13 +128,13 @@ const stickers = [
 	/* The 66px artwork covers the 32px mobile decal at 2x and the 56px desktop decal at 1x. */
 	@media (width < 40rem) and (max-resolution: 2dppx), (min-width: 40rem) and (max-resolution: 1dppx) {
 		housing-stickers button > span {
-			background-image: var(--sticker-image-small);
+			background-image: var(--sticker-image-44w);
 		}
 	}
 
 	@media (min-width: 40rem) and (min-resolution: 1.5dppx) {
 		housing-stickers button > span {
-			background-image: var(--sticker-image-full);
+			background-image: var(--sticker-image-112w);
 		}
 	}
 </style>
