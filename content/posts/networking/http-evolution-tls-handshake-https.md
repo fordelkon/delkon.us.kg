@@ -5,7 +5,7 @@ publishDate: "22 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)解释了如何取得目标地址与连接参数。接下来要分别解决两个问题：应用怎样表达请求与响应，客户端怎样确认通信对端并保护消息。**超文本传输协议**（Hypertext Transfer Protocol，HTTP）规定前者，**传输层安全性协议**（Transport Layer Security，TLS）为后者提供认证与加密机制。
+上一篇[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)解释了如何取得目标地址与连接参数。接下来要分别解决两个问题：应用怎样表达请求与响应，客户端怎样确认通信对端并保护消息。**超文本传输协议**（Hypertext Transfer Protocol，HTTP）规定前者，TLS 为后者提供认证与加密机制。
 
 本篇先读一组最小 HTTP 消息，再比较三个版本怎样复用连接。随后沿 TLS 1.3 握手看客户端怎样验证服务身份，再对照 HTTP/2 和 HTTP/3 在握手和传输应用数据时的线上封装，最后用实验核对协商结果。分清谁能看到什么，也为[第七篇的两段 TCP 与目标 TLS](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls)打下基础：代理把传输连接分成两段，不表示应用的 TLS 也在那里终止。
 
@@ -55,12 +55,12 @@ Cookie 则是 HTTP 层的状态管理：服务端用 `Set-Cookie` 设置，客�
 | 协议版本 | 传输与消息组织 | 复用能力 | 遗留边界 |
 | --- | --- | --- | --- |
 | HTTP/1.1 | TCP，文本消息行与字段 | 默认持久连接；也允许不等前一响应就发下一请求的流水线[^2] | 响应仍须按请求顺序返回，前面的慢响应会阻塞后续响应 |
-| HTTP/2 | TCP，二进制帧、流与 HPACK | 不同流的帧可交错[^3] | TCP 丢失字节仍会阻止后续字节按序交付，从而影响多个流 |
-| HTTP/3 | QUIC / UDP，HTTP 流与 QPACK | 利用 QUIC 流的独立按序交付[^4] | 仍共享路径、连接拥塞控制等资源；头部解码也有自己的依赖 |
+| HTTP/2 | TCP，二进制帧和流，使用 HPACK 压缩字段[^hpack] | 不同流的帧可交错[^3] | TCP 丢失字节仍会阻止后续字节按序交付，从而影响多个流 |
+| HTTP/3 | QUIC / UDP，HTTP 流，使用 QPACK 压缩字段[^4] | 利用 QUIC 流的独立按序交付[^4] | 仍共享路径、连接拥塞控制等资源；头部解码也有自己的依赖 |
 
 HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接关闭、消息定界和完整消费响应都会影响能否复用。并行建立多少条连接属于客户端策略，不是协议规定固定创建六条。RFC 9113 为 HTTP/2 定义了两种建连方式：对于 `https` URI，通过 TLS 的 ALPN 协商 `h2`；对于明文 TCP，客户端需预先知道服务端支持 HTTP/2，然后直接发送连接前言。这些是协议定义的用法，不代表浏览器必须支持两种方式[^3]。
 
-例如，HTTP/2 的某段 TCP 字节丢失时，即便接收端已经收到后面属于另一条 HTTP/2 流的字节，也必须等缺口补齐才会向上交付。HTTP/3 的顺序约束在各 QUIC 流内：若丢包只让流 A 出现缺口，流 B 已到齐的数据仍可交付；若丢失的 QUIC 包同时携带 A、B 两条流的数据，两条流都可能各自等待重传[^3][^4]。这消除的是 TCP 字节流带来的跨流**队头阻塞**（Head-of-Line Blocking，HOL），不是所有跨流影响：QUIC 仍共享拥塞控制；若头部引用了尚未到达的 QPACK 动态表条目，头部解码仍可能等待[^4]。有些路径还会限制 UDP，因此不能据此保证 HTTP/3 更快。具体传输行为见[第四篇的按流交付与队头阻塞](/posts/networking/transport-tcp-udp-socket-quic/#按流交付与队头阻塞)。
+例如，HTTP/2 的某段 TCP 字节丢失时，即便接收端已经收到后面属于另一条 HTTP/2 流的字节，也必须等缺口补齐才会向上交付。HTTP/3 的顺序约束在各 QUIC 流内：若丢包只让流 A 出现缺口，流 B 已到齐的数据仍可交付；若丢失的 QUIC 包同时携带 A、B 两条流的数据，两条流都可能各自等待重传[^3][^4]。这消除的是 TCP 字节流带来的跨流队头阻塞，不是所有跨流影响：QUIC 仍共享拥塞控制；若头部引用了尚未到达的 QPACK 动态表条目，头部解码仍可能等待[^4]。有些路径还会限制 UDP，因此不能据此保证 HTTP/3 更快。具体传输行为见[第四篇的按流交付与队头阻塞](/posts/networking/transport-tcp-udp-socket-quic/#按流交付与队头阻塞)。
 
 复用决定多个请求如何共用一条连接。对 HTTPS 来说，还要先看客户端怎样确认连接对端的身份，以及双方怎样协商应用协议。
 
@@ -70,7 +70,7 @@ HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接
 
 ### 握手消息与协议协商
 
-以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。本例使用**临时椭圆曲线迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE），两端在 `ClientHello` 与 `ServerHello` 中用 `key_share` 交换各自的临时公钥，从而获得**前向保密**（Forward Secrecy，FS）。双方在 `ServerHello` 后以基于哈希的密钥派生函数（HKDF）从共享秘密导出握手流量密钥。此后，握手消息以**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护[^5]。
+以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。本例使用**临时椭圆曲线迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE），两端在 `ClientHello` 与 `ServerHello` 中用 `key_share` 交换各自的临时公钥，从而获得**前向保密**（Forward Secrecy，FS）。双方在 `ServerHello` 后以**基于 HMAC 的密钥派生函数**（HMAC-based Key Derivation Function，HKDF）从共享秘密导出握手流量密钥。此后，握手消息以**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护[^5]。
 
 ```mermaid title="TLS 1.3 完整握手与应用数据" description="示意 TCP 上仅认证服务端的 ECDHE 证书握手，未启用 ECH 或 0-RTT，也没有 HelloRetryRequest。实线为明文 ClientHello、ServerHello；虚线为受保护的消息。花括号内使用握手密钥，应用数据使用应用流量密钥。箭头不对应固定数量的 TCP 报文段或真实耗时；图末画出服务端收到客户端 Finished 后发送数据的情况。"
 sequenceDiagram
@@ -95,7 +95,7 @@ sequenceDiagram
 在图中的 TCP 链路上，旁观者能读到 `ClientHello` 和 `ServerHello`。从 `EncryptedExtensions` 开始，握手消息的内容不再公开：服务端选中的 ALPN、证书链、`CertificateVerify` 和双方的 `Finished` 都受保护[^5][^7]。这也与常见 TLS 1.2 完整握手的明文证书消息不同。
 
 - **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 本身不认证身份[^6]。
-- **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：在未启用 ECH 的例子中，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选，却不能从 TLS 1.3 的 `EncryptedExtensions` 直接读出服务端最终选了哪个[^7]。
+- [ALPN](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)：在未启用 ECH 的例子中，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选，却不能从 TLS 1.3 的 `EncryptedExtensions` 直接读出服务端最终选了哪个[^7]。
 
 ### 证书链可信，还要检查名字
 
@@ -115,7 +115,7 @@ sequenceDiagram
 
 TLS 1.3 的服务端可以在握手后发送 `NewSessionTicket`，把票据与本次握手派生的**预共享密钥**（Pre-Shared Key，PSK）关联。客户端可在新连接的 `ClientHello` 中用票据标识该 PSK；服务端接受后，双方据此恢复会话，而不是复用原连接[^resumption]。
 
-会话恢复不等于发送**早期数据**（early data，0-RTT）。只有条件允许时客户端才尝试发送；服务端可接受恢复、却拒绝早期数据。早期数据可能被重放，客户端只应发送应用层明确允许重放的数据，不能仅凭 GET 方法名作判断。HTTP 可用 `425` 表明服务端不愿承担重放风险，QUIC 的恢复与早期数据另见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)[^early]。
+会话恢复不等于发送早期数据。只有条件允许时客户端才尝试发送；服务端可接受恢复、却拒绝早期数据。早期数据可能被重放，客户端只应发送应用层明确允许重放的数据，不能仅凭 GET 方法名作判断。HTTP 可用 `425` 表明服务端不愿承担重放风险，QUIC 的恢复与早期数据另见[第四篇的 0-RTT 说明](/posts/networking/transport-tcp-udp-socket-quic/#tls-握手应用数据与-0-rtt)[^early]。
 
 ## HTTPS 在线上如何承载握手与应用数据
 
@@ -173,7 +173,7 @@ HTTP/2 这组能读取到 TCP 端口、序号和 TLS 外层记录头，但 `type
 
 ### ECH：保护真实的 ClientHello
 
-**加密客户端问候**（Encrypted Client Hello，ECH）用服务端配置的公钥加密 `ClientHelloInner`，真实 SNI 和需要保护的 ALPN 候选可放在其中；可见的 `ClientHelloOuter` 则承载密文。RFC 9849 定义 ECH 机制；客户端可以从[DNS 服务绑定记录的 `ech` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)取得 RFC 9848 定义的 `ECHConfigList`[^8][^ech-dns]。
+ECH 用服务端配置的公钥加密 `ClientHelloInner`，真实 SNI 和需要保护的 ALPN 候选可放在其中；可见的 `ClientHelloOuter` 则承载密文。RFC 9849 定义 ECH 机制；客户端可以从[DNS 服务绑定记录的 `ech` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)取得 RFC 9848 定义的 `ECHConfigList`[^8][^ech-dns]。
 
 ECH 改变的是 ClientHello 的可见范围。外层 SNI 通常使用配置中的公开名 `public_name`；外层也可携带非敏感的 ALPN 候选，不表示这就是内部真实的候选列表。服务端最终选定的 ALPN 本来就在加密的 `EncryptedExtensions` 里，是否使用 ECH 都不会把选择结果改成明文[^7][^8]。
 
@@ -286,6 +286,8 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 [^2]: 〔RFC〕[RFC 9112 §2.1](https://www.rfc-editor.org/rfc/rfc9112.html#section-2.1)定义 HTTP/1.1 消息头的 `CRLF` 边界；[§6](https://www.rfc-editor.org/rfc/rfc9112.html#section-6)定义正文定界；[§9.3](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3)与 [§9.3.2](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3.2)说明默认持久连接及流水线响应顺序。
 
 [^3]: 〔RFC〕[RFC 9113 §2](https://www.rfc-editor.org/rfc/rfc9113.html#section-2)说明 HTTP/2 与 TCP 队头阻塞的关系；[§3.2–3.3](https://www.rfc-editor.org/rfc/rfc9113.html#section-3.2)说明 TLS 协商与预先知道支持时的明文建连，[§4](https://www.rfc-editor.org/rfc/rfc9113.html#section-4)定义二进制帧，[§5](https://www.rfc-editor.org/rfc/rfc9113.html#section-5)定义流与多路复用。
+
+[^hpack]: 〔RFC〕[RFC 7541 §1](https://www.rfc-editor.org/rfc/rfc7541.html#section-1)——HTTP/2 的字段压缩格式 HPACK。
 
 [^4]: 〔RFC〕[RFC 9114 §2、§3](https://www.rfc-editor.org/rfc/rfc9114.html#section-2)——HTTP/3 的 QUIC 映射、ALPN 与端点发现；[RFC 9000 §13](https://www.rfc-editor.org/rfc/rfc9000.html#section-13)说明丢包与各流的交付，[RFC 9204 §2](https://www.rfc-editor.org/rfc/rfc9204.html#section-2)说明 QPACK 的头部依赖和受阻流。
 

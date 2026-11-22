@@ -113,7 +113,7 @@ flowchart TB
  class eth result
 ```
 
-- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[初始 SYN 的报文布局](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)和[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)分别展示段里装了什么、何时发送[^2][^ethernet-frame]。
+- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[初始 SYN 的报文布局和 MSS 选项](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)与[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)分别展示段里装了什么、何时发送[^2][^ethernet-frame]。
 - **ICMP Echo** 是由 IPv4 直接承载的诊断报文，自己的 ICMP 头部下面可以有探测数据。这里没有 TCP 或 UDP 头，见 [ICMP Echo Request 的报文布局](/posts/networking/routing-forwarding-nat-virtual-interfaces/#icmp-echo-request-的报文布局)[^icmp-echo]。
 - **ARP 请求**由以太网直接承载，以本地链路上的下一跳 IPv4 地址为查询目标。[ARP 请求的帧布局](/posts/networking/ip-addressing-subnet-lan-delivery/#arp-请求的帧布局)展示了以太网广播地址与 ARP 消息中的目标 IPv4 各在什么位置。IPv6 邻居解析使用 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)[^arp]。
 - **DNS 查询**在图中由 UDP 承载，见 [UDP DNS 查询的报文布局](/posts/networking/dns-resolution-caching-encrypted-queries/#udp-dns-查询的报文布局)。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
@@ -126,7 +126,7 @@ flowchart TB
 2. IPv4 的 `Protocol` 字段指明后续协议，例如 `6` 为 TCP、`17` 为 UDP、`1` 为 ICMP[^3]。IPv6 的 `Next Header` 可以指向扩展头或上层协议；ICMPv6 使用协议号 `58`，不能直接套用 IPv4 的 `1`[^ipv6]。
 3. TCP/UDP 头部的端口号参与选择主机内的通信端点。具体选择还可能结合本地地址、远端地址与端口；已建立的 TCP 连接不能只靠目的端口区分[^2]。应用如何操作这些端点，见后文的 [Socket 接口](#操作系统边界socket-与网络接口)。
 
-一旦弄清这三步解复用链条，很多入门时容易混淆的问题就能直接分清：**域名**只出现在应用层消息（如 HTTP `Host` 头、DNS 查询载荷或 TLS `Server Name Indication` 扩展）中，内核的 IP 层和 TCP 层并不认识域名；**IP 地址**负责定位网络中的主机接口，**端口**负责定位主机内部的通信端点。
+一旦弄清这三步解复用链条，很多入门时容易混淆的问题就能直接分清：**域名**只出现在应用层消息（如 HTTP `Host` 头、DNS 查询载荷或 TLS 的 `server_name` 扩展）中，内核的 IP 层和 TCP 层并不认识域名；**IP 地址**负责定位网络中的主机接口，**端口**负责定位主机内部的通信端点。
 
 ### TLS 记录与 TCP 报文段：两套独立的边界
 
@@ -149,7 +149,7 @@ flowchart TB
 
 这只是用于说明边界独立的一种切分，实际分段还受 MSS、发送时机及可用发送窗口等因素影响[^2]。HTTP 的边界也独立于它们：一条 HTTP 消息可以跨多个 TLS 记录，一条 TLS 记录也可以容纳多个 HTTP 消息或 HTTP/2 帧的字节[^tls-record]。
 
-也可以从长度预算看分段。假设已经有 10,000 字节待交给 TCP，IPv4 路径 MTU 为 1500 字节，IPv4 与 TCP 头均无选项、各占 20 字节，且对端通告的 MSS 没有进一步限制。在这个例子里，一个段最多承载 1460 字节。若尽量装满，前六段合计装 8760 字节，第七段装剩下的 1240 字节。这里计算的是 TCP 字节流，HTTPS 要先把 TLS 编码后的字节算进去。TCP 分段在发送端组织字节流，IPv4 分片处理的则是已形成的 IPv4 数据报。这个例子中每个 IP 包都符合 MTU，可以直接在链路上发送[^2][^3][^mss]。路径变化时怎样调整这个预算，见[第八篇的 MTU 与 MSS](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)。
+也可以从长度预算看分段。假设已经有 10,000 字节待交给 TCP，IPv4 路径 MTU 为 1500 字节，IPv4 与 TCP 头均无选项、各占 20 字节，且对端通告的 [MSS](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局) 没有进一步限制。在这个例子里，一个段最多承载 1460 字节。若尽量装满，前六段合计装 8760 字节，第七段装剩下的 1240 字节。这里计算的是 TCP 字节流，HTTPS 要先把 TLS 编码后的字节算进去。TCP 分段在发送端组织字节流，IPv4 分片处理的则是已形成的 IPv4 数据报。这个例子中每个 IP 包都符合 MTU，可以直接在链路上发送[^2][^3][^mss]。路径变化时怎样调整这个预算，见[第八篇的 MTU 与 MSS](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)。
 
 **接收端怎样恢复 TLS 记录？**
 
@@ -263,7 +263,7 @@ sequenceDiagram
 
 握手里的 `ClientHello` 和之后的 HTTP 应用数据都经过 TLS 记录层。同一条 TLS 记录可以分散在多个 TCP 段中，抓包时应按字节流重组来判断阶段。分段示例见[两套独立的边界](#tls-记录与-tcp-报文段两套独立的边界)。
 
-在本例中，浏览器与 TLS 终止端能读取 HTTP 路径和内容。终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，还可能从重组后的 `ClientHello` 读取 SNI。使用 [ECH](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello) 时，真实的 SNI 则位于加密的内层 `ClientHello`。
+在本例中，浏览器与 TLS 终止端能读取 HTTP 路径和内容。终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，还可能从重组后的 `ClientHello` 读取 [SNI](/posts/networking/http-evolution-tls-handshake-https/#握手消息与协议协商) 中的目标服务名。使用 [ECH](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello) 时，真实的 SNI 则位于加密的内层 `ClientHello`。
 
 ### 状态复用：缓存与已有连接会跳过哪些阶段
 

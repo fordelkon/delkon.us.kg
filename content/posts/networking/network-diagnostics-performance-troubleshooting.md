@@ -65,7 +65,7 @@ flowchart TB
 
 ### 性能诊断的五个常用指标
 
-这些指标描述不同方面，但会相互影响。例如路由器或网关瓶颈处队列过长引发的**缓冲膨胀**（Bufferbloat），既可能显著推高**往返时延**（Round-Trip Time，RTT）与**时延抖动**（Jitter），也可能导致丢包和吞吐剧烈波动[^bufferbloat]。
+这些指标描述不同方面，但会相互影响。例如路由器或网关瓶颈处队列过长引发的**缓冲膨胀**（Bufferbloat），既可能显著推高[RTT](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的序号确认与重传)和时延抖动，也可能导致丢包和吞吐剧烈波动[^bufferbloat]。
 
 | 指标 | 含义与单位 | 测量时需要说明什么 |
 | --- | --- | --- |
@@ -113,8 +113,8 @@ $$
 
 先区分两个量。
 
-- **最大传输单元**（Maximum Transmission Unit，MTU）是接口或链路能承载的最大 IP 包总长度，包含 IP 头，不包含外部以太网头。以太网常见 MTU 为 1500 byte，实际路径取各链路约束中的最小值。
-- **最大报文段长度**（Maximum Segment Size，MSS）是 TCP 通告的最大 TCP 数据长度，不包含 IP 和 TCP 头。以 MTU 1500、基本 IPv4/TCP 头各 20 byte 估算，得到 1460 byte；IPv6 基本头为 40 byte，对应 1440 byte。实际发送还要考虑选项、扩展头与路径限制[^mss]。
+- [接口 MTU](/posts/networking/layered-architecture-packet-journey/#以太网帧的封装与结构)限制整个 IP 包的长度。以太网常见 MTU 为 1500 byte，[路径 MTU](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由器怎样报告差错)取各链路约束中的最小值。
+- [MSS](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)只计 TCP 数据。以 MTU 1500、基本 IPv4/TCP 头各 20 byte 估算，得到 1460 byte；IPv6 基本头为 40 byte，对应 1440 byte。实际发送还要考虑选项、扩展头与路径限制[^mss]。
 
 PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经[区分 TUN、代理重建连接与 IP 隧道](/posts/networking/routing-forwarding-nat-virtual-interfaces/)：TUN 只是一种接口，不能从“启用了 TUN”推出每个原包都被完整加上外层头。若代理终结本地 TCP 后创建出站 TCP，两段连接各有自己的 MSS 与路径 MTU；若 VPN 承载完整内层包，才要进一步计算内外层封装开销。
 
@@ -167,7 +167,7 @@ sequenceDiagram
 
 做只读对照时，比较同一地址族、同一路径下不同的实际 IP 包长，不修改网络配置。应用正文变大不等于单个 IP 包变大；单独增大 ping 载荷也不能测得业务连接的 PMTU，因为协议待遇、DF 设置和头部预算可能不同。**MSS 钳制**（MSS Clamping）改变的是 TCP SYN 中通告的 MSS，不是路径 MTU，也不适用于 UDP/QUIC[^mss-clamp]。
 
-**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）不以收到 ICMP 为前提，而是用特定大小的探测包和可关联的送达确认来验证预算。一个探测得到确认，说明那个尺寸在该次探测中可通过；一次探测丢失不能区分包长超限和普通丢包。RFC 4821 描述 TCP 等协议的探测框架；RFC 8899 更新了适用于数据报的机制，即 DPLPMTUD。实现可以把有效的 ICMP 反馈作为进一步探测的线索，但应区分“路由器报告了尺寸”和“端点证实该尺寸能送达”[^plpmtu][^dplpmtu]。
+**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）不以收到 ICMP 为前提，而是用特定大小的探测包和可关联的送达确认来验证预算。一个探测得到确认，说明那个尺寸在该次探测中可通过；一次探测丢失不能区分包长超限和普通丢包。RFC 4821 描述 TCP 等协议的探测框架；RFC 8899 定义了**数据报分组层路径 MTU 发现**（Datagram Packetization Layer Path MTU Discovery，DPLPMTUD）。实现可以把有效的 ICMP 反馈作为进一步探测的线索，但应区分“路由器报告了尺寸”和“端点证实该尺寸能送达”[^plpmtu][^dplpmtu]。
 
 ## 用 curl 记录请求耗时
 
@@ -282,7 +282,7 @@ curl 能测出 `/fast` 和 `/slow` 的时间差；抓包则能检查差异是否
 1. 启动前面的 Python HTTP 服务，在 Wireshark 选择回环接口，设置**捕获过滤器** `tcp port 18080` 后开始捕获。
 2. 在另一终端交替执行前面的 `/fast` 与 `/slow` curl 命令，各运行三次。它们每次新建连接，便于分别观察握手和响应前等待。
 3. 停止捕获，选择本次连接的一个包，读取其 `tcp.stream` 编号。通过 `Follow → TCP Stream` 查看重组后的明文 HTTP；不要把列表中一个包当作完整消息。
-4. 以该编号设置显示过滤器，例如 `tcp.stream == 0`；`0` 必须替换为实际编号。在同一流内比较请求与响应时间，再与 curl 的 TTFB 对照。
+4. 以该编号设置显示过滤器，例如 `tcp.stream == 0`；`0` 必须替换为实际编号。在同一流内比较请求与响应时间，再与 curl 测得的首字节时间（Time to First Byte，TTFB）对照。
 
 也可用下面的 macOS 命令保存原始捕获，再在 Wireshark 中打开；Linux 把 `lo0` 换成 `lo`。`sudo` 用于捕获权限，文件写入当前目录，结束时按 Ctrl+C：
 

@@ -5,7 +5,7 @@ publishDate: "21 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口》](/posts/networking/transport-tcp-udp-socket-quic/)解释了字节流与数据报怎样交付给通信端点。但应用发起连接时，手里通常只有 `example.com` 这样的域名。**域名系统**（Domain Name System，DNS）为通过域名访问服务的应用提供地址及其他连接参数。
+上一篇[《计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口》](/posts/networking/transport-tcp-udp-socket-quic/)解释了字节流与数据报怎样交付给通信端点。但应用发起连接时，手里通常只有 `example.com` 这样的域名。[第二篇介绍的 DNS](/posts/networking/ip-addressing-subnet-lan-delivery/#接入网络先认清配置清单)可以为应用提供目标地址及其他连接参数。
 
 本篇从资源记录、解析路径与缓存讲起，再解释怎样验证答案、保护查询，以及应用如何使用返回的地址。排查时可以依次核对查询类型、实际解析器、响应状态和连接目标。HTTP、TLS 与 QUIC 的连接细节在[下一篇](/posts/networking/http-evolution-tls-handshake-https/)继续解释。
 
@@ -19,10 +19,11 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 | --- | --- | --- |
 | `A` | IPv4 地址 | 一个名字可以返回多个地址 |
 | `AAAA` | IPv6 地址 | 双栈客户端可以同时或相近时间查询 `A` 与 `AAAA` |
-| `CNAME` | 给整个 DNS 名字设置别名 | 除查询 `CNAME` 本身外，通常沿目标名继续查原类型；不能与同名 `SOA`、`NS` 共存，故区域顶点（zone apex）不能直接配 `CNAME`[^1] |
-| `NS` | 某区域的权威域名服务器 | 用于区域权威声明与逐级委派 |
+| `CNAME` | 规范名称记录（Canonical Name），给整个 DNS 名字设置别名 | 除查询 `CNAME` 本身外，通常沿目标名继续查原类型；不能与同名 `SOA`、`NS` 共存，故区域顶点（zone apex）不能直接配 `CNAME`[^1] |
+| `SOA` | 授权起始记录（Start of Authority），给出区域的序列号和计时参数 | 携带 SOA 的否定应答可据此给出缓存期限[^1][^negative] |
+| `NS` | 名称服务器记录（Name Server），指明某区域的权威服务器 | 用于区域权威声明与逐级委派 |
 | `TXT` | 文本数据 | 常用于域名验证、SPF 和 DKIM 等应用 |
-| `HTTPS` / `SVCB` | **服务绑定记录**（service binding record） | 优先级为 `0` 是 AliasMode，正数是 ServiceMode；AliasMode 只改变服务绑定的查询目标，可以与同名 `A` / `AAAA` 共存[^6] |
+| `HTTPS` / `SVCB` | **服务绑定记录**（Service Binding，SVCB） | 优先级为 `0` 是 AliasMode，正数是 ServiceMode；AliasMode 只改变服务绑定的查询目标，可以与同名 `A` / `AAAA` 共存[^6] |
 
 例如，区域顶点的 `example.com. HTTPS 0 svc.example.net.` 告诉支持 AliasMode 的客户端去查 `svc.example.net.` 的 `HTTPS` 记录，不会把 `example.com.` 的 `A` / `AAAA` 查询也改写到那里。若随后得到 `svc.example.net. HTTPS 1 edge.example.net. alpn="h3,h2"`，这条 ServiceMode 记录才给出了候选连接端点 `edge.example.net.` 及其参数。地址通常来自端点名的 `A` / `AAAA`；`ipv4hint` / `ipv6hint` 可在地址记录尚未取得时提供尝试连接的地址，但不代替地址记录。连到这个端点时，TLS 仍须验证原服务名 `example.com`，而不是改用端点名[^6]。
 
@@ -63,7 +64,7 @@ sequenceDiagram
 
 **委派应答**（referral）不是所求记录的最终答案：权威段的 `NS` 告诉递归器下一站问谁，它再向其中一台服务器发出非递归查询（`RD=0`）。若附加段已提供下一站所需的地址，就可以少做地址查询。父区随委派提供的名称服务器地址称为**胶水记录**（glue）；例如 `example.com` 的名称服务器是 `ns.example.com` 时，胶水可打破“必须先联系子区才能查到子区服务器地址”的循环。不是附加段中的所有地址记录都是胶水[^1][^glue]。
 
-实现**查询名最小化**（QNAME Minimisation）的递归解析器通常只把足以取得下一次委派的名字交给上级权威服务器，而不是逐级发送完整查询名。例如查询 `www.example.com. A` 时，它可以先向根查询 `com.`，再向 `.com` 查询 `example.com.`，到负责目标记录的权威端才查完整名字。存根发给递归解析器的查询并不因此缩短，这也不是通道加密[^qname-min]。
+**查询名最小化**（QNAME Minimisation）中的 QNAME 指 DNS 问题段里的查询名（Query Name）。采用此机制的递归解析器通常只把足以取得下一次委派的名字交给上级权威服务器，而不是逐级发送完整查询名。例如查询 `www.example.com. A` 时，它可以先向根查询 `com.`，再向 `.com` 查询 `example.com.`，到负责目标记录的权威端才查完整名字。存根发给递归解析器的查询并不因此缩短，这也不是通道加密[^qname-min]。
 
 ## DNS 查询的报文与传输
 
@@ -140,9 +141,9 @@ flowchart TB
 
 DoH 是服务入口，递归是逻辑职责，两者可以属于同一服务。缓存也可以保存[否定结果或短暂的失败结果](#否定应答解析失败与超时)，不是只有地址才算命中。若只缓存了委派，它能缩短[前面的冷缓存路径](#解析器角色与委派路径)，不能回答存根的问题。观察系统缓存也不能据此判断浏览器内置 DoH 的缓存状态。
 
-DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的缓存使用时间，与 IP 头中用于限制转发跳数的 TTL 含义不同。重复命中同一份尚未刷新的缓存时，通常能观察到剩余 TTL 下降。预取刷新、公共解析服务的不同缓存后端会改变观察结果；标准还允许在规定条件下暂时提供过期数据（serve stale），因此不能把“TTL 到零”理解成所有实现都必须在这一刻同步查询上游[^stale]。
+DNS 记录的 TTL 以秒计，用于约束缓存使用时间。作为对照，[IPv4 头里的 TTL](/posts/networking/layered-architecture-packet-journey/#封装解封装与数据单元)在逐跳转发时递减。重复命中同一份尚未刷新的缓存时，通常能观察到剩余 TTL 下降。预取刷新、公共解析服务的不同缓存后端会改变观察结果；标准还允许在规定条件下暂时提供过期数据（serve stale），因此不能把“TTL 到零”理解成所有实现都必须在这一刻同步查询上游[^stale]。
 
-一条解析路径还可能涉及多个 TTL：别名的 `CNAME`、目标名的 `A` / `AAAA`、单独查询的 `HTTPS` RRset 都有各自的缓存期限。某个地址记录到期，并不自动使相关的全部记录同时到期。下面仅示意同一名字下三类正向记录，不表示客户端必定查询全部类型：
+一条解析路径还可能涉及多个 TTL：别名的 `CNAME`、目标名的 `A` / `AAAA`、单独查询的 `HTTPS` 记录集都有各自的缓存期限。**资源记录集**（Resource Record Set，RRset）由名称、类型和类别都相同的一组记录构成。某个地址记录到期，并不自动使相关的全部记录同时到期。下面仅示意同一名字下三类正向记录，不表示客户端必定查询全部类型：
 
 | `example.com.` 的记录类型 | 缓存内容 | 示例剩余 TTL |
 | --- | --- | ---: |
@@ -152,7 +153,7 @@ DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的
 
 ### 否定应答、解析失败与超时
 
-先检查状态与各段记录，再解释“空答案”：
+先检查 DNS 响应头里的**响应码**（Response Code，RCODE）与各段记录，再解释“空答案”：
 
 | 结果 | 表示什么 | 排障时不能推导什么 |
 | --- | --- | --- |
