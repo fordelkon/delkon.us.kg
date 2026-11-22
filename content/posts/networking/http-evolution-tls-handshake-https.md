@@ -7,7 +7,7 @@ tags: ["networking"]
 
 上一篇[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)解释了如何取得目标地址与连接参数。接下来要分别解决两个问题：应用怎样表达请求与响应，客户端怎样确认通信对端并保护消息。**超文本传输协议**（Hypertext Transfer Protocol，HTTP）规定前者，**传输层安全性协议**（Transport Layer Security，TLS）为后者提供认证与加密机制。
 
-本篇先读一组最小 HTTP 消息，再比较三个版本怎样复用连接。随后沿 TLS 1.3 握手看客户端怎样验证服务身份，再对照 HTTP/2 和 HTTP/3 在握手和传输应用数据时的线上封装，最后用实验核对协商结果。分清谁能看到什么，也为[第七篇的代理分析](/posts/networking/proxies-tunnels-transparent-interception/)打下基础：代理把传输连接分成两段，不表示应用的 TLS 也在那里终止。
+本篇先读一组最小 HTTP 消息，再比较三个版本怎样复用连接。随后沿 TLS 1.3 握手看客户端怎样验证服务身份，再对照 HTTP/2 和 HTTP/3 在握手和传输应用数据时的线上封装，最后用实验核对协商结果。分清谁能看到什么，也为[第七篇的两段 TCP 与目标 TLS](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls)打下基础：代理把传输连接分成两段，不表示应用的 TLS 也在那里终止。
 
 ## HTTP 请求、响应与消息语义
 
@@ -60,7 +60,7 @@ Cookie 则是 HTTP 层的状态管理：服务端用 `Set-Cookie` 设置，客�
 
 HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接关闭、消息定界和完整消费响应都会影响能否复用。并行建立多少条连接属于客户端策略，不是协议规定固定创建六条。RFC 9113 为 HTTP/2 定义了两种建连方式：对于 `https` URI，通过 TLS 的 ALPN 协商 `h2`；对于明文 TCP，客户端需预先知道服务端支持 HTTP/2，然后直接发送连接前言。这些是协议定义的用法，不代表浏览器必须支持两种方式[^3]。
 
-HTTP/3 避免的是丢包引起的跨流传输按序交付阻塞，并不保证一个流绝不受其他流影响：QPACK 动态表依赖仍可能让某些头部解码等待[^4]。这也不意味着 HTTP/3 一定比 HTTP/2 快，例如有些路径会限制 UDP。HTTP/3 所依赖的可靠性、流量控制与连接迁移见[第四篇的 QUIC](/posts/networking/transport-tcp-udp-socket-quic/#quic为什么在-udp-之上重建可靠传输)。
+例如，HTTP/2 的某段 TCP 字节丢失时，即便接收端已经收到后面属于另一条 HTTP/2 流的字节，也必须等缺口补齐才会向上交付。HTTP/3 的顺序约束在各 QUIC 流内：若丢包只让流 A 出现缺口，流 B 已到齐的数据仍可交付；若丢失的 QUIC 包同时携带 A、B 两条流的数据，两条流都可能各自等待重传[^3][^4]。这消除的是 TCP 字节流带来的跨流**队头阻塞**（Head-of-Line Blocking，HOL），不是所有跨流影响：QUIC 仍共享拥塞控制；若头部引用了尚未到达的 QPACK 动态表条目，头部解码仍可能等待[^4]。有些路径还会限制 UDP，因此不能据此保证 HTTP/3 更快。具体传输行为见[第四篇的按流交付与队头阻塞](/posts/networking/transport-tcp-udp-socket-quic/#按流交付与队头阻塞)。
 
 复用决定多个请求如何共用一条连接。对 HTTPS 来说，还要先看客户端怎样确认连接对端的身份，以及双方怎样协商应用协议。
 
@@ -70,9 +70,9 @@ HTTP/3 避免的是丢包引起的跨流传输按序交付阻塞，并不保证�
 
 ### 握手消息与协议协商
 
-以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。在 `ClientHello` 与 `ServerHello` 中，双方已各自携带**椭圆曲线瞬时迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE）临时公钥 `key_share`（提供**前向保密**，Forward Secrecy，FS）；一旦服务端发出 `ServerHello`，双方即可通过基于哈希的密钥派生函数（HKDF）算出握手流量密钥，因此紧随其后的 `EncryptedExtensions`、`Certificate`、`CertificateVerify` 和 `Finished` 全部处于**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护之下[^5]：
+以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。本例使用**临时椭圆曲线迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE），两端在 `ClientHello` 与 `ServerHello` 中用 `key_share` 交换各自的临时公钥，从而获得**前向保密**（Forward Secrecy，FS）。双方在 `ServerHello` 后以基于哈希的密钥派生函数（HKDF）从共享秘密导出握手流量密钥。此后，握手消息以**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护[^5]。
 
-```mermaid title="TLS 1.3 完整握手与应用数据" description="示意仅认证服务端的 ECDHE 证书握手，未启用 ECH、0-RTT，也没有 HelloRetryRequest。实线表示明文握手消息，虚线表示密钥保护的消息；花括号中的消息由握手密钥保护，应用数据使用应用流量密钥。箭头是逻辑消息顺序，不对应固定数量的 TCP 报文段或真实耗时。"
+```mermaid title="TLS 1.3 完整握手与应用数据" description="示意 TCP 上仅认证服务端的 ECDHE 证书握手，未启用 ECH 或 0-RTT，也没有 HelloRetryRequest。实线为明文 ClientHello、ServerHello；虚线为受保护的消息。花括号内使用握手密钥，应用数据使用应用流量密钥。箭头不对应固定数量的 TCP 报文段或真实耗时；图末画出服务端收到客户端 Finished 后发送数据的情况。"
 sequenceDiagram
  participant Client as 客户端
  participant Server as TLS 服务端
@@ -90,12 +90,12 @@ sequenceDiagram
  Server-->>Client: 加密 Application Data
 ```
 
-`CertificateVerify` 用证书对应的私钥对握手上下文签名，证明持有该私钥，并把身份绑定到本次握手；证书链与服务名检查仍须另行完成。双方各自的 `Finished` 则校验握手记录并确认掌握相应密钥：本例客户端没有提供客户端证书，因此服务端验证客户端 `Finished` 不等于验证了客户端的实名身份[^5]。
+`CertificateVerify` 用证书对应的私钥对握手上下文签名，证明持有该私钥，并把身份绑定到本次握手；证书链与服务名检查仍须另行完成。双方各自的 `Finished` 则校验握手记录并确认掌握相应密钥。本例客户端没发送证书，验证它的 `Finished` 不等于认证特定客户端身份。客户端发出自己的 `Finished` 后才能发送普通应用数据；服务端发出自己的 `Finished` 后可以先发送，不一定要等客户端的 `Finished` 到达[^5]。
 
-花括号表示已被握手密钥保护的消息。与常见 TLS 1.2 完整证书握手的明文证书消息不同，TLS 1.3 的服务器证书通常在加密通道中传输；未使用 ECH 时，最初的 `ClientHello` 及其中的一些扩展仍对链路观察者可见。
+在图中的 TCP 链路上，旁观者能读到 `ClientHello` 和 `ServerHello`。从 `EncryptedExtensions` 开始，握手消息的内容不再公开：服务端选中的 ALPN、证书链、`CertificateVerify` 和双方的 `Finished` 都受保护[^5][^7]。这也与常见 TLS 1.2 完整握手的明文证书消息不同。
 
-- **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 不是证书身份验证[^6]。
-- **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：客户端提供候选应用协议，服务端选取支持的一个。基于 TCP 的 HTTPS 常协商 `h2` 或 `http/1.1`[^7]。
+- **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 本身不认证身份[^6]。
+- **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：在未启用 ECH 的例子中，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选，却不能从 TLS 1.3 的 `EncryptedExtensions` 直接读出服务端最终选了哪个[^7]。
 
 ### 证书链可信，还要检查名字
 
@@ -125,7 +125,7 @@ TLS 1.3 的服务端可以在握手后发送 `NewSessionTicket`，把票据与�
 
 使用 TLS 的 HTTP/2 新连接先建 TCP，再通过字节流中的 TLS 记录传递握手消息；HTTP/3 则把 TLS 握手消息放进 QUIC 的 CRYPTO 帧，不使用 TLS 记录层。`h3` 在 QUIC 的 TLS 握手中通过 ALPN 协商，不是在既有 TCP 连接里升级得到[^4][^quic-handshake]。
 
-QUIC Initial 的保护密钥可由公开信息导出，不能向旁观者隐藏其中的 ClientHello；后续 Handshake 与 1-RTT 使用另外派生的密钥[^quic-handshake]。
+`ClientHello` 和 `ServerHello` 都走 QUIC Initial。能看到客户端 Initial 的旁观者可从公开信息导出 Initial 密钥，读出这两个握手消息的公开部分；这与能解密 ECH 的内部 ClientHello 是两回事。之后的 `EncryptedExtensions`、证书（若发送）及 `Finished` 走 Handshake 级别，应用数据通常走 1-RTT，不能用公开的 Initial 密钥解密[^quic-handshake]。
 
 ### HTTP/2 与 HTTP/3 的应用数据布局
 
@@ -173,30 +173,31 @@ HTTP/2 这组能读取到 TCP 端口、序号和 TLS 外层记录头，但 `type
 
 ### ECH：保护真实的 ClientHello
 
-**加密客户端问候**（Encrypted Client Hello，ECH）使用服务端提供的配置加密 `ClientHelloInner`，把真实 SNI 及其他受保护参数放在里面，`ClientHelloOuter` 则作为可见的外部封装。RFC 9849 定义 ECH 机制，RFC 9848 的 `ech` 服务参数定义了通过 `HTTPS` / `SVCB` 分发 `ECHConfigList` 的方式[^8][^ech-dns]。
+**加密客户端问候**（Encrypted Client Hello，ECH）用服务端配置的公钥加密 `ClientHelloInner`，真实 SNI 和需要保护的 ALPN 候选可放在其中；可见的 `ClientHelloOuter` 则承载密文。RFC 9849 定义 ECH 机制；客户端可以从[DNS 服务绑定记录的 `ech` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)取得 RFC 9848 定义的 `ECHConfigList`[^8][^ech-dns]。
 
-`ClientHelloOuter` 仍然可见。外层 SNI 通常使用配置中的公开名 `public_name`，而非受保护的真实 SNI；它不是某个固定域名。成功使用 ECH 时，链路旁观者不能直接从外层读出受保护的真实 SNI[^8]。
+ECH 改变的是 ClientHello 的可见范围。外层 SNI 通常使用配置中的公开名 `public_name`；外层也可携带非敏感的 ALPN 候选，不表示这就是内部真实的候选列表。服务端最终选定的 ALPN 本来就在加密的 `EncryptedExtensions` 里，是否使用 ECH 都不会把选择结果改成明文[^7][^8]。
 
-```mermaid mobile-direction="TB" title="ECH 的公开外层与受保护的 ClientHello" description="展示通过 DNS HTTPS 或 SVCB 的 ech 参数取得配置、并成功使用 ECH 的路径，不表示每次都要重新查询 DNS，也不表示所有站点都提供 ECH。配置包含公钥与 public_name；ClientHelloInner 中的真实 SNI 和受保护 ALPN 被加密后放进外层 ECH 扩展。持有对应私钥的 ECH 前端可恢复 inner，旁观者只能读取外层及网络元数据；客户端仍需完成 TLS 服务身份验证。"
+```mermaid mobile-direction="TB" title="ECH 的公开外层与受保护的 ClientHello" description="从同一条客户端链路上的被动旁观者视角，对照携带 SNI 与 ALPN 的普通 ClientHello，以及通过 HTTPS 或 SVCB 配置并成功使用 ECH 的情况。外层通常显示配置指定的公开名，受保护的内层字段只有持有私钥的一端能恢复。"
 flowchart LR
- dns["HTTPS / SVCB 的 ech 参数<br/>解码为 ECHConfigList"] --> seal["按公钥与 public_name 构造外层<br/>加密内部 ClientHello"]
- seal --> outer["ClientHelloOuter<br/>外层可见，ECH 扩展携带密文"]
- outer -.->|只能观察公开部分| observer["旁观者<br/>不能解密 inner"]
- outer -->|解密| frontend["ECH 前端<br/>用私钥恢复 inner"]
- frontend --> tls["继续 TLS<br/>客户端校验身份"]
+ plain["未启用 ECH<br/>普通 ClientHello"] -.->|旁观者可读| plain_view["目标 SNI<br/>客户端的 ALPN 候选"]
+ dns["HTTPS / SVCB 的 ech 参数<br/>提供公钥与 public_name"] --> outer["成功使用 ECH<br/>ClientHelloOuter 承载内层密文"]
+ outer -.->|旁观者可读| outer_view["外层 SNI（通常为 public_name）<br/>可能还有外层 ALPN 候选"]
+ outer -->|用私钥解密| frontend["ECH 前端恢复内层<br/>真实 SNI 与受保护的 ALPN 候选"]
 ```
+
+能解开 ECH 不等于能解密 HTTP。在分离部署中，ECH 前端恢复内部 ClientHello 并交给后端；后端才是目标 TLS 的终止端。合并部署时两个角色也可以在同一服务上。无论哪种部署，客户端仍须验证预期服务身份[^8]。
 
 若服务端拒绝 ECH，RFC 9849 要求客户端用 `public_name` 校验外层握手。即使校验和握手都成功，也不能把它当成到目标服务的连接，必须在发送应用数据前以 `ech_required` 结束。若握手或认证失败，则报告错误，不使用重试配置，也不能据此关闭 ECH[^ech-retry]。
 
 外层握手与认证成功才有重试的依据；如果返回的 `encrypted_client_hello` 扩展格式无效，客户端必须中止。若 `retry_configs` 中至少有一项采用客户端支持的 ECH 版本，规范建议另建连接，用新配置重试。若未返回该扩展、没有客户端支持的 ECH 配置版本，或协商到早于 TLS 1.3 的版本，规范允许把这些情况视为服务端发出的可信停用信号，并建议另建连接、不带 ECH 重试。单凭超时或拒绝信号不能关闭 ECH；不重试就须向应用报告错误。这些规则只适用于已使用配置尝试 ECH 的握手[^ech-retry]。
 
 :::note[ECH 仍留下地址与流量特征]
-加密 DNS 可减少查询在该段链路上的明文暴露，ECH 可保护真实 ClientHello。两者都不隐藏目标 IP、包长与时序，也不保证目标服务与其他服务不可区分。不能把“观察不到明文域名”直接写成“无法推断访问目标”[^8]。
+如果同一旁观者还能看到明文 DNS，目标名可能早在握手前就已暴露；[加密 DNS](/posts/networking/dns-resolution-caching-encrypted-queries/#dotdoh-与-doq-保护查询通道)只减少所保护链路上的查询暴露。即使两者都启用，观察者仍能看到其所在链路的外层 IP、包长与时序；不能把“没读到明文域名”当成“无法推断访问目标”[^8]。
 :::
 
 ### 各参与者能看到什么
 
-下面以目标使用 TLS 1.3、客户端验证预期服务身份、普通代理不终止目标 TLS 为前提。每一行描述该参与者自身的视角；客户端到它之间若有外层加密隧道，沿途第三方看到的还会更少。
+下面假设目标使用 TLS 1.3，且客户端验证预期服务身份。旁观者不持有会话密钥；普通代理只转发，不终止目标 TLS。表中每一行描述该参与者自身的视角，不能把它看到的内容等同于同一链路上的第三方观察结果。
 
 | 观察者 / 参与者 | 地址与端口 | 目标域名 | 目标证书 | HTTP 路径、字段与内容 |
 | --- | --- | --- | --- | --- |
@@ -208,9 +209,9 @@ flowchart LR
 | 被客户端接受的**中间人**（man-in-the-middle，MitM）代理 | 可见其两段连接 | 通常可见 | 对客户端提供替代证书，对上游独立验证 | 作为 TLS 终止端可读取 |
 | TLS 终止端，如 CDN 或源站 | 可见对端出口地址 | 可见被接收的 SNI 与 HTTP authority / Host | 持有相应证书与认证密钥 | 可读取终止于此的 HTTP 消息 |
 
-**CONNECT 代理知道目标，不等于客户端到代理沿途的旁观者都知道。** 明文 HTTP 代理上的 `CONNECT example.com:443` 可在该链路被读取；如果客户端通过 TLS 连接 HTTPS 代理，CONNECT 本身就在外层 TLS 内。两种情况下，代理自身都要解释目标信息，随后应用仍可与目标 TLS 终止端握手。CONNECT 语义由 HTTP 定义，SOCKS5 的目标地址和协商则由它自己的协议定义[^connect]。
+**CONNECT 代理知道目标，不等于客户端到代理沿途的旁观者都知道。** 明文 HTTP 代理上的 `CONNECT example.com:443` 可在该链路被读取；如果客户端通过 TLS 连接 HTTPS 代理，代理只解开外层 TLS 来处理 CONNECT，仍可把隧道内的目标 TLS 原样转发。两种入口与 SOCKS5 的地址处理见[第七篇的显式代理边界](/posts/networking/proxies-tunnels-transparent-interception/#显式代理http-connect-与-socks5-的工作边界)[^connect]。
 
-MitM 调试代理需要让客户端接受它提供的证书和信任链。常见方式是安装调试 CA，但信任也可能预先由设备管理配置，或由应用单独设置；不能限定为用户手动安装。代理此时终止客户端 TLS，再单独连接上游，两个握手和验证责任需要分别检查[^mitm]。
+若 CDN 作为反向代理终止客户端 TLS，它就能读取 HTTP；CDN 到源站走明文还是另建 TLS，是另一段连接的配置。如果使用 TLS，上游身份应由 CDN 独立验证，客户端的 TLS 握手验证不了这一段[^gateway]。MitM 调试代理则需要让客户端信任它为目标名提供的替代证书；信任可能来自调试 CA、设备管理或应用自己的信任配置。代理终止客户端 TLS，再单独验证上游，不能把两段握手的验证结果混在一起[^mitm]。
 
 :::important[信任库决定哪一个 TLS 终止端会被接受]
 客户端接受代理 CA 后，代理可能成为它认可的服务身份签发者。诊断时应检查证书签发者、目标名字、实际连接地址与代理配置；单凭“浏览器没有报错”不能推导链路中不存在被信任的 TLS 检查代理。
@@ -286,15 +287,15 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 
 [^3]: 〔RFC〕[RFC 9113 §2](https://www.rfc-editor.org/rfc/rfc9113.html#section-2)说明 HTTP/2 与 TCP 队头阻塞的关系；[§3.2–3.3](https://www.rfc-editor.org/rfc/rfc9113.html#section-3.2)说明 TLS 协商与预先知道支持时的明文建连，[§4](https://www.rfc-editor.org/rfc/rfc9113.html#section-4)定义二进制帧，[§5](https://www.rfc-editor.org/rfc/rfc9113.html#section-5)定义流与多路复用。
 
-[^4]: 〔RFC〕[RFC 9114 §2、§3](https://www.rfc-editor.org/rfc/rfc9114.html#section-2)——HTTP/3 的 QUIC 映射、ALPN 与端点发现；[RFC 9204 §2](https://www.rfc-editor.org/rfc/rfc9204.html#section-2)说明 QPACK 的头部依赖和受阻流
+[^4]: 〔RFC〕[RFC 9114 §2、§3](https://www.rfc-editor.org/rfc/rfc9114.html#section-2)——HTTP/3 的 QUIC 映射、ALPN 与端点发现；[RFC 9000 §13](https://www.rfc-editor.org/rfc/rfc9000.html#section-13)说明丢包与各流的交付，[RFC 9204 §2](https://www.rfc-editor.org/rfc/rfc9204.html#section-2)说明 QPACK 的头部依赖和受阻流。
 
-[^5]: 〔RFC〕[RFC 9846 §2、§4、§5、§7](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)——TLS 1.3 常见 1-RTT 完整握手、ECDHE 前向保密、HKDF 密钥派生以及 ServerHello 之后握手消息的 AEAD 加密保护；取代 RFC 8446
+[^5]: 〔RFC〕[RFC 9846 §2](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)和[图 1](https://www.rfc-editor.org/rfc/rfc9846.html#figure-1)展示 TLS 1.3 完整握手、明文与密钥保护阶段、应用数据发送时机；[§4.5.2–§4.5.3](https://www.rfc-editor.org/rfc/rfc9846.html#section-4.5.2)定义 `CertificateVerify` 与 `Finished`，[§7](https://www.rfc-editor.org/rfc/rfc9846.html#section-7)定义 HKDF 密钥派生。RFC 9846 取代 RFC 8446。
 
 [^6]: 〔RFC〕[RFC 6066 §3](https://www.rfc-editor.org/rfc/rfc6066.html#section-3)——`server_name` 扩展在 ClientHello 中传递服务名，不代替客户端身份验证
 
 [^7]: 〔RFC〕[RFC 7301 §3](https://www.rfc-editor.org/rfc/rfc7301.html#section-3)与[RFC 9846 §4.4.1](https://www.rfc-editor.org/rfc/rfc9846.html#section-4.4.1)——ALPN 的协议选择及 TLS 1.3 服务端在加密扩展中的响应；新版主规范调整了章节编号。
 
-[^8]: 〔RFC〕[RFC 9849 §3.2](https://www.rfc-editor.org/rfc/rfc9849.html#section-3.2)概述 ClientHelloInner / Outer；[§6.1.1](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.1)规定外层 SNI 与 `public_name` 的关系；[§10](https://www.rfc-editor.org/rfc/rfc9849.html#section-10)讨论剩余隐私边界。
+[^8]: 〔RFC〕[RFC 9849 §3.1–§3.2](https://www.rfc-editor.org/rfc/rfc9849.html#section-3.1)区分部署角色并概述 ClientHelloInner / Outer，[§6.1.1](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.1)规定外层 SNI 与 `public_name` 的关系，[§10](https://www.rfc-editor.org/rfc/rfc9849.html#section-10)讨论 DNS、IP 等隐私边界及外层敏感参数的处理。
 
 [^ech-retry]: 〔RFC〕[RFC 9849 §6.1.4](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.4)定义接受与拒绝的判定；[§6.1.6](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.6)与 [§6.1.7](https://www.rfc-editor.org/rfc/rfc9849.html#section-6.1.7)定义拒绝后的重试条件与公开名认证。
 
@@ -303,6 +304,8 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 [^identity]: 〔RFC〕[RFC 9525 §6](https://www.rfc-editor.org/rfc/rfc9525.html#section-6)——预期服务身份、SAN 名字匹配与认证路径验证的不同责任，不允许以 Common Name 识别服务
 
 [^connect]: 〔RFC〕[RFC 9110 §9.3.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——CONNECT 成功后转为隧道；[RFC 1928 §4、§5](https://www.rfc-editor.org/rfc/rfc1928.html#section-4)另行定义 SOCKS5 地址与请求
+
+[^gateway]: 〔RFC〕[RFC 9110 §3.7](https://www.rfc-editor.org/rfc/rfc9110.html#section-3.7)描述反向代理在客户端和上游两侧的角色，[§4.3.4](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.4)规定 HTTPS 客户端应验证所连接的服务身份。
 
 [^mitm]: 〔软件实现〕[mitmproxy: Certificates](https://docs.mitmproxy.org/stable/concepts/certificates/)——动态签发替代证书与客户端接受代理 CA 的前提
 
@@ -318,7 +321,7 @@ HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要
 
 [^tls-record]: 〔RFC〕[RFC 9846 §5.2](https://www.rfc-editor.org/rfc/rfc9846.html#section-5.2)及[附录 B.1](https://www.rfc-editor.org/rfc/rfc9846.html#appendix-B.1)——TLS 1.3 加密记录的外层类型、兼容版本字段与长度，以及受保护的内容、内层类型和填充。
 
-[^quic-handshake]: 〔RFC〕[RFC 9001 §4、§5.2—5.4](https://www.rfc-editor.org/rfc/rfc9001.html#section-4)——QUIC CRYPTO 帧中的 TLS 握手、公开可导出的 Initial 密钥、包体保护与包号的头部保护；HTTP/3 的 QUIC 流映射见 [RFC 9114 §6](https://www.rfc-editor.org/rfc/rfc9114.html#section-6)。
+[^quic-handshake]: 〔RFC〕[RFC 9001 §4](https://www.rfc-editor.org/rfc/rfc9001.html#section-4)与[图 5](https://www.rfc-editor.org/rfc/rfc9001.html#figure-5)说明 CRYPTO 帧与各 TLS 消息的保护级别，[§5.2–§5.4](https://www.rfc-editor.org/rfc/rfc9001.html#section-5.2)说明公开可导出的 Initial 密钥、包体与包头保护；HTTP/3 的 QUIC 流映射见 [RFC 9114 §6](https://www.rfc-editor.org/rfc/rfc9114.html#section-6)。
 
 [^pki]: 〔RFC〕[RFC 5280 §6.1](https://www.rfc-editor.org/rfc/rfc5280.html#section-6.1)——认证路径验证、有效期和约束检查。
 

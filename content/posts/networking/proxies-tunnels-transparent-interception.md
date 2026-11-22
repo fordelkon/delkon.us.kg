@@ -13,7 +13,14 @@ tags: ["networking", "go"]
 
 ### 两段 TCP 与目标 TLS
 
-以普通 TCP CONNECT 为例，客户端先与代理建立 TCP 连接，代理再与目标建立一条独立的 TCP 连接。两段连接各自维护序号、确认与关闭状态。代理在两段之间搬运字节时，目标 TLS 仍可由客户端与目标服务建立，证书也由客户端校验。连接端点与加密终止点的对照见[第六篇的可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)[^1]。
+以普通 TCP CONNECT 为例，客户端先与代理建立 TCP 连接，代理再与目标建立一条独立的 TCP 连接。两段连接各自维护序号、确认与关闭状态。代理终结 TCP 不等于终止目标 TLS；判断中间节点能否读出 HTTP，要看谁是 TLS 对端[^1][^tls-endpoints]。
+
+| HTTPS 路径 | TLS 会话及端点 | 中间节点能看到什么 |
+| --- | --- | --- |
+| CONNECT 隧道，只转发字节 | 客户端 ↔ 源站，一条 TLS 会话跨过两段 TCP | 代理知道 CONNECT 指定的目标，转发目标 TLS 字节，但不因此看见加密的 HTTP 内容 |
+| 有意终止 TLS，例如站点的反向代理，且回源也用 TLS | 客户端 ↔ 代理；代理 ↔ 源站，两条独立 TLS 会话 | 代理解密前一段，可在重新加密前读取 HTTP；客户端验证前一段服务身份，代理独立验证回源服务身份 |
+
+即使客户端先用 TLS 连接显式代理，这层加密也只保护到代理，隧道内的目标 TLS 仍可端到端。证书校验与中间节点的可见范围，见第六篇的[服务名校验](/posts/networking/http-evolution-tls-handshake-https/#证书链可信还要检查名字)与[可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)。
 
 ### 入站、运行模式、DNS 与出站
 
@@ -57,7 +64,7 @@ tags: ["networking", "go"]
 | REDIRECT | 经本地重定向后交给监听 Socket 的流量 | 常见 Linux TCP 方案会改写目的；恢复原目的信息需要平台接口 |
 | TPROXY | 保留原目的地址的透明 Socket 流量 | Linux 需相应内核支持、策略路由及透明 Socket 配合，可用于 TCP/UDP |
 
-REDIRECT 与 TPROXY 的上述区别依据 Linux 内核文档，不能复制为 macOS 或 Windows 的部署命令。它们也不能单独解决 DNS 域名关联、代理出站或 TLS 解密问题[^transparent]。
+表中 TUN/TAP 的包交付是接口层概念，第三篇的[平台接口对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun-与-tap用户态读写哪些数据)分别说明 Linux TUN/TAP 与 macOS `utun`、Network Extension 的交付方式。REDIRECT 和 TPROXY 是 Linux 的接管机制；下文的自动路由与 DNS 配置则是 Mihomo 自己的实现，平台支持应分别查阅对应文档[^transparent][^4]。
 
 对不采用显式代理的应用，可以通过路由把匹配流量引向 TUN。Mihomo 的 `tun.enable` 与 `auto-route` 负责相应接口及自动路由配置，但实际范围仍受更具体路由、排除地址、策略路由与 IPv4/IPv6 配置影响。第三篇的[最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由表与最长前缀匹配)解释了为什么“已启用 TUN”不能直接证明所有连接都进入代理[^4]。
 
@@ -75,30 +82,36 @@ TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP �
 
 在匹配的 DNS 请求进入内部解析器后，**虚拟地址映射**（Fake-IP）可以先返回与域名关联的地址，而不必在这个响应阶段取得真实目标 IP。RFC 3089 描述的 SOCKS IPv6/IPv4 网关使用了类似的临时地址与域名映射，并未为 Fake-IP 分配地址段[^fakeip-rfc]。Mihomo 文档的 IPv4 地址池示例是 `fake-ip-range: 198.18.0.1/16`，其前缀位于 IANA 登记的 `198.18.0.0/15` 基准测试网段内。这个网段不是为 Fake-IP 分配的，也不是全球可达的地址空间[^3][^fakeip-benchmark]。
 
-应用连接映射地址，流量再进入代理时，内核可通过映射关系恢复域名。随后是否需要本地真实解析，仍取决于规则和出站：若二者都不要求本地目标 IP，可以把域名交给远端；若目标 IP 规则、直连或特定出站要求真实 IP，则仍需在相应阶段查询。
+把 [DNS 回答与实际连接](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-答案怎样影响连接目标)分开看。DNS 查询命中 Fake-IP 时，解析侧分配或复用虚拟地址并记录域名关联；**DNS 回答成功并不表示已经建立了目标连接。** 之后应用可能从缓存取到这个地址并发起连接。只有本次传输被路由到 TUN，且代理仍有对应映射时，下图的查表恢复才成立[^3][^4]。
 
-```mermaid title="Fake-IP 从 DNS 映射到域名出站的闭环" description="限定 DNS 请求进入内部解析器、应用连接对应 Fake-IP 且路由将其送入 TUN 的情形。DNS 模块与 TUN 处理侧属于同一个 Mihomo，共享映射状态；此处选择无需本地目标 IP 的域名规则及支持域名的远端出站。远端再解析目标并连接源站，DIRECT、IP 规则和不支持域名的出站另有路径。箭头表示逻辑交付顺序，不按耗时绘制，也不表示本地 TCP 包原样穿过全部连接。"
+```mermaid title="Fake-IP 的两次事件：DNS 建映射，连接查映射" description="DNS 和代理核心共享地址映射。缓存中的回答可以稍后用于连接。本图只展开命中域名规则且出站支持传域名的情形；箭头表示逻辑交付顺序，不按耗时绘制。"
 sequenceDiagram
  participant App as 应用
  participant DNS as Mihomo DNS
- participant Kernel as 内核
- participant Inbound as TUN 与代理核心
+ participant OS as 系统网络栈
+ participant Core as 代理核心
  participant Node as 远端代理节点
  participant Target as 目标服务
- App-->>DNS: 查询 example.com 的 A 记录
- Note over DNS,Inbound: 写入共享映射<br/>198.18.0.8 ↔ example.com
- DNS->>App: 返回 198.18.0.8
- App->>Kernel: 连接 198.18.0.8:443
- Kernel->>Inbound: 路由选中 TUN，交付 IP 包
- Note over Inbound: 查映射恢复 example.com，DOMAIN-SUFFIX 规则选择远端出站
- Inbound->>Node: 通过支持域名的出站协议<br/>提交 example.com:443
- Note over Node: 按节点环境解析真实目标地址
- Node->>Target: 建立独立的目标连接
- Target->>Node: 返回响应
- Node->>Inbound: 通过对应代理会话返回
- Inbound->>Kernel: 按应用侧状态写回 IP 包
- Kernel->>App: 交付响应字节
+ Note over App,DNS: DNS 事件：分配或复用虚拟地址
+ App->>DNS: 查询 example.com 的 A 记录
+ DNS->>DNS: 记录共享映射<br/>198.18.0.8 ↔ example.com
+ DNS-->>App: A 记录：198.18.0.8
+ Note over App,Core: 传输事件：路由交付后查映射
+ App->>OS: 连接 198.18.0.8:443
+ OS->>Core: 选中 TUN，交付 IP 包
+ Core->>Core: 恢复 example.com<br/>域名规则选中远端节点
+ Core->>Node: 通过出站会话提交 example.com:443
+ Node->>Node: 解析真实目标地址
+ Node->>Target: 建立目标连接
+ Target-->>Node: 响应数据
+ Node-->>Core: 按出站会话返回
+ Core-->>OS: 按应用侧连接状态写回 IP 包
+ OS-->>App: 交付响应字节
 ```
+
+地址映射回答的是“这个虚拟 IP 对应哪个域名”；它既不记录最终出站，也不代替每条连接的转发状态。同一域名可以发起多条连接，每条流仍要按规则选出站。若规则或出站需要真实 IP，例如目标 IP 规则或 DIRECT，再按需取得真实地址[^3][^6]。
+
+不启用 Fake-IP 时，TUN 也能接收被选路送入的 IP 包；应用拿到真实 IP 时，代理从包头得到的就是真实目标地址，不走虚拟地址查表。TUN 决定包如何交付，Fake-IP 决定匹配的 DNS 请求如何回答，二者不是同一个开关[^3][^4]。
 
 #### 目标站点、代理节点与 DNS 服务的解析
 
@@ -150,7 +163,7 @@ flowchart TB
 | 应用直接使用 IP 或自定义加密协议 | 原始域名或可识别元数据 | 核对代理收到的目标 IP 及命中的 IP 或进程规则 |
 | TLS / QUIC 使用 ECH | 真实的内部 SNI | 核对代理是否另有可用的域名映射 |
 
-持久化映射能减少部分重启导致的失配。若应用还在使用旧地址，需要对照它实际连入代理的地址和当前映射[^3]。
+持久化映射能减少部分重启导致的失配。若应用还在使用旧地址，需要对照它实际连入代理的地址和当前映射[^mapping-storage]。
 
 ## 分流规则与出站选择
 
@@ -460,17 +473,15 @@ client received: response after EOF
 
 ### 实验一：观察 HTTP CONNECT
 
-启动前面的教学代理后，在另一终端执行：
+使用已配置、允许访问该目标的本机 HTTP 代理，把 `7890` 换成实际监听端口。不要使用前面的教学代理：它只接受 IPv4 回环目标，会对这里的 `CONNECT example.com:443` 返回 `400`，不会接着进行目标 TLS 握手。
 
 ```bash frame="code"
-curl --noproxy '' --proxy http://127.0.0.1:17890 \
+curl --noproxy '' --proxy http://127.0.0.1:7890 \
   --connect-timeout 5 --max-time 20 \
   -v --http1.1 https://example.com/ -o /dev/null
 ```
 
-`--noproxy ''` 避免环境中的绕过列表使本次实验跳过指定代理。日志应先显示连接本地代理，再发送 `CONNECT example.com:443`，收到成功响应后才开始目标 TLS 握手。先区分失败发生在代理 TCP、CONNECT 协商、目标 TLS 还是 HTTP 响应；只看到代理端口连接成功并不能证明整条访问成功[^curl]。
-
-也可以使用已有 HTTP/SOCKS mixed 监听端口重复实验，但要用实际监听地址替换 `17890`，并确认代理日志中的入站与出站。教学程序只支持 CONNECT，不支持 SOCKS5。
+`--noproxy ''` 避免环境中的绕过列表使本次实验跳过指定代理。日志先显示连接本地代理，再发送 `CONNECT example.com:443`，收到成功响应后才开始目标 TLS 握手。对照代理日志中的入站与出站，区分失败发生在代理 TCP、CONNECT 协商、目标 TLS 还是 HTTP 响应；只看到代理端口连接成功并不能证明整条访问成功[^curl]。
 
 ### 实验二：SOCKS5 的本地解析与代理解析
 
@@ -498,14 +509,16 @@ curl --noproxy '' --proxy socks5h://127.0.0.1:7890 \
 - Fake-IP 延后的是特定阶段的真实目标解析，嗅探依赖可见协议字段；它们都不能保证每条流量都有域名。
 - 规则顺序、`no-resolve`、出站能力与防回环需要一起检查，返回方向也有需要维护的会话状态。
 
-最后一篇[《计算机网络（八）：网络性能与分层排障》](/posts/networking/network-diagnostics-performance-troubleshooting/)会把这些阶段转为对照实验：先确认请求实际经过哪些环节，再判断哪份证据能排除哪种解释。
+最后一篇[《计算机网络（八）：网络诊断、性能指标与分层排障》](/posts/networking/network-diagnostics-performance-troubleshooting/)会把这些阶段转为对照实验：先确认请求实际经过哪些环节，再判断哪份证据能排除哪种解释。
 
 ## 延伸阅读
 
 - [Mihomo 官方文档](https://wiki.metacubex.one/)——按安装版本对照完整配置，而不是把单段示意当成可直接部署的配置文件
 - [Go `io.Copy`](https://pkg.go.dev/io#Copy)——复制直到 EOF 或错误的返回契约
 
-[^1]: 〔RFC〕[RFC 9110 §9.3.6, CONNECT](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)——CONNECT 目标、成功响应后的隧道语义与连接关闭要求。
+[^1]: 〔RFC〕[RFC 9110 §3.7](https://www.rfc-editor.org/rfc/rfc9110.html#section-3.7)区分代理、网关与隧道；[§9.3.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6)定义 CONNECT 目标、成功响应后的隧道语义与连接关闭要求。
+
+[^tls-endpoints]: 〔RFC〕[RFC 9846 §2](https://www.rfc-editor.org/rfc/rfc9846.html#section-2)与[§5.2](https://www.rfc-editor.org/rfc/rfc9846.html#section-5.2)——TLS 对端建立密钥并保护应用数据；中间转发 TCP 字节不会使中间节点成为 TLS 对端。
 
 [^2]: 〔RFC〕[RFC 1928 §3–7](https://www.rfc-editor.org/rfc/rfc1928.html#section-3)——SOCKS5 方法协商、目标地址类型、TCP 连接与 UDP 中继。
 
@@ -516,6 +529,8 @@ curl --noproxy '' --proxy socks5h://127.0.0.1:7890 \
 [^mode]: 〔软件实现〕[Mihomo：Operation Mode](https://wiki.metacubex.one/en/config/general/#operation-mode)——`rule`、`global`、`direct` 的出站选择职责。
 
 [^3]: 〔软件实现〕[Mihomo：DNS 配置](https://wiki.metacubex.one/config/dns/)——Fake-IP、过滤模式、目标解析、直连解析、节点解析与 DNS 服务的引导解析。
+
+[^mapping-storage]: 〔软件实现〕[Mihomo：运行配置](https://wiki.metacubex.one/config/general/)中 `profile.store-fake-ip` 的说明——保存 Fake-IP 映射供后续启动复用。
 
 [^fakeip-rfc]: 〔RFC〕[RFC 3089 §3, DNS Name Resolving Procedure](https://www.rfc-editor.org/rfc/rfc3089.html#section-3)——在 SOCKS IPv6/IPv4 网关中用临时地址恢复对应域名。
 

@@ -19,14 +19,14 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 | --- | --- | --- |
 | `A` | IPv4 地址 | 一个名字可以返回多个地址 |
 | `AAAA` | IPv6 地址 | 双栈客户端可以同时或相近时间查询 `A` 与 `AAAA` |
-| `CNAME` | 指向另一个名字的别名 | 解析器可能继续查询别名目标；不能与同节点 `SOA`、`NS` 等共存，故裸域名（Zone Apex）不能直接配 `CNAME`[^1] |
+| `CNAME` | 给整个 DNS 名字设置别名 | 除查询 `CNAME` 本身外，通常沿目标名继续查原类型；不能与同名 `SOA`、`NS` 共存，故区域顶点（zone apex）不能直接配 `CNAME`[^1] |
 | `NS` | 某区域的权威域名服务器 | 用于区域权威声明与逐级委派 |
 | `TXT` | 文本数据 | 常用于域名验证、SPF 和 DKIM 等应用 |
-| `HTTPS` / `SVCB` | **服务绑定记录**（service binding record） | AliasMode 可解决裸域名别名问题，ServiceMode 提供 ALPN、端口、地址提示与 `ech` 配置[^6][^ech-dns] |
+| `HTTPS` / `SVCB` | **服务绑定记录**（service binding record） | 优先级为 `0` 是 AliasMode，正数是 ServiceMode；AliasMode 只改变服务绑定的查询目标，可以与同名 `A` / `AAAA` 共存[^6] |
 
-对基于 TCP 的 HTTPS，客户端通常在 TLS 握手中通过**应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）协商 HTTP/1.1 或 HTTP/2。HTTP/3 使用 QUIC，需要发现可用端点后建立 QUIC 连接，不能把已有 TCP 连接直接协商成 HTTP/3。`HTTPS` 记录可以提前提供 `h3` 等参数[^6]，HTTP 的 `Alt-Svc` 信息也可以用于发现 HTTP/3 服务[^http3]。
+例如，区域顶点的 `example.com. HTTPS 0 svc.example.net.` 告诉支持 AliasMode 的客户端去查 `svc.example.net.` 的 `HTTPS` 记录，不会把 `example.com.` 的 `A` / `AAAA` 查询也改写到那里。若随后得到 `svc.example.net. HTTPS 1 edge.example.net. alpn="h3,h2"`，这条 ServiceMode 记录才给出了候选连接端点 `edge.example.net.` 及其参数。地址通常来自端点名的 `A` / `AAAA`；`ipv4hint` / `ipv6hint` 可在地址记录尚未取得时提供尝试连接的地址，但不代替地址记录。连到这个端点时，TLS 仍须验证原服务名 `example.com`，而不是改用端点名[^6]。
 
-因此，DNS 不只是返回一个 IP 的通讯录。`HTTPS` 是独立的查询类型，不是每次 `A` / `AAAA` 响应都会自动附送的固定字段；ServiceMode 的参数也是可选组合，不能假定每条记录都同时携带 `alpn`、地址提示和 `ech`。RFC 9848 用 `ech` 分发**加密客户端问候**（Encrypted ClientHello，ECH）所需的 `ECHConfigList`；实际 TLS 加密机制由 RFC 9849 定义，见[下一篇的 ECH 说明](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)[^ech-dns][^ech-tls]。
+`HTTPS` 是独立的查询类型，不是 `A` / `AAAA` 应答中的固定字段。ServiceMode 可以通告**应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）候选、端口、地址提示和 `ech` 等参数，不要求每项都出现。通告 `h3` 帮助客户端发现 HTTP/3 端点，实际仍需另建 QUIC 连接并在握手中协商；HTTP 也可通过 `Alt-Svc` 通告 HTTP/3 服务[^6][^http3]。`ech` 则按 RFC 9848 分发**加密客户端问候**（Encrypted ClientHello，ECH）所需的 `ECHConfigList`，实际加密机制见[下一篇的 ECH 说明](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello)[^ech-dns][^ech-tls]。
 
 这里要区分发现和握手。支持 ECH、原本允许绕过服务绑定记录直连的客户端，如果服务绑定解析成功且所有备选端点都带 `ech`，就必须改为依赖这些端点；全部连接失败时，不能再绕过记录直接连接。没有 `HTTPS` 记录不等于这种情况。若 DNS 响应受密码学保护，服务绑定解析却因认证失败、`SERVFAIL`、传输错误或超时未完成，RFC 9460 建议放弃此次连接，而不是把失败当成“没有记录”[^ech-dns][^6]。
 
@@ -42,9 +42,9 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 - **递归解析器**（Recursive Resolver）：使用缓存并按需要向其他服务器发起迭代查询，最终返回答案或失败状态[^1]。运营商 DNS 与公共 DNS 都可以承担这一职责。
 - **权威名称服务器**（Authoritative Name Server）：提供某个区域的权威数据。根区服务由多个标识及其分布式实例提供；此图把它们抽象为一个角色。
 
-以下是忽略缓存、别名和查询最小化等细节的单次 `A` 查询示意；`198.51.100.20` 是文档地址，不是当前真实解析结果[^1]：
+存根设置 `RD=1` 请求递归服务：由提供该服务的解析器负责返回最终结果或失败，不把下一站留给存根。递归器可以直接用缓存回答；答案未命中但有可用的缓存委派时，则从最接近目标的已知区域开始补查。下面假设两种缓存都没命中，所以从根开始。图中 `198.51.100.20` 是文档地址，不是实时解析结果[^1]。
 
-```mermaid title="一次未命中缓存的 DNS 查询" description="从上到下读。存根请求递归服务，递归器分别询问根、.com 与目标权威。前两站返回委派，这些服务器之间没有转发存根的查询。本例每次都查询 example.com. 的 A 记录，省略缓存、查询名最小化、别名、失败和地址补查。"
+```mermaid title="一次未命中缓存的 DNS 查询" description="从上到下读。本例没有可用的答案或委派缓存，递归器从根开始迭代查询。根与 .com 只返回下一站，递归器自己发起下一次查询；它们并不转发存根的原请求。每次都查询 example.com. 的 A 记录，省略查询名最小化、别名、失败和地址补查。"
 sequenceDiagram
  participant S as 存根
  participant R as 递归器
@@ -52,16 +52,16 @@ sequenceDiagram
  participant TLD as .com
  participant Auth as 目标权威
  S->>R: 查询 A · RD=1
- R->>Root: 查询 A
- Root->>R: .com 委派
- R->>TLD: 查询 A
- TLD->>R: example.com 委派
- R->>Auth: 查询 A
+ R->>Root: 查询 A · RD=0
+ Root->>R: .com 委派（NS）
+ R->>TLD: 查询 A · RD=0
+ TLD->>R: example.com 委派（NS）
+ R->>Auth: 查询 A · RD=0
  Auth->>R: A = 198.51.100.20
  R->>S: A = 198.51.100.20
 ```
 
-客户端请求递归服务（置位 `RD=1`），意思是让解析器完成后续工作，而不是只返回下一站。解析器对权威服务器通常进行非递归查询，沿委派继续向下。父区随委派提供的名称服务器 `A` / `AAAA` 地址称为**胶水记录**（glue）；例如 `example.com` 的名称服务器是 `ns.example.com` 时，父区带上的地址可以打破“必须先联系子区，才能查到联系子区所需地址”的循环。不是附加段中的所有地址记录都是胶水[^glue]。
+**委派应答**（referral）不是所求记录的最终答案：权威段的 `NS` 告诉递归器下一站问谁，它再向其中一台服务器发出非递归查询（`RD=0`）。若附加段已提供下一站所需的地址，就可以少做地址查询。父区随委派提供的名称服务器地址称为**胶水记录**（glue）；例如 `example.com` 的名称服务器是 `ns.example.com` 时，胶水可打破“必须先联系子区才能查到子区服务器地址”的循环。不是附加段中的所有地址记录都是胶水[^1][^glue]。
 
 实现**查询名最小化**（QNAME Minimisation）的递归解析器通常只把足以取得下一次委派的名字交给上级权威服务器，而不是逐级发送完整查询名。例如查询 `www.example.com. A` 时，它可以先向根查询 `com.`，再向 `.com` 查询 `example.com.`，到负责目标记录的权威端才查完整名字。存根发给递归解析器的查询并不因此缩短，这也不是通道加密[^qname-min]。
 
@@ -122,19 +122,23 @@ flowchart TB
 
 浏览器、系统服务、路由器转发器和递归解析器都可能缓存结果，但它们不一定全部出现在同一条查询路径上。浏览器内置 DoH 可能绕过系统解析服务；`/etc/hosts` 是本地静态映射，也不能直接当作遵循 DNS TTL 的缓存。
 
-```mermaid title="解析路径决定会访问哪些缓存" description="比较应用使用系统解析与浏览器内置 DoH 两条可选路径。每个方框中的缓存命中都可以提前返回；本地转发器不是必经节点，权威端提供区域数据而不是客户端缓存的最后一层。图不表示每次查询都会访问所有节点。"
+```mermaid title="解析路径决定会访问哪些缓存" description="应用、系统服务或本地转发器可在本地作答；向上游发查询的箭头只画这些节点未能直接作答的情况。到达递归器后，可用缓存结果直接返回；只有需要补查时才开始迭代。上游给出下一次委派时，递归器继续查，不把委派作为最终结果。省略别名追踪与重试。"
 flowchart TB
  app["应用或浏览器<br/>先检查自身可用缓存"] --> path{"本次解析路径"}
  path -->|系统接口| system["系统解析服务<br/>静态映射、缓存与网络策略"]
  system --> local["可选本地 DNS 转发器<br/>可能另有缓存"]
- system -->|直接配置递归服务| recursive["递归解析器<br/>检查自己的缓存"]
+ system -->|直接配置递归服务| recursive{"递归器有可用的缓存结果？"}
  local --> recursive
  path -->|浏览器内置 DoH| doh["浏览器选定的 DoH 服务<br/>可能绕过系统解析缓存"]
- doh -->|作为递归服务处理| recursive
- recursive -->|需要补查的数据| auth["按委派查询权威服务器<br/>不保证每次从根开始"]
+ doh --> recursive
+ recursive -->|有| reply["向请求方返回结果"]
+ recursive -->|需要补查| query["从最近的可用委派开始<br/>没有则从根开始"]
+ query --> iterate["向当前权威发起迭代查询"]
+ iterate -->|收到下一站的委派| iterate
+ iterate -->|得到最终答案或失败| reply
 ```
 
-图中 DoH 服务与递归解析器是服务入口和逻辑职责的区分，可以属于同一服务。观察系统缓存不能据此推断浏览器内置 DoH 的缓存状态；权威数据被修改后，各条路径也可能在不同时间看到新值。
+DoH 是服务入口，递归是逻辑职责，两者可以属于同一服务。缓存也可以保存[否定结果或短暂的失败结果](#否定应答解析失败与超时)，不是只有地址才算命中。若只缓存了委派，它能缩短[前面的冷缓存路径](#解析器角色与委派路径)，不能回答存根的问题。观察系统缓存也不能据此判断浏览器内置 DoH 的缓存状态。
 
 DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的缓存使用时间，与 IP 头中用于限制转发跳数的 TTL 含义不同。重复命中同一份尚未刷新的缓存时，通常能观察到剩余 TTL 下降。预取刷新、公共解析服务的不同缓存后端会改变观察结果；标准还允许在规定条件下暂时提供过期数据（serve stale），因此不能把“TTL 到零”理解成所有实现都必须在这一刻同步查询上游[^stale]。
 
@@ -153,7 +157,7 @@ DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的
 | 结果 | 表示什么 | 排障时不能推导什么 |
 | --- | --- | --- |
 | `NXDOMAIN` | 查询的名字不存在；有别名链时需检查最终目标 | 不能只因暂时失败就使用这个结论 |
-| `NODATA` | 名字存在，但没有请求类型的数据 | 它不是独立 RCODE，常见形式是 `NOERROR` 且无相应答案；不能只看答案数为 0 就下结论 |
+| `NODATA` | 名字存在，但没有请求类型的数据 | 它不是独立 RCODE；`NOERROR` 且答案为空也可能是委派，应结合权威段的 SOA 与 NS 判断[^negative] |
 | `SERVFAIL` | 解析器未能完成查询，如上游失败或 DNSSEC 验证失败 | 不证明名字不存在 |
 | 超时 | 在工具的等待预算内没有收到可用响应 | 不证明服务器宕机，也不证明不存在；还可能是路径、过滤或接管问题 |
 
@@ -189,22 +193,28 @@ DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeb
 
 ### DoT、DoH 与 DoQ 保护查询通道
 
-DoT、DoH、DoQ 在使用正确的服务端认证时，保护客户端到所选解析服务这一段传输[^2][^3][^4]：
+把传统 DNS 和三种加密方式放在一起对照。加密各行假设客户端认证了所选 DNS 服务，且本次查询未回退到明文；加密只保护实际使用它的链路[^2][^3][^4][^5]。
 
-| 协议 | 传输与默认端口 | 消息组织 | 边界与权衡 |
+| 协议 | 从内到外的封装（省略 IP） | 默认端口 | DNS 消息怎样承载 |
 | --- | --- | --- | --- |
-| DoT（DNS over TLS） | TCP + TLS，853 | 带 2 字节长度前缀的 DNS 消息 | 专用端口便于识别，也可能被网络策略限制 |
-| DoH（DNS over HTTPS） | HTTPS，通常 443 | HTTP 请求承载 DNS 消息 | 可使用 HTTP/2 或 HTTP/3；共享端口不保证可用，也不消除 HTTP 元数据关联风险 |
-| DoQ（DNS over QUIC） | QUIC / UDP，853 | 每次查询使用独立双向流；每条消息带 2 字节长度前缀 | 避免跨流的按序交付阻塞；仍受共享拥塞控制及 UDP 可达性影响 |
+| 传统 DNS | DNS → UDP 或 TCP | UDP/TCP 53 | UDP 直接承载消息；TCP 使用 2 字节长度前缀；两者都不提供传输加密[^dns-message][^dns-tcp] |
+| DoT（DNS over TLS） | DNS → TLS → TCP | TCP 853 | DNS 消息带 2 字节长度前缀[^2] |
+| DoH（DNS over HTTPS，经 HTTP/2） | DNS → HTTP/2 → TLS → TCP | TCP 443 | GET 用 `dns` 参数携带 base64url 编码的消息，POST 用二进制请求体[^3] |
+| DoH（经 HTTP/3） | DNS → HTTP/3 → QUIC（集成 TLS）→ UDP | UDP 443 | DNS 消息到 HTTP 请求的映射不变，由双方支持并协商 `h3`[^3][^http3] |
+| DoQ（DNS over QUIC） | DNS → QUIC（集成 TLS）→ UDP | UDP 853 | 每次查询用独立双向流；DNS 消息带 2 字节长度前缀[^4] |
 
-DoQ 的响应在发出查询的同一条流上返回，靠流对应请求与响应，因此 DNS 报文的 `ID` 置为 `0`，不用前面 UDP 示例里的事务 ID 来区分并发查询[^4]。
+DoH 用 HTTP 承载查询；DoQ 直接用 QUIC 流，并不经过 HTTP。DoQ 的响应沿发出查询的同一条流返回，靠流匹配而非事务 ID，因此 DNS 报文的 `ID` 置为 `0`[^4]。DoH 使用 443 不保证可达；DoH over HTTP/3 和 DoQ 还依赖 UDP 路径可用。两种 HTTPS 封装的差异见[下一篇的 HTTP/2 与 HTTP/3 应用数据布局](/posts/networking/http-evolution-tls-handshake-https/#http2-与-http3-的应用数据布局)。
 
-加密 DNS 不能阻止解析器本身看到查询；也不自动保护解析器到权威端的全部后续链路[^5]。它与 DNSSEC 可组合：一项认证 DNS 数据，一项保护所选通道。网站连接若未使用 ECH，旁观者还可能从 TLS SNI 得到域名；即使两者都启用，目标 IP 和流量模式仍然可见，详见[下一篇的可见性边界](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)。
+- **客户端链路上的旁观者**：无法直接读取加密段中的查询名、类型和答案，但能看到该段的连接地址、端口和流量大小、时序。若加密从本地转发器才开始，前一段的旁观者不受这层保护[^5]。
+- **解密查询的转发器或递归解析器**：可以读取收到的查询名、类型和应答，也能看到连接对端的地址；对端不一定是最初的客户端[^5]。
+- **权威名称服务器**：只看到实际发给自己的查询。缓存命中可能根本没有这一步，查询名最小化也会改变各级权威收到的名字。通常看到的是递归器的来源地址；[ECS](#dns-答案怎样影响连接目标) 等机制可能另外携带客户端网络前缀。客户端加密到递归器，不会自动加密这些后续查询[^5][^qname-min][^ecs]。
+
+网站连接还要单独判断：未使用 ECH 时，旁观者可能从 TLS 的服务器名称指示（SNI）得到网站域名；即使用了加密 DNS 和 ECH，网站的目标 IP 及流量特征也未因此隐藏，详见[下一篇的可见性边界](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)。
 
 域名形式的 DoH 服务（如 `https://dns.google/dns-query`）还需要**引导解析**（bootstrap）：客户端必须先有办法取得解析服务自己的地址。地址可以来自既有缓存、预配置 IP、另一套可用解析服务等；不必然要求一次明文查询。取得 IP 后仍需按服务名验证 TLS 身份，不能因为使用预置 IP 就省略认证。
 
 :::important[网站、代理节点与 DNS 服务是三个解析对象]
-开启代理后，目标网站、代理节点自身、加密 DNS 服务自身可能分别使用不同的解析路径。Fake-IP 能让代理先返回映射地址，但是否需要本地真实解析仍取决于规则与出站协议。具体接管与配置职责见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/)，不能把“开了 TUN”当作全部查询都由同一个解析器完成的证据。
+开启代理后，目标网站、代理节点自身、加密 DNS 服务自身可能分别使用不同的解析路径。Fake-IP 能让代理先返回映射地址，但是否需要本地真实解析仍取决于规则与出站协议。参见[第七篇对这三类解析路径的区分](/posts/networking/proxies-tunnels-transparent-interception/#目标站点代理节点与-dns-服务的解析)：不能把“开了 TUN”当作全部查询都由同一个解析器完成的证据。
 :::
 
 ## DNS 查询实验与结果判读
@@ -281,17 +291,17 @@ DNS 的输出是带类型、状态与缓存条件的记录，不只是一个 IP�
 - [RFC 9499: DNS Terminology](https://www.rfc-editor.org/rfc/rfc9499.html)——系统核对存根、递归、权威、区域与胶水等术语
 - [BIND 9: dig 手册](https://bind9.readthedocs.io/en/stable/manpages.html#dig-dns-lookup-utility)——按所用版本核对查询选项、显示格式与类型支持
 
-[^1]: 〔RFC〕[RFC 1034 §3、§4](https://www.rfc-editor.org/rfc/rfc1034.html#section-3)与[RFC 1035 §3.2](https://www.rfc-editor.org/rfc/rfc1035.html#section-3.2)——域名空间、区域委派、递归解析和资源记录格式
+[^1]: 〔RFC〕[RFC 1034 §3](https://www.rfc-editor.org/rfc/rfc1034.html#section-3)讨论域名空间与资源记录，[§3.6.2](https://www.rfc-editor.org/rfc/rfc1034.html#section-3.6.2)定义 CNAME，[§4.3.1–§4.3.2](https://www.rfc-editor.org/rfc/rfc1034.html#section-4.3.1)区分递归应答与委派，[§5.3.3](https://www.rfc-editor.org/rfc/rfc1034.html#section-5.3.3)说明怎样使用缓存和逐级查询；资源记录格式见 [RFC 1035 §3.2](https://www.rfc-editor.org/rfc/rfc1035.html#section-3.2)。
 
 [^2]: 〔RFC〕[RFC 7858 §3](https://www.rfc-editor.org/rfc/rfc7858.html#section-3)——DoT 的 TLS 连接、TCP/853 与 DNS 消息长度前缀
 
-[^3]: 〔RFC〕[RFC 8484 §4](https://www.rfc-editor.org/rfc/rfc8484.html#section-4)——DNS 消息与 HTTPS 请求、响应的映射
+[^3]: 〔RFC〕[RFC 8484 §4](https://www.rfc-editor.org/rfc/rfc8484.html#section-4)与[§6](https://www.rfc-editor.org/rfc/rfc8484.html#section-6)定义 DNS 消息到 HTTPS 的映射及 `application/dns-message` 格式；[§5.2](https://www.rfc-editor.org/rfc/rfc8484.html#section-5.2)推荐至少使用 HTTP/2。
 
 [^4]: 〔RFC〕[RFC 9250 §4.1–§4.2.1](https://www.rfc-editor.org/rfc/rfc9250.html#section-4.1)——DoQ 的默认端口、独立流、两字节长度前缀与 DNS 消息 ID 规则。
 
-[^5]: 〔RFC〕[RFC 9076: DNS Privacy Considerations](https://www.rfc-editor.org/rfc/rfc9076.html#section-5.2)——§5.2、§6、§7.1 分别说明加密传输的边界、解析器与权威端可见性，以及元数据关联风险。
+[^5]: 〔RFC〕[RFC 9076 §5](https://www.rfc-editor.org/rfc/rfc9076.html#section-5)讨论链路观察者与加密边界，[§6](https://www.rfc-editor.org/rfc/rfc9076.html#section-6)区分递归与权威服务器的可见性，[§7.1](https://www.rfc-editor.org/rfc/rfc9076.html#section-7.1)讨论元数据关联风险。
 
-[^6]: 〔RFC〕[RFC 9460 §3–§3.1](https://www.rfc-editor.org/rfc/rfc9460.html#section-3)说明服务绑定解析成功的条件、端点选择和失败处理；[§7、§9](https://www.rfc-editor.org/rfc/rfc9460.html#section-7)定义 HTTPS 记录的 ALPN、端口、地址提示等服务参数。
+[^6]: 〔RFC〕[RFC 9460 §2.4](https://www.rfc-editor.org/rfc/rfc9460.html#section-2.4)区分 AliasMode 与 ServiceMode，[§3–§3.1](https://www.rfc-editor.org/rfc/rfc9460.html#section-3)说明端点选择与失败处理，[§7](https://www.rfc-editor.org/rfc/rfc9460.html#section-7)定义 ALPN、端口、地址提示等服务参数，[§9.4](https://www.rfc-editor.org/rfc/rfc9460.html#section-9.4)保留原始服务身份，[§10.4.2](https://www.rfc-editor.org/rfc/rfc9460.html#section-10.4.2)给出区域顶点别名与地址记录共存的示例。
 
 [^ech-dns]: 〔RFC〕[RFC 9848 §3、§5.1](https://www.rfc-editor.org/rfc/rfc9848.html#section-3)——`ech` 携带 `ECHConfigList`，且在解析成功、所有备选端点均含 `ech` 时禁止绕过服务绑定直接回退。
 
@@ -305,7 +315,7 @@ DNS 的输出是带类型、状态与缓存条件的记录，不只是一个 IP�
 
 [^qname-min]: 〔RFC〕[RFC 9156 §2、§4](https://www.rfc-editor.org/rfc/rfc9156.html#section-2)——查询名最小化的目的、查询名与查询类型选择，以及示例。
 
-[^dns-tcp]: 〔RFC〕[RFC 7766 §5、§6](https://www.rfc-editor.org/rfc/rfc7766.html#section-5)——通用 DNS 对 TCP 的支持要求，以及直接使用与复用 TCP 连接
+[^dns-tcp]: 〔RFC〕[RFC 1035 §4.2.2](https://www.rfc-editor.org/rfc/rfc1035.html#section-4.2.2)定义 DNS 使用 TCP 53 和两字节长度前缀；[RFC 7766 §5–§6](https://www.rfc-editor.org/rfc/rfc7766.html#section-5)说明通用 DNS 对 TCP 的支持要求，以及直接使用与复用 TCP 连接。
 
 [^stale]: 〔RFC〕[RFC 8767 §4](https://www.rfc-editor.org/rfc/rfc8767.html#section-4)——在规定条件下使用过期 DNS 数据；TTL 的通常模型不能包办所有缓存行为
 

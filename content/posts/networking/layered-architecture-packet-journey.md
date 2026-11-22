@@ -192,15 +192,20 @@ flowchart TB
 沿着上一节的发送路径离开本机网卡后，数据还要经过家用路由器、运营商网络与骨干路由器等多段接力。现在从单台主机内部转向整条网络路径，区分沿途设备各自解释哪一层的头部。
 
 - **二层交换机**（Switch）在普通二层转发中读取目的 MAC，查询转发表并选择出端口，通常不改写 IP 头。具备三层转发、过滤等功能的设备还会执行额外处理，不能只凭设备名称判断能力。
-- **路由器**（Router）检查目的 IP 并选择下一跳，转发时递减 IPv4 TTL 或 IPv6 Hop Limit，再为下一段链路重新封装。若下一段仍为以太网，就使用这一跳的源/目的 MAC；其他链路未必使用以太网帧头[^3][^ipv6]。
+- **路由器**（Router）检查目的 IP 并选择下一跳，转发时递减 IPv4 TTL 或 IPv6 Hop Limit，再按出接口的链路类型重新封装[^forward-ttl][^ipv6]。
 - **终端主机**（Host）把交给本机的数据继续解复用到传输端点和应用。透明代理、NAT、防火墙等中间功能可能检查更高层；这里描述的是普通交换与路由的基本职责。
 
-因此，一次跨网通信中存在两条边界截然不同的生命周期：
+因此，**链路层封装只服务于当前一跳**（hop-by-hop），每次路由转发都要按出接口重新封装。普通 IP 转发则保留端到端（end-to-end）的源与目的 IP 和传输层端口，但并不保留整个 IP 头。另有**网络地址转换**（Network Address Translation，NAT）按配置转换地址，或**应用代理**（Proxy）在应用层或传输层终结连接，再向目标建立一条新的连接。
 
-1. **链路层帧头是逐跳重写的**（hop-by-hop）：同一份 IP 数据报从你的电脑到家用路由器、再到运营商接入设备，每经过一次三层路由转发，外层的源/目的 MAC 地址都会被替换成当前这段链路的收发双方。
-2. **网络层 IP 与传输层端口在常规直连中是端到端保持的**（end-to-end）：直到遇到**网络地址转换**（Network Address Translation，NAT）设备或**应用代理**（Proxy）。NAT 按配置转换地址，而代理服务器在应用层或传输层终结客户端连接，再以自己的网络身份向目标发起一条新连接——这也是第三篇与第七篇要重点拆解的区别。
+拿[第三篇的全以太网示例](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)作对照：假设只把 R1 与 R2 之间换成一条**点对点协议**（Point-to-Point Protocol，PPP）链路，仍无 NAT、代理或 IP 分片。A 发出初始 TTL 为 `64` 的 IPv4 包，两台路由器各递减 `1`：
 
-先看普通转发的具体字段对照，见[第三篇同一个 IP 包经过三段以太网链路](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：源 / 目的 MAC 分别随接口改变，源 / 目的 IP 保留，TTL 则逐跳递减。这张图把“保持地址”与“保持整个包头”分开。
+| 路段 | 外层封装 | IPv4 TTL |
+| --- | --- | --- |
+| A → R1 | 以太网，源 MAC 为 A 的接口，目的 MAC 为 R1 的入口 | `64` |
+| R1 → R2 | PPP，`Protocol=0x0021` 表示 IPv4，没有以太网的源 / 目的 MAC | `63` |
+| R2 → B | 以太网，源 MAC 为 R2 的出口，目的 MAC 为 B 的接口 | `62` |
+
+PPP 链路的另一端就是 R2，R1 无需在这一跳通过 ARP 查询 MAC。没有 MAC 字段并不意味着没有链路封装，也不影响路由器递减 TTL。三段链路上的源 / 目的 IP 与 TCP 端口仍相同，IPv4 头部校验和则随 TTL 更新[^ppp][^forward-ttl]。
 
 家庭路由器常用的是 NAT 中的**网络地址端口转换**（Network Address Port Translation，NAPT）：除转换 IP 地址外，还维护 TCP/UDP 端口的映射，让多台内网设备共用一个公网 IP 地址[^napt]。具体的地址端口映射与回包转换，见[第三篇的 NAT 与 NAPT 示例](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)。
 
@@ -218,30 +223,43 @@ flowchart LR
 
 ### 冷启动时客户端会发哪些报文
 
-先看一次没有可用缓存或连接的访问：本机 IPv4 为 `192.168.1.10`，通过普通局域网、默认网关和家庭 NAT 访问 `https://example.com/`。浏览器需要解析地址、新建 TCP 连接并完成 TLS 1.3 握手。本例省略 ECH、显式代理和 TUN。`198.51.100.20` 是前文转发示例中的目标地址，实际实验以当次连接报告的地址为准。
+先看客户端没有可用缓存、连接或 TLS 恢复状态时访问 `https://example.com/`。本机已配置 IPv4 地址 `192.168.1.10`，递归 DNS 解析器与网站都经同一个家庭网关可达，本机尚无网关的邻居映射。这次用 UDP 查询 DNS，新建 TCP 连接，完成 TLS 1.3 完整握手后用 HTTP/1.1 交换消息。不考虑 ECH、代理或 TUN；网站地址 `198.51.100.20` 仅作示意，不是 `example.com` 的真实查询结果[^example-ip]。
 
-**请求阶段和逐层封装回答的是两个问题。** DNS、TCP、TLS 和 HTTP 说明这次访问先后要完成什么；封装说明每次发送的数据怎样上链路。拿到网站地址前，主机就可能已经把 DNS 查询封装为 UDP 数据报、IP 包和链路帧。随后 TCP 的 SYN 也会独立封装成 IP 包和链路帧，里面没有要等到 TLS 建立后才发送的 HTTP 请求。
+**请求阶段和逐层封装回答不同的问题。** 下图按协议端点画交换顺序；要看每类数据如何上链路，可对照前面的[封装路径](#同一条链路上的不同封装路径)。DNS 查询已作为自己的 UDP 数据报发送，之后 TCP 才独立发送 SYN；HTTP 请求还要等 TLS 握手完成。
 
-假设客户端使用传统 UDP DNS，解析器和网站都经同一个 IPv4 默认网关可达，而且本机没有网关的邻居缓存。此时可以按下表对照客户端链路上的一次冷启动；其中每行代表一类交换。
+```mermaid title="从查询地址到收到 HTTPS 响应" description="只有 ARP 直接与网关交换；DNS、TCP、TLS 和 HTTP 的箭头连的是逻辑端点，网关转发流量。虚线表示受 TLS 保护的消息。省略 DNS 上游查询、握手后的 TCP 确认、重传与连接关闭。箭头表示先后，不表示一箭一包或固定耗时。"
+sequenceDiagram
+ participant C as 客户端
+ participant G as 默认网关
+ participant D as 递归解析器
+ participant S as 网站
+ C->>G: 广播 ARP：查询网关的 MAC
+ G->>C: ARP 应答：网关的 MAC
+ Note over G: 转发并做 NAPT<br/>不是 DNS 或 HTTPS 对端
+ C->>D: DNS 查询：example.com 的 A 记录
+ D->>C: DNS 应答：IPv4 地址
+ C->>S: TCP SYN
+ S->>C: TCP SYN-ACK
+ C->>S: TCP ACK
+ C->>S: TLS ClientHello
+ S->>C: TLS ServerHello
+ S-->>C: 证书、服务端 Finished 等
+ C-->>S: 客户端 Finished
+ C-->>S: HTTP 请求
+ S-->>C: HTTP 响应
+```
 
-| 先后 | 发什么 | 客户端链路上的承载 |
-| --- | --- | --- |
-| 1 | 查询并取得默认网关的 MAC 地址 | ARP → 以太网 |
-| 2 | 查询网站地址并取得 DNS 应答 | DNS → UDP → IPv4 → 以太网 |
-| 3 | 交换 SYN、SYN-ACK、ACK | TCP → IPv4 → 以太网 |
-| 4 | 交换 ClientHello 等 TLS 握手消息 | TLS → TCP → IPv4 → 以太网 |
-| 5 | 发出 HTTP 请求并取得响应 | HTTP → TLS → TCP → IPv4 → 以太网 |
-| 6 | 之后按需结束连接，例如用 FIN 和 ACK | TCP → IPv4 → 以太网 |
+本例中，[客户端用 ARP 解析选出的本地下一跳](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp)。发往网站的包以网站地址为目的 IP，本地以太网帧却以网关接口的 MAC 为目的 MAC。收到 HTTP 响应后不一定要立即关闭 TCP；连接能否继续使用见[状态复用](#状态复用缓存与已有连接会跳过哪些阶段)。
 
 #### DNS 与 TCP：取得地址并建立连接
 
-1. **DNS**：浏览器从 URL 取得方案和主机名；`https` 未显式指定端口时默认使用 `443`[^7]。没有可用解析结果时，由系统解析服务或应用内置解析器查询目标地址，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/)。
+1. **DNS**：浏览器从 URL 取得方案和主机名；`https` 未显式指定端口时默认使用 `443`[^7]。本例由客户端向递归解析器查询 IPv4 地址；解析器可以从缓存回答，也可以继续向上游查询[^dns-resolver]。这两种路径见[第五篇的递归与迭代](/posts/networking/dns-resolution-caching-encrypted-queries/#递归与迭代一次查询如何穿越层级)。
 2. **TCP**：浏览器按目标 IP 和端口建立连接。本机按路由和邻居映射把报文送给网关，家庭路由器在本例改写出站源地址与端口。具体报文和序号见[第四篇的三次握手](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)[^2]。
 
 #### TLS 与 HTTP：建立加密信道并交换消息
 
 3. **TLS**：浏览器在 TCP 字节流上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。证书验证与加密起点见[第六篇的 TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
-4. **HTTP**：浏览器将 HTTP/1.1 请求或 HTTP/2 帧交给 TLS 记录层加密，经 TCP 分段并逐层封装。TLS 终止端收齐、解密后解析请求，再经回程送回响应。回程未必与去程相同。
+4. **HTTP**：浏览器把 HTTP/1.1 请求交给 TLS 记录层保护，再由 TCP 分段并逐层封装。若协商的是 HTTP/2，交给 TLS 的则是 HTTP/2 帧。TLS 终止端解密并解析请求，再送回响应；回程路径未必与去程相同。
 
 握手里的 `ClientHello` 和之后的 HTTP 应用数据都经过 TLS 记录层。同一条 TLS 记录可以分散在多个 TCP 段中，抓包时应按字节流重组来判断阶段。分段示例见[两套独立的边界](#tls-记录与-tcp-报文段两套独立的边界)。
 
@@ -274,7 +292,7 @@ flowchart TB
  dns --> connect --> send
 ```
 
-本篇逐跳示例采用 IPv4 以太网。IPv6 在以太网上仍可使用源和目的 MAC，下一跳地址通过 ICMPv6 邻居发现解析。点对点和 TUN 等接口的交付方式另计，详见[第二篇的邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)。
+本例的客户端网段采用 IPv4 以太网。若在以太网上发送 IPv6，帧仍有源与目的 MAC，但解析下一跳用的是[第二篇的 ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)，不是 ARP。
 
 ## 观察一次请求：应用日志与接口抓包
 
@@ -354,10 +372,10 @@ fi
 
 - 互联网四层模型（应用、传输、网络、链路）按职责隔离变化；实际软件实现不必机械对应四段独立代码，但每一层的头部边界必须清晰。
 - 每次发送从产生报文的协议开始，沿其承载路径逐层封装。TCP 能独立发控制段，IPv4 能直接承载 ICMP，以太网能直接承载 ARP。
-- 链路层 MAC 帧头逐跳重写，IP 与端口在常规直连中端到端保持；NAT 按配置改写包头中的地址或端口，而代理则在应用或传输边界终结并重建连接。
+- 路由器为每一跳重新做链路封装；以太网有源与目的 MAC，点对点 PPP 没有这对字段。普通转发递减 TTL，但不改写 IP 地址和端口；NAT 按配置转换地址或端口，代理则终结并重建连接。
 - Socket 是操作系统向应用暴露的编程接口而非网络协议；应用写入 Socket 成功只代表本地发送路径接受了相应字节。
 
-下一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)将深入最底层与网络层的交界：主机需要哪些网络配置？拿到目标 IP 后，又该把帧交给同链路上的目标还是默认网关？
+下一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)把镜头移到客户端的第一跳：主机怎样取得网络配置、选中同链路的目标或网关，并找到它的 MAC？网关收到包后的选路与地址转换，则由[第三篇](/posts/networking/routing-forwarding-nat-virtual-interfaces/)展开。
 
 ## 延伸阅读
 
@@ -367,9 +385,17 @@ fi
 
 [^1]: 〔RFC〕[RFC 1122: Requirements for Internet Hosts — Communication Layers](https://www.rfc-editor.org/rfc/rfc1122.html)——定义互联网主机的应用层、传输层、网络层与链路层四层通信模型
 
-[^2]: 〔RFC〕[RFC 9293: Transmission Control Protocol (TCP), §2.2 & §3.3](https://www.rfc-editor.org/info/rfc9293/)——区分应用字节流、TCP 报文段与承载它的 IP 数据报，并定义内核维护连接的传输控制块（TCB）与状态机
+[^2]: 〔RFC〕[RFC 9293: Transmission Control Protocol (TCP)](https://www.rfc-editor.org/rfc/rfc9293.html)——区分应用字节流、TCP 报文段与承载它的 IP 数据报；§3.3 描述传输控制块与状态机，§3.5 给出基本三次握手。
 
 [^3]: 〔RFC〕[RFC 791: Internet Protocol](https://www.rfc-editor.org/info/rfc791/)——定义 IPv4 数据报格式、Protocol 协议号复用字段、TTL 与跨网络转发机制
+
+[^forward-ttl]: 〔RFC〕[RFC 1812 §5.3.1](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.3.1)规定转发时 TTL 至少减一；[§4.2.2.5](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.2.2.5)说明首部校验和更新，[§5.2.1.2](https://www.rfc-editor.org/rfc/rfc1812.html#section-5.2.1.2)说明单播包按出接口进行链路层封装。
+
+[^ppp]: 〔RFC〕[RFC 1661 §1–2](https://www.rfc-editor.org/rfc/rfc1661.html#section-1)——PPP 在两个直接相连的对端之间传输，封装不含以太网的源 / 目的 MAC；[RFC 1332 §2.1](https://www.rfc-editor.org/rfc/rfc1332.html#section-2.1)指定 IPv4 数据报对应的 PPP 协议号 `0x0021`。
+
+[^dns-resolver]: 〔RFC〕[RFC 1034 §4.3.1、§4.3.2、§5.3.1](https://www.rfc-editor.org/rfc/rfc1034.html#section-5.3.1)——客户端可将递归查询交给配置的解析服务；解析服务可使用缓存或继续查询。
+
+[^example-ip]: 〔RFC〕[RFC 5737 §3](https://www.rfc-editor.org/rfc/rfc5737.html#section-3)——`198.51.100.0/24` 是文档示例网段。
 
 [^4]: 〔编号表〕[IANA: IEEE 802 Numbers — Ethertypes](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——列出 IPv4、ARP 与 IPv6 的 EtherType。
 

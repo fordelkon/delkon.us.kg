@@ -1,6 +1,6 @@
 ---
-title: "计算机网络（八）：网络性能与分层排障"
-description: "区分带宽、吞吐量、时延、抖动与丢包，用 BDP 和 TCP 窗口解释单流上限，分析 MTU 与 PMTUD 黑洞，并通过 curl 计时和控制变量实验定位请求阶段。"
+title: "计算机网络（八）：网络诊断、性能指标与分层排障"
+description: "按 DNS、TCP 或 QUIC、TLS 与 HTTP 的实际阶段选取观测点，区分常用性能指标，解释 TCP 单流吞吐与 PMTUD 黑洞，并用 curl 计时和 Wireshark 回环实验对照证据。"
 publishDate: "24 Nov 2026"
 tags: ["networking"]
 ---
@@ -13,32 +13,39 @@ tags: ["networking"]
 
 ### 按请求阶段选择观测点
 
-排查网页访问，可以沿接口与选路、DNS、传输、TLS、HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始；HTTP/3 的传输分支检查 QUIC。
+沿接口与选路、DNS、传输、服务身份与 HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始。先区分基于 TCP 的 HTTP 与[在 UDP 上运行 QUIC 的 HTTP/3](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)，再选对应的握手证据[^tcp-handshake][^quic-setup]。
 
-```mermaid title="按证据选择下一项网络诊断" description="每个判断都针对本次请求和实际地址族，否分支是调查范围而不是根因结论。HTTP/3 使用 QUIC，不经过 TCP 建连；TUN 代理可能终结本地 TCP，所以传输成功仍需核对出站日志。已知状态可跳过相应步骤。"
+```mermaid title="按证据选择下一项网络诊断" description="判断只针对本次请求和实际地址族、端点、接口；否分支表示要补查的证据，不是根因。HTTP/3 的 TLS 身份验证属于 QUIC 握手，不是建连后再跑一次 TLS。若有代理，还须区分入站和出站；复用连接时不必看到新的握手。"
 flowchart TB
  start["记录 URL、地址族、时间<br/>显式代理与 TUN 状态"] --> local{"本次接口与选路符合预期？"}
- local -->|否或不明| route["查地址、下一跳、邻居<br/>及策略路由、TUN 排除项"]
+ local -->|否或不明| route["查地址、下一跳、邻居<br/>及策略路由"]
  local -->|是| dns{"需要解析时得到可用结果？"}
- dns -->|否或不明| resolver["对照系统、独立 DNS 查询<br/>状态码、缓存与实际解析路径"]
- dns -->|是或已知地址| transport{"实际传输是否建立？"}
- transport -->|否或不明| connect["TCP：SYN、RST、超时<br/>QUIC：UDP 路径、Initial 与响应"]
- transport -->|是| tls{"目标 TLS 身份验证完成？"}
- tls -->|否或不明| secure["核对证书、服务名与握手<br/>并排查重传、MTU 与代理出站"]
- tls -->|是或明文 HTTP| http{"收到预期 HTTP 响应？"}
+ dns -->|否或不明| resolver["对照系统与独立 DNS 查询<br/>核对缓存与实际解析路径"]
+ dns -->|是或已知地址| transport{"本次尝试哪种传输？"}
+ transport -->|TCP| tcp{"本段三次握手完成？"}
+ tcp -->|否或不明| tcpTrace["对照 SYN、SYN-ACK、ACK<br/>查是否有 RST 或只见重试"]
+ transport -->|QUIC| quic{"端点报告的 QUIC 握手结果？"}
+ quic -->|其他失败或不明| quicTrace["查 Initial 与对应的 UDP 回包<br/>对照端点握手或失败日志"]
+ tcp -->|是，HTTPS| tls{"目标 TLS 身份验证通过？"}
+ tls -->|否或不明| secure["核对证书、服务名与握手<br/>检查代理出站"]
+ quic -->|身份验证失败| secure
+ tls -->|是| http{"收到预期 HTTP 响应？"}
+ quic -->|握手与身份验证都成功| http
+ tcp -->|是，明文 HTTP| http
  http -->|否| service["核对状态码、重定向、请求<br/>服务端及代理日志"]
- http -->|是但慢| performance["重复测量阶段耗时、吞吐<br/>窗口、重传与应用供数"]
+ http -->|是但慢| performance["重复测量阶段耗时、吞吐<br/>再查重传、流控与应用供数"]
 ```
 
-例如，DNS 返回 Fake-IP 时，后续连接需要本地映射；本地代理已经接受 TCP 连接时，还要查它是否连上远端。这些路径差异会直接影响后面的计时解释。把“打不开”改写成具体问题，如“连接哪个端点时超时”，再从表中选工具。
+先把“打不开”改写成可验证的问题，例如“哪个端点在哪个接口上发了握手，哪里没有看到对应回应？” 如果 DNS 返回的是 [Fake-IP](/posts/networking/proxies-tunnels-transparent-interception/#fake-ip在-dns-阶段建立映射)，先核对应用是否实际连向这个地址，再用选路和代理日志关联到出站。应用侧握手成功不等于出站成功。
 
 | 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
 | --- | --- | --- | --- |
 | 本地配置与邻居 | 接口地址、前缀与下一跳是否符合预期？ | `ifconfig` / `ip addr`，`arp -a`、`ndp -a` / `ip neigh` | 邻居表不是在线设备清单；见[第二篇](/posts/networking/ip-addressing-subnet-lan-delivery/) |
 | 选路与接管 | 对实际目标地址，选中了哪个接口和下一跳？ | `route -n get <IP>` / `ip route get <IP>` | 只观察本机决策；更具体路由、策略和 IPv6 需分别检查，见[第三篇](/posts/networking/routing-forwarding-nat-virtual-interfaces/) |
 | 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | `dig @服务器` 仍可能被接管；错误类型、Fake-IP 与真实公网地址应分开，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/) |
-| 传输与队列 | 是连接拒绝、超时，还是读写迟迟不能推进？ | `nc -zv -w 3 <IP> <Port>`，`netstat -anv` / `ss -tnap` | `rxbytes`/`txbytes` 不能当作队列积压；`nc` 成功只证明所连端点接受连接，见[第四篇](/posts/networking/transport-tcp-udp-socket-quic/) |
-| TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`、`curl -v`、代理连接日志 | SNI 与主机名校验不同；目标 TLS 与代理传输不同，见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)和[第七篇](/posts/networking/proxies-tunnels-transparent-interception/) |
+| TCP | 本段建连失败，还是建连后读写停顿？ | `nc -zv -w 3 <IP> <Port>`、抓包、端点 TCP 状态 | 相关 RST 表示在观察点收到复位，要核实来源；只见 SYN 重试则不能区分去程、回程和对端未应答。已建连只说明本段传输可用[^tcp-handshake] |
+| QUIC | 有本次尝试对应的 UDP 回包吗？端点的握手结果是什么？ | 抓包看 QUIC Initial 和回包；对照客户端或服务端日志 | 对应的 Initial 或 Retry 回包支持该次探测有往返；仅见回包不代表身份验证通过或已经协商 HTTP/3[^quic-setup] |
+| TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`（这里仅用于 TCP 上的 TLS）、`curl -v`、代理连接日志 | [SNI 与服务名校验不同](/posts/networking/http-evolution-tls-handshake-https/#证书链可信还要检查名字)；[目标 TLS 与代理传输不同](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls) |
 
 ### 按症状设计下一次对照
 
@@ -47,10 +54,12 @@ flowchart TB
 | 症状 | 观测点与工具 | 能支持的判断 | 下一次对照 |
 | --- | --- | --- | --- |
 | 同一名字在两个程序结果不同 | 实际解析器、系统缓存、应用 DNS 设置，辅以 `dig` | 解析结果或路径不同 | 固定同一名称、类型和解析服务再做对照 |
-| TCP 超时或立即失败 | 实际出口与接收端，用 `tcpdump` 或 Wireshark 看 SYN、回应及 RST | 已返回 RST 时响应路径至少曾可用 | 确认 RST 来源；对照同一目标的地址族、端口和代理视角 |
-| HTTP/3 失败而 HTTP/2 成功 | QUIC Initial、UDP 响应与端点日志 | 该样本中 TCP 路径可用，QUIC 仍待定位 | 在同一支持两种协议的服务上固定 HTTP 版本与地址 |
-| 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与包长 | 包长依赖只是 PMTU 线索 | 降低受控测试的包长，并检查反馈是否抵达发送端 |
+| TCP 超时或立即失败 | 实际出口与接收端，用 `tcpdump` 或 Wireshark 看 SYN、回应及 RST | 两端对照可缩小握手停在哪一侧的范围 | 匹配同一条 TCP 连接的端点与时间；经过代理时分开核对两段 |
+| HTTP/3 失败而 HTTP/2 成功 | 实际协商版本、QUIC Initial 与端点日志 | 仅说明样本中的 TCP 请求可用，不能据此判定 UDP 被阻断 | 在已知同时支持两种协议的同一服务上固定地址、端口和代理条件，分别比较协议结果 |
+| 小传输成功，大传输停顿 | 两端捕获、ICMP 差错与实际 IP 包长 | 包长依赖只是 PMTU 线索 | 核对同一流在不同包长时的送达情况，以及反馈是否抵达发送端 |
 | 建连与握手快，首字节或正文慢 | curl 时间戳、应用日志、RTT 与 TCP 窗口 | 延迟落在可定位的阶段 | 固定连接配置，只改变应用等待或传输大小 |
+
+应用回退到 HTTP/2 后拿到 `200`，不等于 HTTP/3 成功。按第六篇的 [HTTP 协商观察](/posts/networking/http-evolution-tls-handshake-https/#实验二用-curl-观察-http-协商与响应)核对构建功能和实际版本。用支持 HTTP/3 的 curl 直接测试目标时，`--http3` 允许回退，`--http3-only` 不回退；curl 的 HTTP/3 不支持经显式代理发起。先排除工具能力限制，再用结果判断传输路径[^quic-setup][^curl-http3]。
 
 ## 性能指标与单连接吞吐
 
@@ -72,9 +81,9 @@ flowchart TB
 
 如果慢在正文传输，而且同一路径上的多连接测速明显快于单连接下载，可以先用窗口模型估算单流的吞吐上限。
 
-**带宽时延积**（Bandwidth-Delay Product，BDP）是瓶颈带宽与 RTT 的乘积。带宽用 bit/s、RTT 用秒时，乘积是 bit；除以 8 才得到 byte。它可用于估算持续利用路径容量需要多少在途数据[^throughput]。
+**带宽时延积**（Bandwidth-Delay Product，BDP）是瓶颈带宽与 RTT 的乘积。带宽用 bit/s、RTT 用秒时，乘积是 bit；除以 8 才得到 byte。用同一路径的瓶颈带宽估计和没有明显排队时的基准 RTT，可以估算填满路径大致需要多少在途数据。BDP 是路径容量的估算，不是某条连接的窗口值[^throughput]。
 
-第四篇区分了[流量控制与拥塞控制](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的流量控制与拥塞控制)。在简化的稳定传输模型中，未确认数据量受拥塞窗口 `cwnd` 和接收窗口 `rwnd` 共同约束。若将二者中的较小值记为 $W$（byte），路径瓶颈带宽记为 $B$（bit/s），则有估算上界：
+第四篇区分了[流量控制与拥塞控制](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的流量控制与拥塞控制)。在简化的稳定传输模型中，发送方的拥塞窗口 `cwnd` 与接收方通告的接收窗口 `rwnd` 共同限制未确认数据量。若将二者中的较小值记为 $W$（byte），路径瓶颈带宽记为 $B$（bit/s），RTT 取正在测量的同一连接的往返时延，则有估算上界[^tcp-windows]：
 
 $$
 \text{TCP 载荷吞吐率} \lesssim \min\left(B, \frac{8W}{\text{RTT}}\right)
@@ -86,9 +95,15 @@ $$
 \frac{65,536 \times 8}{0.15} \approx 3.5\text{ Mbit/s}
 $$
 
-未使用窗口缩放时，TCP 首部的 16 位窗口字段最多表示 65,535 byte，上式用 64 KiB 作近似；窗口缩放选项允许双方在建连时协商更大的接收窗口表示范围[^window]。
+若同一路径的瓶颈带宽为 100 Mbit/s，基准 RTT 也是 150 ms，路径 BDP 约为 1.875 MB。这个量比 64 KiB 的连接窗口大得多；3.5 Mbit/s 是示例中的窗口上限，不是路径带宽。
 
-如果已确认瓶颈是 `rwnd`，就应检查窗口缩放、接收缓冲与应用消费速度。更换拥塞控制算法不能越过接收端通告的窗口限制；只有证据指向拥塞控制和路径反馈时，才进一步评估算法选择。并发连接可能提高总吞吐，也可能加剧竞争，不能代替查明单流约束。
+验证时，按同一条 TCP 连接、同一发送方向及同一时间段取数：
+
+- `rwnd` 看对端通告的 TCP 窗口，需结合握手中协商的缩放因子解释。未启用窗口缩放时，16 位字段最多表示 65,535 byte；上例用 64 KiB 作近似[^window]。
+- `cwnd` 是发送端状态，不在 TCP 首部里。用发送端的 TCP 统计取数，和 `rwnd` 都换算成字节后，再与实际未确认在途量比较。套接字队列长度不能当作 `cwnd` 或在途量，见[第四篇的队列观测](/posts/networking/transport-tcp-udp-socket-quic/#实验一分清队列与累计统计)[^tcp-windows]。
+- RTT 用该连接的传输统计或相应的报文时序，记录是空闲基线还是负载下的样本。ping 的 RTT 可用作对照，不能直接替代这条连接的 RTT；遇到[代理拆成两段 TCP](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls)时更不能把两侧的数据混算。
+
+在应用持续供数时，若未确认数据长期贴近较小的窗口，才有证据追查相应限制。若瓶颈是 `rwnd`，检查窗口缩放、接收缓冲和应用消费速度；更换拥塞控制算法不能越过对端通告。若在途数据远少于两个窗口，先检查应用供数或发送节奏，不要仅凭 BDP 就判定该增大窗口。
 
 ## MTU、MSS 与 PMTUD 黑洞
 
@@ -118,7 +133,7 @@ PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经
 
 ### IPv4 与 IPv6 的路径 MTU 反馈
 
-IP 分片在 NAT、防火墙等环境中有脆弱性，协议设计常尽量控制包长[^fragmentation]。经典**路径 MTU 发现**（Path MTU Discovery，PMTUD）在两个地址族中使用不同反馈：
+IP 分片在 NAT、防火墙等环境中有脆弱性，协议设计常尽量控制包长[^fragmentation]。经典**路径 MTU 发现**（Path MTU Discovery，PMTUD）依赖第三篇介绍的 [ICMP 差错反馈](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由器怎样报告差错)，在两个地址族中使用不同报文：
 
 | 场景 | 路由器遇到超大包时 | 发送端依据 |
 | --- | --- | --- |
@@ -148,11 +163,11 @@ sequenceDiagram
 
 ### 对照包长、反馈与重传
 
-先确认受影响的是 TCP 还是 UDP/QUIC，并记录实际出接口、接口 MTU，以及是否存在完整 IP 封装。对自己管理的端点，可比较不同大小的传输，并在许可的捕获位置检查超大包、ICMP 错误和重传是否相关。单独增大 ping 载荷不等于测得业务连接的 PMTU：探测路径、协议待遇、DF 设置及 IP 头开销都需要核对。
+先确认受影响的是 TCP 还是 UDP/QUIC，记录实际出接口、接口 MTU 与封装。对自己管理的端点，可在许可的捕获位置对照同一流，先看哪种 IP 包长发出却没到，再看 ICMP 引用的原包是否就是该流、报告了什么 MTU。若反馈抵达发送端，还要观察后续包长是否随之调整。只有发送端的捕获时，没看到反馈不能证明路由器发过反馈并被过滤[^pmtu4][^pmtu6]。
 
-若可控制隧道两端，可临时降低测试接口或连接的包长做对照，记录变化并恢复配置。**MSS 钳制**（MSS Clamping）通过调整 TCP SYN 中通告的 MSS 影响对端发包，应根据已知路径预算设置，并考虑方向；它不能作为 UDP/QUIC 的通用修复。
+做只读对照时，比较同一地址族、同一路径下不同的实际 IP 包长，不修改网络配置。应用正文变大不等于单个 IP 包变大；单独增大 ping 载荷也不能测得业务连接的 PMTU，因为协议待遇、DF 设置和头部预算可能不同。**MSS 钳制**（MSS Clamping）改变的是 TCP SYN 中通告的 MSS，不是路径 MTU，也不适用于 UDP/QUIC[^mss-clamp]。
 
-**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）用不同大小的包探测路径，根据送达确认调整包长，不依赖 ICMP 反馈。RFC 4821 描述了适用于 TCP 等协议的框架；RFC 8899 更新了其中适用于数据报的机制，即 DPLPMTUD。是否实现、启用以及怎样确认送达，仍需检查具体协议与软件[^plpmtu][^dplpmtu]。
+**分组层路径 MTU 发现**（Packetization Layer Path MTU Discovery，PLPMTUD）不以收到 ICMP 为前提，而是用特定大小的探测包和可关联的送达确认来验证预算。一个探测得到确认，说明那个尺寸在该次探测中可通过；一次探测丢失不能区分包长超限和普通丢包。RFC 4821 描述 TCP 等协议的探测框架；RFC 8899 更新了适用于数据报的机制，即 DPLPMTUD。实现可以把有效的 ICMP 反馈作为进一步探测的线索，但应区分“路由器报告了尺寸”和“端点证实该尺寸能送达”[^plpmtu][^dplpmtu]。
 
 ## 用 curl 记录请求耗时
 
@@ -337,13 +352,23 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 - [Everything curl: Write out](https://everything.curl.dev/usingcurl/verbose/writeout.html)——继续查阅 write-out 的版本差异与输出方式
 - [Wireshark User's Guide](https://www.wireshark.org/docs/wsug_html_chunked/)——对照捕获位置、显示过滤和 TCP 分析字段；工具标记仍需结合协议上下文解释
 
+[^tcp-handshake]: 〔RFC〕[RFC 9293 §3.5](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.5)与[§3.5.2](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.5.2)——TCP 三次握手和连接复位行为。
+
+[^quic-setup]: 〔RFC〕[RFC 9000 §7](https://www.rfc-editor.org/rfc/rfc9000.html#section-7)与[§8.1.2](https://www.rfc-editor.org/rfc/rfc9000.html#section-8.1.2)说明 QUIC 建连与 Retry 地址验证；[RFC 9001 §4.1](https://www.rfc-editor.org/rfc/rfc9001.html#section-4.1)区分握手完成与确认；[RFC 9114 §3.1–§3.2](https://www.rfc-editor.org/rfc/rfc9114.html#section-3.1)定义 HTTP/3 协商与改用基于 TCP 的 HTTP 的情形。
+
+[^curl-http3]: 〔工具文档〕[curl 官方手册：`--http3`](https://curl.se/docs/manpage.html#--http3)和[`--http3-only`](https://curl.se/docs/manpage.html#--http3-only)——允许回退与不尝试其他 HTTP 版本的区别。
+
 [^bufferbloat]: 〔研究资料〕[ACM Queue: Bufferbloat: Dark Buffers in the Internet](https://queue.acm.org/detail.cfm?id=2071893)——瓶颈链路过大缓冲区导致排队延迟激增与抖动恶化的成因分析
 
-[^throughput]: 〔RFC〕[RFC 6349 §3.3.1](https://www.rfc-editor.org/rfc/rfc6349.html#section-3.3.1)给出 BDP 与 TCP 接收窗口限制吞吐的计算示例。
+[^throughput]: 〔RFC〕[RFC 6349 §3.2](https://www.rfc-editor.org/rfc/rfc6349.html#section-3.2)说明基准 RTT 和瓶颈带宽的估计；[§3.3.1](https://www.rfc-editor.org/rfc/rfc6349.html#section-3.3.1)给出 BDP 与 TCP 接收窗口限制吞吐的计算示例。
+
+[^tcp-windows]: 〔RFC〕[RFC 5681 §2–§3.1](https://www.rfc-editor.org/rfc/rfc5681.html#section-2)——发送端拥塞窗口、接收端通告窗口和未确认在途量的定义，以及两个窗口如何共同约束发送。
 
 [^window]: 〔RFC〕[RFC 7323 §2: TCP Window Scale Option](https://www.rfc-editor.org/rfc/rfc7323.html#section-2)——窗口字段的 16 位限制与建连时的窗口缩放协商
 
 [^mss]: 〔RFC〕[RFC 9293 §3.7.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.7.1)及 [RFC 6691 §2](https://www.rfc-editor.org/rfc/rfc6691.html#section-2)——MSS 的含义、基本头部扣除与选项对实际发送长度的影响
+
+[^mss-clamp]: 〔RFC〕[RFC 4459 §3.2](https://www.rfc-editor.org/rfc/rfc4459.html#section-3.2)——在隧道端点更改 TCP 通告 MSS 的作用及仅适用于 TCP 的限制。
 
 [^fragmentation]: 〔RFC〕[RFC 8900: IP Fragmentation Considered Fragile](https://www.rfc-editor.org/rfc/rfc8900.html)——分片在中间设备等环境中的可靠性与运维问题
 
@@ -353,7 +378,7 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 
 [^plpmtu]: 〔RFC〕[RFC 4821 §2](https://www.rfc-editor.org/rfc/rfc4821.html#section-2)概述分组层探测与 TCP 等协议的适用条件；[§7.6](https://www.rfc-editor.org/rfc/rfc4821.html#section-7.6)说明如何处理探测结果。
 
-[^dplpmtu]: 〔RFC〕[RFC 8899 §1.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-1.2)说明对 RFC 4821 数据报机制的更新；[§4.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-4.2)定义探测包的送达确认。
+[^dplpmtu]: 〔RFC〕[RFC 8899 §1.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-1.2)说明对 RFC 4821 数据报机制的更新；[§4.2](https://www.rfc-editor.org/rfc/rfc8899.html#section-4.2)定义探测送达的确认，[§4.6](https://www.rfc-editor.org/rfc/rfc8899.html#section-4.6)说明如何处理 ICMP 反馈，[§5.3.1](https://www.rfc-editor.org/rfc/rfc8899.html#section-5.3.1)描述探测超时与重试。
 
 [^curl]: 〔工具文档〕[curl 官方手册：write-out](https://curl.se/docs/manpage.html#-w)及 [libcurl 时间指标](https://curl.se/libcurl/c/curl_easy_getinfo.html#TIMES)——累计计时、连接端点和重定向的解释边界；`time_appconnect` 的适用阶段见 [CURLINFO_APPCONNECT_TIME](https://curl.se/libcurl/c/CURLINFO_APPCONNECT_TIME.html)。
 

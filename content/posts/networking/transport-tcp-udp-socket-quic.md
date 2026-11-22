@@ -5,7 +5,7 @@ publishDate: "21 Nov 2026"
 tags: ["networking", "rust"]
 ---
 
-上一篇[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)解释了数据包怎样抵达目标主机。网络层的 IP 提供尽力而为的交付：包可能丢失、乱序或重复；IP 地址也没有说明该由主机内哪个应用接收。
+上一篇[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)追踪了 [IP 包的逐跳交付](/posts/networking/routing-forwarding-nat-virtual-interfaces/#逐跳转发时哪些字段会变)。IP 尽力把包送到目标主机：包可能丢失、乱序或重复；目的 IP 也不说明该把载荷交给哪个应用。本篇从传输层端点接着看。
 
 本篇先比较**传输控制协议**（Transmission Control Protocol，TCP）字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。示例用 Rust 标准库演示 `TcpStream` 的分次读取、EOF 与半关闭，连接状态观察以 macOS 与 Linux 为例。
 
@@ -13,13 +13,15 @@ tags: ["networking", "rust"]
 
 传输层通过 16 位的**端口号**（Port，范围 `0–65535`）区分通信端点。同一个监听端口可以接受多条连接；在通常的 TCP/IP 讨论中，连接可用五元组 `(协议, 源 IP, 源端口, 目的 IP, 目的端口)` 区分，其中 TCP 自身使用两端地址与端口组成的四元组识别连接[^1]。
 
-| 对比维度 | TCP | UDP |
-| --- | --- | --- |
-| 服务模型 | 面向连接、可靠、有序的字节流 | 无连接、尽力而为的独立数据报 |
-| 消息边界 | 不保留应用的写入边界，读写次数不要求对应 | 保留数据报边界；普通接收调用处理一个数据报，缓冲区不足时可能截断 |
-| 头部开销 | 至少 20 字节，含选项可达 60 字节 | 固定 8 字节 |
-| 流量与拥塞控制 | 接收窗口与拥塞控制共同约束发送 | 协议本身不提供，应用或上层协议负责 |
-| 典型应用 | HTTP/1.1–2、SSH、数据库连接 | DNS 查询、实时媒体、QUIC 的底层载体 |
+TCP 和 UDP 直接由 IP 承载；[QUIC](#quic为什么在-udp-之上重建可靠传输) 使用 UDP 承载自己的包，为应用提供另一套传输服务[^1][^2][^4]。
+
+| 对比维度 | TCP | UDP | QUIC 的流服务 |
+| --- | --- | --- | --- |
+| 交付模型 | 每个方向一条可靠、有序的字节流 | 无连接、尽力而为的独立数据报 | 一条连接内复用多条可靠字节流，各流分别保证顺序 |
+| 消息边界 | 不保留应用的写入边界 | 保留数据报边界；接收缓冲区不足时可能截断 | 不保留应用的写入边界；UDP 数据报不等于应用消息 |
+| 传输头部 | 20–60 字节 | 固定 8 字节 | 在 UDP 载荷内另有 QUIC 包头，长度随包类型和字段变化 |
+| 流量与拥塞控制 | 接收窗口与拥塞控制共同约束发送 | 协议本身不提供，由应用或上层协议负责 | 流级与连接级流量控制，拥塞控制由 QUIC 实现提供 |
+| 典型应用 | HTTP/1.1–2、SSH、数据库连接 | [传统 DNS 查询](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-查询的报文与传输)、实时媒体 | HTTP/3、DNS over QUIC |
 
 UDP 的“保留边界”不表示每次都能取得完整消息。Rust `UdpSocket::recv_from` 明确说明：消息超过调用方提供的缓冲区时，超出的字节可能被丢弃；具体返回和截断指示依接口与平台而定。一次成功发送也不保证对端收到该数据报[^2][^udp-api]。
 
@@ -101,7 +103,9 @@ sequenceDiagram
  Note over A: 2 MSL 后 CLOSED
 ```
 
-图中的 `m`、`n` 是两端关闭前各自的下一个发送序号，每个 FIN 占用一个序号。若两端同时关闭，`FIN-WAIT-1` 收到尚未确认本端 FIN 的对端 FIN 时可进入 `CLOSING`，等本端 FIN 获确认再进入 `TIME-WAIT`。其他状态转换见 RFC 9293 的连接状态图[^tcp-lifecycle]。
+图中的 `m`、`n` 是两端关闭前各自的下一个发送序号，每个 FIN 占用一个序号。B 的 TCP 可以确认 A 的 FIN，无需等 B 的应用读到 EOF。此时 `FIN-WAIT-2` 表示 A 自己的 FIN 已获确认，仍等待 B 的 FIN；`CLOSE-WAIT` 表示 B 已收到 A 的 FIN，自己的写方向仍然开放。B 可以在这段时间继续写响应；等它也发出 FIN 才进入 `LAST-ACK`。下文的[半关闭程序](#运行一次半关闭发送结束后继续接收)正是先读到 EOF、再写回响应[^tcp-lifecycle]。
+
+若两端同时关闭，`FIN-WAIT-1` 收到尚未确认本端 FIN 的对端 FIN 时可进入 `CLOSING`，等本端 FIN 获确认再进入 `TIME-WAIT`。其他状态转换见 RFC 9293 的连接状态图[^tcp-lifecycle]。
 
 对已建立的连接，一端收到带复位标志（`RST`）的报文并按当前状态及序号规则接受它时，会在本地中止该连接。应用在哪次读写看到错误取决于接口与缓冲状态。`RST` 也可用于拒绝建连请求[^1]。已发出的请求仍可能在复位前被对端处理，重试需要考虑幂等性。意外断网可能没有 FIN 或 RST，需等超时或后续通信发现。
 
@@ -156,20 +160,21 @@ sequenceDiagram
 
 第一篇的[Socket 边界](/posts/networking/layered-architecture-packet-journey/#操作系统边界socket-与网络接口)说明了应用怎样把字节交给操作系统。通过普通 TCP Socket，应用读写的是内核 TCP 处理过的连接字节流。通过[第三篇的 TUN 虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)，用户态程序读写的是带 IP 头的包。下图沿一条 TCP 连接追踪发送应用与接收应用之间的字节交付。
 
-```mermaid mobile-direction="TB" title="TCP 字节从发送应用到接收应用" description="这是单向字节流的交付路径。write 成功只表示相应字节被本地发送路径接受，不证明对端已经读取或处理；一次写入与一次读取没有固定的一一对应关系。"
+```mermaid mobile-direction="TB" title="TCP 字节从发送应用到接收应用" description="实线表示单向字节流的交付路径，虚线表示反向的 TCP 累计确认。write 成功只表示本地接受了字节；接收端 TCP 不必等应用 read 才能确认。图不规定 ACK 和 read 的先后，也不表示一次写入对应一次读取。"
 flowchart LR
  subgraph local[发送端]
   direction TB
-  sender["发送应用"] -->|write / send| send_buffer["本机发送缓冲"]
+  sender["发送应用"] -->|write / send| send_buffer["本端 TCP<br/>发送缓冲"]
  end
  subgraph remote[接收端]
   direction TB
-  receive_buffer["对端接收缓冲"] -->|read / recv| receiver["接收应用"]
+  receive_buffer["对端 TCP<br/>接收缓冲"] -->|read / recv| receiver["接收应用"]
  end
- send_buffer -->|TCP/IP 与网络| receive_buffer
+ send_buffer -->|TCP 数据经 IP 交付| receive_buffer
+ receive_buffer -.->|TCP 累计 ACK| send_buffer
 ```
 
-`write`/`send` 成功返回 `n`，只说明本次调用接受了前 `n` 个字节。在普通缓冲式 TCP 实现中，这通常对应本机内核发送缓冲区的接纳；它既不证明网卡已经发出，也不证明对端内核已收到这些字节，更不证明对端应用层已完成业务处理[^send-man]。这个区别与并发系列中[消息入队和处理完成](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)相同：业务确认需要应用协议表达。
+`write`/`send` 成功返回 `n`，只说明本次调用接受了前 `n` 个字节；在普通缓冲式 TCP 实现中，这通常对应本机发送缓冲区的接纳，并不证明这些字节已经发出[^send-man]。[累计 ACK](#tcp-的序号确认与重传)确认的是对端 TCP 已连续收到相应的字节，不说明对端应用是否调用了 `read`。就算 `read` 已经把字节交给应用，也无法据此判断请求是否已处理或已提交。这个区别与并发系列中[消息入队和处理完成](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)相同：如果发送方需要知道处理结果，要等应用协议定义的响应。
 
 ### 短读、短写、EOF 与 WouldBlock
 
@@ -263,9 +268,9 @@ Tokio 的 `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` 则是异步�
 
 ## QUIC：为什么在 UDP 之上重建可靠传输
 
-**QUIC**（历史上源自 Quick UDP Internet Connections，IETF 标准 RFC 9000 将其确立为正式协议名称而非首字母缩写）以 UDP 为载体提供多路复用的安全传输。它说明“UDP 本身不保证可靠性”并不妨碍上层协议自行提供确认、重传与拥塞控制[^4]。
+**QUIC** 在 UDP 之上提供多路复用的安全传输。QUIC v1 的三份规范分工不同：RFC 9000 定义传输协议本身，包括连接、流和报文格式；RFC 9001 定义如何使用 TLS 1.3 建立密钥并保护 QUIC 包；RFC 9002 描述如何检测丢失、计算探测超时与控制拥塞[^4][^quic-tls][^quic-recovery]。
 
-UDP 提供端口和数据报承载，使 QUIC 可以在现有 UDP 路径上部署新的传输逻辑，常见实现可随用户态库迭代。QUIC 自己维护包号、ACK、丢失检测、流偏移、流量控制和拥塞控制；丢失的流数据可放入新包号的包重发，不能理解成简单给 UDP 载荷加密。若直接叠在 TCP 上，仍会继承 TCP 整条字节流的按序交付约束，无法仅靠上层分流消除这个等待[^4][^quic-recovery]。
+UDP 提供端口和数据报承载，一个 UDP 数据报可以包含一个或多个 QUIC 包。QUIC 按包号确认收到了哪些包，按流 ID 和偏移量重组应用字节。丢失的流数据可放到新包号的包里重发，原来的包号不会在同一包号空间复用。若直接把多流复用叠在 TCP 上，各流仍受同一条 TCP 字节流的按序交付约束，无法仅靠上层分流消除这个等待[^4][^quic-recovery]。
 
 ### 按流交付与队头阻塞
 
@@ -283,7 +288,7 @@ HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后
 
 普通 TCP 连接依赖固定的地址和端口组合。QUIC 使用**连接标识**（Connection ID，CID）识别连接，在路径发生变化时可在满足条件的情况下保留原连接[^quic-migration]。
 
-以客户端从 Wi-Fi 切到蜂窝网络为例：主动迁移要等握手确认，并受服务端通告的迁移参数限制。服务端发现之前未验证的客户端地址时，需要验证新路径；CID 能识别原连接，却不能证明新路径可达。为避免跨路径关联，从不同本地地址发包不能复用同一个 CID。NAT 重绑定则可能在客户端没有主动换地址、也未换 CID 的情况下改变服务端看到的源地址或端口，仍需按规则验证未验证的地址。QUIC v1 通常由客户端发起迁移；服务端通过 `preferred_address` 通告备用地址是另有规则的情形[^quic-migration]。
+以客户端从 Wi-Fi 切到蜂窝网络为例：主动迁移要等握手确认，并受服务端通告的迁移参数限制。服务端发现之前未验证的客户端地址时，需要验证新路径；CID 能识别原连接，却不能证明新路径可达。为避免跨路径关联，从不同本地地址发包不能复用同一个 CID。第三篇的 [NAT 映射](/posts/networking/routing-forwarding-nat-virtual-interfaces/#napt地址端口映射与回包转换)若重新分配外部地址或端口，服务端看到的对端也可能改变，即使客户端没有主动迁移或换 CID；这种 NAT 重绑定仍需按规则验证新路径。QUIC v1 通常由客户端发起迁移；服务端通过 `preferred_address` 通告备用地址是另有规则的情形[^quic-migration]。
 
 ### TLS 握手、应用数据与 0-RTT
 
@@ -330,7 +335,7 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 - Socket 程序需要分别处理短读、短写、EOF、暂不可用和错误；半关闭允许发送结束后继续接收。
 - QUIC 在 UDP 之上提供独立流与连接迁移机制，路径验证、CID 规则和早期数据的重放边界仍需明确。
 
-掌握 UDP、TCP 与 QUIC 的交付方式后，可以回到建连前的域名解析。[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)会展开一次传统 UDP 查询，再对照 TCP 回退与加密 DNS。
+端口区分主机上的端点，但应用最初往往只有一个域名。[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)先解释域名怎样得到连接所用的地址，再对照 [DNS 的 UDP 查询与 TCP 回退](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，以及加密 DNS 如何选择传输通道。
 
 ## 延伸阅读
 
@@ -357,7 +362,7 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 
 [^bbr]: 〔研究资料与草案〕[ACM Queue: BBR — Congestion-Based Congestion Control](https://queue.acm.org/detail.cfm?id=3022184)——原始设计论文；另见 [BBR Congestion Control, draft-ietf-ccwg-bbr-07](https://datatracker.ietf.org/doc/html/draft-ietf-ccwg-bbr-07)中 BBRv3 依据带宽与最小 RTT 模型控制 pacing 和窗口的说明。后者仍是 Internet-Draft，并非正式 RFC，也不构成特定网络上的性能保证。
 
-[^4]: 〔RFC〕[RFC 9000 §1、§2、§5.1](https://www.rfc-editor.org/rfc/rfc9000.html#section-1)——QUIC 的 UDP 承载、多路复用与连接标识。
+[^4]: 〔RFC〕[RFC 9000](https://www.rfc-editor.org/rfc/rfc9000.html)——QUIC v1 传输协议；§1.2、§2、§4.1、§5.1、§12.3 与 §17 分别说明 UDP 承载、流、流量控制、连接标识、包号与包头。
 
 [^quic-migration]: 〔RFC〕[RFC 9000 §8.2、§9、§9.5–§9.6](https://www.rfc-editor.org/rfc/rfc9000.html#section-9)——路径验证、主动迁移与 NAT 重绑定、CID 复用限制及服务端首选地址。
 

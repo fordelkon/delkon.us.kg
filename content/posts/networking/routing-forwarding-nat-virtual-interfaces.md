@@ -40,9 +40,30 @@ tags: ["networking"]
 
 查表得到下一跳，并不会把包的目的 IP 改成网关 IP。在这个例子中，IP 包的目的地址仍为 `198.51.100.20`；若出口是以太网，内核通过上一篇的 [ARP](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp) 找到下一跳 `192.168.1.1` 的 MAC，把它填进当前链路的帧头。目的 IP 与下一跳 MAC 分别服务于跨网寻址和本跳交付。
 
-以上例子先固定了一张表。只有当多条候选路由的前缀长度相同时，才进一步按具体平台的管理距离（Administrative Distance / Preference）、度量值（Metric）或多路径规则（例如**等价多路径路由**，Equal-Cost Multi-Path，ECMP）处理。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（firewall mark，`fwmark`）等匹配规则，决定查询哪张路由表；不能把整套决策都概括为对一张表做一次最长前缀匹配[^policy]。
+以上例子先固定了一张表。同一前缀的候选路由可再按平台的度量值（Metric）或多路径规则处理，例如**等价多路径路由**（Equal-Cost Multi-Path，ECMP）。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（firewall mark，`fwmark`）等匹配规则，决定查询哪张路由表[^policy]。
 
-在 Linux 上，**路由策略数据库**（Routing Policy Database，RPDB）按规则优先级数字从小到大处理。某条规则选择 `lookup` 表时，先在该表内找匹配路由。如果规则不匹配、表内无适用结果，或 `throw` 路由让该次查表结束，查询可继续下一条适用规则。已有终结动作（如 `unreachable`）则直接返回结果，不再尝试后面的表。用 `ip rule show` 查看规则顺序，再用 `ip route get` 或 `ip -6 route get` 对具体目标验证[^policy][^iproute]。
+在 Linux 上，**路由策略数据库**（Routing Policy Database，RPDB）按优先级数字从小到大检查规则。每条规则先匹配选择条件，匹配后才执行动作。默认 IPv4 规则依次查询 `local`（`0`）、`main`（`32766`）和 `default`（`32767`）；这里的数字是规则优先级，`default` 是表名，不是 `/0` 路由[^policy]。
+
+```mermaid title="Linux IPv4 的 RPDB 选路决策" description="从最小优先级数字开始。规则不匹配、本次查表无路由或命中 throw、查表成功但结果被抑制，都会继续扫描。goto 跳到目标规则重新匹配。查到可用路由或得到拒绝结果时停止；规则用尽且未得到结果则选路失败。图展示常见的本地与单播交付，不展开广播等特殊路由。"
+flowchart TB
+ rules["按优先级取下一条规则<br/>小数字在前"]
+ rules -->|规则用尽| miss["选路失败：无路由结果"]
+ rules -->|有规则| selector{"规则匹配？"}
+ selector -->|否| next["回到起点<br/>检查下一条规则"]
+ selector -->|是| action["执行规则动作"]
+ action -->|goto| jump["跳到目标规则<br/>重新匹配"]
+ action -->|lookup| lookup["只查指定表<br/>表内做最长前缀匹配"]
+ action -->|直接拒绝| negative["终止：丢弃或报错"]
+ lookup -->|无路由或 throw| next
+ lookup -->|命中拒绝路由| negative
+ lookup -->|查表成功| suppress{"结果被抑制？"}
+ suppress -->|是| next
+ suppress -->|否| usable["终止：采用结果<br/>local：本机交付<br/>unicast：选定出接口与下一跳"]
+```
+
+图中 `goto` 假定目标规则存在；目标未解析时继续下一条。`throw` 结束的是本次查表，不会再退回同一张表找更短前缀。**抑制**（suppression）则发生在查表成功之后，例如 `suppress_prefixlength 0` 会拒用匹配到的 `/0` 路由，但不会拒用匹配到的 `/24`；`suppress_ifgroup` 可以按出接口所属的接口组抑制结果。`blackhole` 则表示静默丢弃：不论是规则动作还是命中的路由类型，它都终止整个决策。`unreachable` 和 `prohibit` 同样终止，而差错含义不同[^policy][^iproute][^rpdb-kernel]。
+
+因此，若优先级较高的规则查到一条未被抑制的 `/0` 单播路由，后面规则所查表里的 `/32` 不会参与竞争。要验证实际选择，应按[路由查询实验](#实验一查看完整路由表与特定目标的选路结果)检查规则、对应的表和具体目标。
 
 :::note[两条 /1 路由能覆盖什么]
 `0.0.0.0/1` 与 `128.0.0.0/1` 共同覆盖 IPv4 地址空间，并优先于原有 `/0` 默认路由。因此，把它们指向虚拟接口，可以接管原本依赖默认路由的 IPv4 流量；`/24`、`/32` 等更具体路由仍可能优先命中，策略规则也可能选择其他表。IPv6 的选路独立于这两条 IPv4 路由。删除这两条路由后的行为取决于剩余配置。
@@ -187,7 +208,13 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 出站从内网列读到公网列，返回则从公网列读到内网列。两侧观察的是同一条端到端 TCP 连接，NAPT 不替对端发送 TCP 确认。
 
-路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。沿用表中的映射：响应到达 `203.0.113.5:61001` 后，若映射仍有效且过滤允许，路由器就把目的地址与端口恢复为 `192.168.1.10:50001`，再转发至内网。公网端口如何分配、多久过期，取决于实现、协议与配置。
+路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。
+
+动态映射有自己的生命周期，即使两端的 Socket 仍打开，映射也可能过期：
+
+1. 建立或复用：内网流量出站时，设备分配外部地址端口，或按映射规则复用已有的分配；本例第一条映射使用 `203.0.113.5:61001`[^4][^5]。
+2. 转换与刷新：映射仍有效且过滤允许时，发往 `203.0.113.5:61001` 的回包会被还原为发往 `192.168.1.10:50001`。对 UDP，RFC 4787 要求出站流量刷新计时，入站流量不一定刷新。对 TCP，设备可以按观察到的连接阶段采用不同的空闲计时；只看到单向 FIN 不代表两个方向都已结束[^nat-lifetime]。
+3. 过期后移除：旧映射不再提供回包的还原路径。之后的出站流量若建立新映射，外部地址或端口可能不同；分配新映射不等于恢复 TCP 连接。实际超时由协议、设备实现和配置决定[^nat-lifetime]。
 
 ### 映射、过滤与连接跟踪
 
@@ -205,7 +232,15 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 ### NAT 与 TCP 代理：改写包头还是重建连接
 
-**普通 NAT 改写包头但不终结两端的 TCP 连接；TCP 代理分别处理两段独立连接。** 使用 HTTP `CONNECT` 或 SOCKS5 建立 TCP 会话时，代理接收客户端连接，再建立自己的出站连接[^proxy-protocols]。网站看到的源地址可能都发生了变化，但 TCP 确认、缓冲和连接关闭的边界不同。第四篇会解释 [Socket 的读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)，[第七篇的出站与回包示例](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)再把两段连接放在同一条路径上比较。
+同一台网关可以做路由转发、NAPT，也可以运行应用代理。以客户端访问 TCP 服务为例，判断三者的关键不只是服务端看到哪个源地址，还要看 TCP 在哪里终结：
+
+| 机制 | 中间设备处理什么 | TCP 连接端点 |
+| --- | --- | --- |
+| 普通 IP 路由转发 | 选择下一跳，更新 TTL 等逐跳字段，保留源／目的 IP 与端口 | 客户端 ↔ 服务端 |
+| 普通 NAPT | 转发时按映射改写 IP 地址、端口和相关校验和 | 仍是客户端 ↔ 服务端；设备不代发 TCP ACK |
+| 应用代理（如 HTTP `CONNECT` 或 SOCKS5 的 TCP 转接） | 接收客户端连接，将载荷转到独立的出站连接[^proxy-protocols] | 客户端 ↔ 代理、代理 ↔ 服务端；各有序号、确认与关闭状态 |
+
+`CONNECT` 转接 TCP 字节不要求代理同时终结里面的 TLS。不同连接如何分别确认与缓冲，见[第四篇的 Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)；[第七篇的出站与回包示例](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)再沿两段连接追踪回包。
 
 ## 虚拟网络接口：TUN 与 TAP 如何接入协议栈
 
@@ -213,7 +248,7 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 ### TUN 与 TAP：用户态读写哪些数据
 
-TUN 的“三层”指接口在网络层交付 IP 包。内核把 TUN 选为出口后，程序从接口读取要发出的 IP 包；程序把包写入 TUN 时，内核将其当作该接口收到的入站包处理。读、写方向都以操作接口的程序为参照[^6]。
+TUN 的“三层”指接口在网络层交付 IP 包。读、写方向以操作接口的用户态程序为参照：`read` 取走的是内核选路后交给 TUN 的出站包；`write` 则向内核注入一个从 TUN 收到的入站包，不会直接在物理网卡上发包。TUN 提供这个交接点，本身不建立远端连接，也不提供加密[^6]。
 
 | 接口 | 用户态读写的数据 | 内核如何处理 |
 | --- | --- | --- |
@@ -283,12 +318,12 @@ flowchart TB
 
 | 观察目的 | Linux | macOS |
 | --- | --- | --- |
-| 查看 IPv4 路由表 | `ip route show` | `netstat -rn -f inet` |
+| 查看 IPv4 路由表 | `ip route show table all` | `netstat -rn -f inet` |
 | 查询 IPv4 目标 | `ip route get 198.51.100.20` | `route -n get 198.51.100.20` |
-| 查看 IPv6 路由表 | `ip -6 route show` | `netstat -rn -f inet6` |
+| 查看 IPv6 路由表 | `ip -6 route show table all` | `netstat -rn -f inet6` |
 | 查询 IPv6 目标 | `ip -6 route get 2001:db8::20` | `route -n get -inet6 2001:db8::20` |
 
-Linux 有策略路由时，按地址族补查 `ip rule show` 或 `ip -6 rule show` 与相应的路由表。macOS 上还需结合接口作用域和具体 Network Extension 的路由配置。
+Linux 的 `table all` 仅用于列出各表，缺省的 `ip route show` 只列出 `main`。有策略路由时，按地址族补查 `ip rule show` 或 `ip -6 rule show`，再对照实际命中规则所查的表；源地址、入口接口或 `fwmark` 等条件不同时，只查询同一个目的地址不能代表所有流量[^policy][^iproute]。macOS 上还需结合接口作用域和具体 Network Extension 的路由配置。
 
 macOS 的 `route -n get` 常见字段包括：
 
@@ -330,7 +365,9 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^example-ip]: 〔RFC〕[RFC 5737 §3—4](https://www.rfc-editor.org/rfc/rfc5737.html#section-3)——`198.51.100.0/24`（TEST-NET-2）等地址段保留供文档示例使用，不应出现在公共互联网上。
 
-[^policy]: 〔平台与实现〕[Linux ip-rule(8)](https://man7.org/linux/man-pages/man8/ip-rule.8.html)——规则优先级、源地址/fwmark 等匹配条件，以及按规则查询路由表。
+[^policy]: 〔平台与实现〕[Linux ip-rule(8)](https://man7.org/linux/man-pages/man8/ip-rule.8.html)——规则优先级、匹配条件、默认规则、按规则查表与结果抑制。
+
+[^rpdb-kernel]: 〔平台与实现〕Linux 内核的 [RPDB 扫描](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c)、[IPv4 规则动作与结果抑制](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c)及[单表查询](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_trie.c)——`goto` 与规则回退、成功结果的抑制，以及 `throw` 结束本次查表。
 
 [^2]: 〔RFC〕[RFC 792: Internet Control Message Protocol](https://www.rfc-editor.org/rfc/rfc792.html)——IPv4 Echo、Destination Unreachable 和 Time Exceeded 报文。
 
@@ -339,6 +376,8 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 [^4]: 〔RFC〕[RFC 3022 §2.1–2.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.1)区分 Basic NAT 与 NAPT，[§4.1–4.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-4.1)说明双向包头改写与校验和调整。
 
 [^5]: 〔RFC〕[RFC 4787 §3、§4.1、§5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——旧 NAT 分类的不足，以及 UDP 地址/端口映射和入向过滤的独立描述。
+
+[^nat-lifetime]: 〔RFC〕[RFC 4787 §4.3](https://www.rfc-editor.org/rfc/rfc4787.html#section-4.3)定义 UDP 映射超时与刷新方向；[RFC 5382 §5](https://www.rfc-editor.org/rfc/rfc5382.html#section-5)说明 TCP 的空闲状态与半关闭；[RFC 7857 §2、§7](https://www.rfc-editor.org/rfc/rfc7857.html#section-2)更新 TCP 过渡状态计时及 UDP 入向刷新的条件。
 
 [^6]: 〔平台与实现〕[Linux Kernel: Universal TUN/TAP device driver](https://docs.kernel.org/networking/tuntap.html)——TUN 处理 IP 包、TAP 处理以太网帧，以及用户态读写与内核收发之间的关系；其创建 API 示例针对 Linux。
 
@@ -362,4 +401,4 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^bridge]: 〔软件与平台实现〕[Docker Engine：Bridge network driver](https://docs.docker.com/engine/network/drivers/bridge/)与 [Linux veth(4)](https://man7.org/linux/man-pages/man4/veth.4.html)——bridge 驱动的连通、转换与端口发布，以及 veth 对在命名空间之间的连接方式。
 
-[^iproute]: 〔平台与实现〕[Linux ip-route(8)](https://man7.org/linux/man-pages/man8/ip-route.8.html)——`throw` 路由与按目标查询实际选路的 `get` 子命令。
+[^iproute]: 〔平台与实现〕[Linux ip-route(8)](https://man7.org/linux/man-pages/man8/ip-route.8.html)——路由类型、`show table all` 的显示范围与 `get` 的按条件选路查询。
