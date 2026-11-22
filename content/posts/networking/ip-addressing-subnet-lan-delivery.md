@@ -5,9 +5,9 @@ publishDate: "19 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（一）：协议分层、封装与一次请求的路径》](/posts/networking/layered-architecture-packet-journey/)建立了四层模型，并区分了[主机、交换机与路由器的分工](/posts/networking/layered-architecture-packet-journey/#端到端与逐跳主机交换机与路由器的分工)。本篇把请求离开本机之前的准备补齐：接口有哪些地址，主机如何取得配置，以及发包时如何找到同链路目标或网关的 MAC 地址。
+上一篇[《计算机网络（一）：协议分层、封装与一次请求的路径》](/posts/networking/layered-architecture-packet-journey/)建立了四层模型，并区分了[主机、交换机与路由器的分工](/posts/networking/layered-architecture-packet-journey/#端到端与逐跳主机交换机与路由器的分工)。本篇把请求离开本机之前的准备补齐。先看接口需要哪些配置，再用这些参数决定要把帧交给谁。
 
-先认清网络配置的用途，再看三层的 IP 地址与子网，随后解释二层的 MAC 与帧交付，最后说明 DHCP 和 IPv6 自动配置如何提供这些参数。这里的二层、三层沿用[第一篇说明的 OSI 层号](/posts/networking/layered-architecture-packet-journey/#为什么需要分层模型)。普通业务发包时，主机先按目的 IP 选出下一跳，再在以太网上找到下一跳的 MAC，所以本篇按这个决策顺序从三层讲到二层；配置获取通常先于业务通信，放在后面是为了先理解参数、再理解获取机制。
+普通业务发包时，主机先按目的 IP 选出下一跳，再在以太网上找到该下一跳的 MAC。本篇按这个顺序从三层的地址与前缀讲到二层的帧交付，再回到 DHCP 和 IPv6 自动配置。二层、三层沿用[第一篇说明的 OSI 层号](/posts/networking/layered-architecture-packet-journey/#为什么需要分层模型)。
 
 ## 接入网络：先认清配置清单
 
@@ -258,15 +258,28 @@ ARP Request 直接封装在以太网帧里，`EtherType` 为 `0x0806`，不经�
 | B    | `192.168.1.11` | `00:00:5e:00:53:03` |
 | C    | `192.168.1.12` | `00:00:5e:00:53:04` |
 
-A 查路由后确定 B 在直连链路上，需要知道 B 的 MAC。它构造的 ARP Request 包含两组不同层次的地址：
+#### ARP 请求的帧布局
 
-| 字段位置                      | 本次请求的值                      |
-| ----------------------------- | --------------------------------- |
-| 以太网帧头：源 MAC / 目的 MAC | A 的 MAC / `ff:ff:ff:ff:ff:ff`    |
-| ARP 内容：发送方 IP / MAC     | `192.168.1.10` / A 的 MAC         |
-| ARP 内容：目标 IP / MAC       | `192.168.1.11` / 未知，通常填全零 |
+A 查路由后确定 B 在直连链路上，需要知道 B 的 MAC。这个请求的帧头与 ARP 消息各自携带地址[^4]。
 
-请求表达的是“谁拥有 `192.168.1.11`？请把 MAC 告诉 `192.168.1.10`”。外层广播让同一广播域内的设备有机会收到请求，ARP 内容中的目标 IP 则决定普通解析中谁应当回复；请求里的未知目标 MAC 不负责交换机转发[^4]。
+```mermaid title="以太网广播帧直接承载 ARP 请求" description="以太网头的目的 MAC 全为 ff，用于广播。ARP 消息内的目标 MAC 此时未知，本例填全零；目标 IPv4 是要解析的 B。ARP 直接位于帧载荷，没有独立的 IPv4 头。省略部分字段、填充和 FCS。"
+flowchart TB
+ subgraph frame[Ethernet II 帧]
+  eth["帧头 · EtherType=0x0806<br/>目的 MAC<br/>ff:ff:ff:ff:ff:ff<br/>源 MAC<br/>00:00:5e:00:53:01"]
+  subgraph arp[ARP 请求]
+   format["硬件类型=1 · 以太网<br/>协议类型=0x0800 · IPv4<br/>地址长度：MAC 6 · IPv4 4<br/>操作码=1 · Request"]
+   sender["发送方 MAC<br/>00:00:5e:00:53:01<br/>发送方 IPv4：192.168.1.10"]
+   target["目标 MAC<br/>00:00:00:00:00:00<br/>目标 IPv4：192.168.1.11"]
+   format --- sender --- target
+  end
+  eth --- format
+ end
+ linkStyle default stroke:none
+```
+
+请求表达的是“谁拥有 `192.168.1.11`？请把 MAC 告诉 `192.168.1.10`”。外层广播让同一广播域内的设备有机会收到请求。交换机按外层目的 MAC 转发，收到请求的主机再检查 ARP 消息中的目标 IPv4[^4]。
+
+#### ARP 请求与应答的时序
 
 ```mermaid title="ARP 广播怎样经交换机找到目标 MAC" description="A、B、C 位于同一 VLAN，均为 /24；A 无 B 的邻居缓存，交换机初始无相关 MAC 表项，无代理 ARP。箭头表示报文与处理顺序，不表示耗时。交换机从源 MAC 学习端口；广播请求到达 B、C，B 单播回复后，A 才发送原 IPv4 包。"
 sequenceDiagram
@@ -476,7 +489,7 @@ sudo tcpdump -i en0 -nn -e icmp6
 - ARP Probe 与 Announcement 分别负责使用前探测和地址公告，邻居缓存不能代替在线设备发现。
 - DHCPv4 首次租约通常经历 DORA，但四条消息并非全部广播；IPv6 的路由发现、地址生成、DAD 与 DNS 参数各有自己的状态和期限。
 
-现在已经知道“交给谁的 MAC”如何确定，接下来要回答它之前的决策：多条路由同时匹配时选择哪一个下一跳，NAT 又怎样改变跨网通信中的地址？下一篇进入[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)。
+本篇用直连路由和默认路由解释了怎样找到下一跳的 MAC。多条路由同时匹配时该如何选路，数据跨越公私网边界时地址又如何变化？下一篇进入[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)。
 
 ## 延伸阅读
 

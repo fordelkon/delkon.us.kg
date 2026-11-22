@@ -5,9 +5,9 @@ publishDate: "20 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)用普通单接口配置解释了[直连子网与默认网关](/posts/networking/ip-addressing-subnet-lan-delivery/#子网掩码cidr-与同网段判定)。本篇把这一模型推广到多接口和多条路由：下一跳如何选出，转发途中哪些头部会改变，虚拟接口又怎样把包交给用户态程序。
+上一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)用普通单接口配置解释了[直连子网与默认网关](/posts/networking/ip-addressing-subnet-lan-delivery/#子网掩码cidr-与同网段判定)。本篇把这一模型推广到多接口和多条路由：先看下一跳如何选出，再追踪每一跳的头部变化和 ICMP 反馈。最后区分 NAT 地址转换与 TUN、TAP 的用户态交付。
 
-本篇先看路由如何选出下一跳，再追踪 NAT 转换前后的地址与端口，最后对照 TUN 与二层虚拟接口的交付方式。第七篇再把这几种机制组合成具体的代理接管与出站过程。
+[第七篇的代理接管与出站](/posts/networking/proxies-tunnels-transparent-interception/)会把这些机制组合成一条完整的流量路径。
 
 ## 路由表与最长前缀匹配
 
@@ -57,7 +57,9 @@ tags: ["networking"]
 
 两种配置分别得到不同的出口。IPv6 则使用 `::/0` 及其更具体路由，可能出现 IPv4 进入 TUN、IPv6 仍走物理出口的双栈配置。
 
-## 路由选择与逐跳转发：TTL 与 ICMP
+## 逐跳转发时哪些字段会变
+
+### 路由器如何处理收到的包
 
 **路由选择**（routing）维护路径信息，**分组转发**（packet forwarding）使用这些信息处理到达的数据包。在一个普通 IPv4 以太网路由器上，可把转发方向概括为：
 
@@ -107,7 +109,7 @@ MAC 只列末字节，完整地址见上表。R1 和 R2 各更新一遍 IPv4 头
 
 所以“IP 地址不变”并不等于“整个 IP 头不变”。路由器转发的是去掉旧链路封装后的 IP 包；TCP 确认与重传由两端的 TCP 处理，见[第四篇的序号与确认示例](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的序号确认与重传)[^forward-packet]。
 
-### ICMP 差错与探测反馈
+## ICMP 差错与探测反馈
 
 **互联网控制报文协议**（Internet Control Message Protocol，ICMP）用来报告 IP 层状态与差错。下表列出 IPv4 的常见 ICMP 报文。**IPv6 互联网控制报文协议**（Internet Control Message Protocol for IPv6，ICMPv6）使用独立的类型编号[^2][^3]。
 
@@ -116,6 +118,31 @@ MAC 只列末字节，完整地址见上表。R1 和 R2 各更新一遍 IPv4 头
 | 回显请求／回显应答（Echo Request／Echo Reply，类型 8／0） | `ping` 测试这类探测是否得到回应，并测量往返时间 |
 | 超时（Time Exceeded，类型 11） | 报告 TTL 等超时；传统 `traceroute` 借助递增 TTL 观察响应者 |
 | 目的不可达（Destination Unreachable，类型 3） | 报告目标或端口不可达，以及设置**不分片标志**（Don't Fragment，DF）后仍需分片等情况 |
+
+### ICMP Echo Request 的报文布局
+
+以 IPv4 的 `ping` 回显请求为例。IPv4 头的 `Protocol=1` 指明载荷交给 ICMP。ICMP 用标识符和序号关联请求与应答；应答使用 `Type=0`，并返回相应的标识符、序号和探测数据[^2]。
+
+```mermaid title="IPv4 直接承载 ICMP Echo Request" description="外层 Ethernet II 帧承载 IPv4 包。IPv4 头用 Protocol=1 指向 ICMP。Echo Request 的固定部分为 8 字节，后面可带探测数据。此处没有 TCP 或 UDP 头，省略链路层填充和 FCS。"
+flowchart TB
+ subgraph frame[Ethernet II 帧]
+  eth["帧头 · EtherType=0x0800"]
+  subgraph ip[IPv4 包]
+   ip_header["IPv4 头 · Protocol=1 · ICMP<br/>源 IPv4 · 目的 IPv4 · TTL"]
+   subgraph echo[ICMP Echo Request]
+    first["Type=8 · Code=0 · 校验和"]
+    match["标识符 · 序号"]
+    data["探测数据 · 可为空"]
+    first --- match --- data
+   end
+   ip_header --- first
+  end
+  eth --- ip_header
+ end
+ linkStyle default stroke:none
+```
+
+### 路由器怎样报告差错
 
 IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过出接口允许的大小时会返回**数据包过大**（Packet Too Big）报文[^3]。**路径最大传输单元**（Path Maximum Transmission Unit，PMTU）取路径上各链路 MTU 的最小值。源端可用这类报文调整对 PMTU 的估计，参见第八篇的[路径 MTU 诊断](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)[^pmtu]。
 
@@ -292,7 +319,7 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 - NAPT 改写地址端口，映射、过滤和会话状态需要分别理解；它不会因为转换地址而终结两端 TCP。
 - TUN 提供 IP 包入口，代理与 VPN 决定后续处理。接管范围、出站绕行和回包交付共同决定通信能否成立。
 
-下一篇沿协议栈向上，讨论[《计算机网络（四）：TCP、UDP、Socket 与可靠传输》](/posts/networking/transport-tcp-udp-socket-quic/)：不可靠的逐跳 IP 交付，怎样支撑有序字节流，应用读写连接时又能依赖哪些保证？
+下一篇沿协议栈向上，讨论[《计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口》](/posts/networking/transport-tcp-udp-socket-quic/)：不可靠的逐跳 IP 交付，怎样支撑有序字节流，应用读写连接时又能依赖哪些保证？
 
 ## 延伸阅读
 

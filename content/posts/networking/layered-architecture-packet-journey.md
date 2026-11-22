@@ -113,10 +113,10 @@ flowchart TB
  class eth result
 ```
 
-- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)也展示了纯 ACK 如何独立发送[^2][^ethernet-frame]。
-- **ICMP Echo** 是由 IPv4 直接承载的诊断报文，自己的 ICMP 头部下面可以有探测数据。这里没有 TCP 或 UDP 头[^icmp-echo]。
-- **ARP 请求**由以太网直接承载，以本地链路上的下一跳 IPv4 地址为查询目标。ARP 消息内部虽有 IPv4 地址字段，外面没有 IPv4 头。IPv6 邻居解析使用 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)[^arp]。
-- **DNS 查询**在图中由 UDP 承载。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
+- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[初始 SYN 的报文布局](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)和[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)分别展示段里装了什么、何时发送[^2][^ethernet-frame]。
+- **ICMP Echo** 是由 IPv4 直接承载的诊断报文，自己的 ICMP 头部下面可以有探测数据。这里没有 TCP 或 UDP 头，见 [ICMP Echo Request 的报文布局](/posts/networking/routing-forwarding-nat-virtual-interfaces/#icmp-echo-request-的报文布局)[^icmp-echo]。
+- **ARP 请求**由以太网直接承载，以本地链路上的下一跳 IPv4 地址为查询目标。[ARP 请求的帧布局](/posts/networking/ip-addressing-subnet-lan-delivery/#arp-请求的帧布局)展示了以太网广播地址与 ARP 消息中的目标 IPv4 各在什么位置。IPv6 邻居解析使用 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)[^arp]。
+- **DNS 查询**在图中由 UDP 承载，见 [UDP DNS 查询的报文布局](/posts/networking/dns-resolution-caching-encrypted-queries/#udp-dns-查询的报文布局)。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
 
 ### 接收端怎样选择上层协议
 
@@ -216,7 +216,9 @@ flowchart LR
 
 ## 一次 HTTPS 请求：冷启动与状态复用
 
-先看一次没有可用缓存或连接的访问：本机 IPv4 为 `192.168.1.10`，通过普通局域网、默认网关和家庭 NAT 访问 `https://example.com/`。浏览器需要解析地址、新建 TCP 连接并完成 TLS 1.3 握手；本例不使用 ECH、显式代理或 TUN。`198.51.100.20` 是前文转发示例中的目标地址，实际实验以当次连接报告的地址为准。
+### 冷启动时客户端会发哪些报文
+
+先看一次没有可用缓存或连接的访问：本机 IPv4 为 `192.168.1.10`，通过普通局域网、默认网关和家庭 NAT 访问 `https://example.com/`。浏览器需要解析地址、新建 TCP 连接并完成 TLS 1.3 握手。本例省略 ECH、显式代理和 TUN。`198.51.100.20` 是前文转发示例中的目标地址，实际实验以当次连接报告的地址为准。
 
 **请求阶段和逐层封装回答的是两个问题。** DNS、TCP、TLS 和 HTTP 说明这次访问先后要完成什么；封装说明每次发送的数据怎样上链路。拿到网站地址前，主机就可能已经把 DNS 查询封装为 UDP 数据报、IP 包和链路帧。随后 TCP 的 SYN 也会独立封装成 IP 包和链路帧，里面没有要等到 TLS 建立后才发送的 HTTP 请求。
 
@@ -231,12 +233,12 @@ flowchart LR
 | 5 | 发出 HTTP 请求并取得响应 | HTTP → TLS → TCP → IPv4 → 以太网 |
 | 6 | 之后按需结束连接，例如用 FIN 和 ACK | TCP → IPv4 → 以太网 |
 
-### DNS 与 TCP：取得地址并建立连接
+#### DNS 与 TCP：取得地址并建立连接
 
 1. **DNS**：浏览器从 URL 取得方案和主机名；`https` 未显式指定端口时默认使用 `443`[^7]。没有可用解析结果时，由系统解析服务或应用内置解析器查询目标地址，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/)。
 2. **TCP**：浏览器按目标 IP 和端口建立连接。本机按路由和邻居映射把报文送给网关，家庭路由器在本例改写出站源地址与端口。具体报文和序号见[第四篇的三次握手](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)[^2]。
 
-### TLS 与 HTTP：建立加密信道并交换消息
+#### TLS 与 HTTP：建立加密信道并交换消息
 
 3. **TLS**：浏览器在 TCP 字节流上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。证书验证与加密起点见[第六篇的 TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
 4. **HTTP**：浏览器将 HTTP/1.1 请求或 HTTP/2 帧交给 TLS 记录层加密，经 TCP 分段并逐层封装。TLS 终止端收齐、解密后解析请求，再经回程送回响应。回程未必与去程相同。
@@ -247,7 +249,7 @@ flowchart LR
 
 ### 状态复用：缓存与已有连接会跳过哪些阶段
 
-上面四个阶段描述一次冷启动访问。已经访问过的服务可能留下缓存、连接或 TLS 恢复状态，下一次请求需要完成的网络工作也会随之变化：
+冷启动时要准备下一跳地址、解析域名并建连。已经访问过的服务可能留下缓存、连接或 TLS 恢复状态，下一次请求需要完成的网络工作也会随之变化：
 
 | 本次状态 | 还需要的网络工作 |
 | --- | --- |
@@ -355,7 +357,7 @@ fi
 - 链路层 MAC 帧头逐跳重写，IP 与端口在常规直连中端到端保持；NAT 按配置改写包头中的地址或端口，而代理则在应用或传输边界终结并重建连接。
 - Socket 是操作系统向应用暴露的编程接口而非网络协议；应用写入 Socket 成功只代表本地发送路径接受了相应字节。
 
-下一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)将深入最底层与网络层的交界：当本机已经拿到目标 IP 后，如何获取自己的网络配置，又如何判断该直接把帧交给同一局域网里的另一台设备，还是交给默认网关？
+下一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)将深入最底层与网络层的交界：主机需要哪些网络配置？拿到目标 IP 后，又该把帧交给同链路上的目标还是默认网关？
 
 ## 延伸阅读
 

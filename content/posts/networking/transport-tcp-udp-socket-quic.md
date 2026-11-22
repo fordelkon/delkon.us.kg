@@ -1,5 +1,5 @@
 ---
-title: "计算机网络（四）：TCP、UDP、Socket 与可靠传输"
+title: "计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口"
 description: "对比 TCP 字节流与 UDP 数据报，解释连接状态、重传、窗口控制与 Socket 读写契约，用可运行的 Rust 程序演示分次读取、EOF 和半关闭，并界定 QUIC 多流与连接迁移的保证。"
 publishDate: "21 Nov 2026"
 tags: ["networking", "rust"]
@@ -51,6 +51,30 @@ sequenceDiagram
 ```
 
 这里的确认号都在 TCP 头里。SYN 即使没有载荷也占用一个序号，纯 ACK 则不消耗序号。第三段 ACK 可以带数据，本例取纯 ACK。三个 TCP 控制段都能单独交给 IP，再由当前链路成帧，参见[封装路径对照](/posts/networking/layered-architecture-packet-journey/#同一条链路上的不同封装路径)[^1]。
+
+#### 初始 SYN 的报文布局
+
+把时序图里的第一支箭头展开。例中客户端从 `192.168.1.10:50001` 连接 `198.51.100.20:443`，初始序号仍记为 `x`。TCP 头里的数据偏移字段以 32 位字为单位。无选项时它的值为 `5`，表示 TCP 头占 20 字节[^tcp-header]。
+
+```mermaid title="初始 SYN 装在 IPv4 包里" description="未加 VLAN 标签的 Ethernet II 帧。IPv4 和 TCP 都无选项，IPv4 总长度 40 字节。TCP 段只含 TCP 头，SYN 标志与初始序号就在头中。帧填充和 FCS 位于 IPv4 包之外。图只列关键字段。"
+flowchart TB
+ subgraph frame[Ethernet II 帧]
+  eth["帧头 · EtherType=0x0800"]
+  subgraph ip[IPv4 包 · 40 字节]
+   ip_header["IPv4 头 · 20 字节<br/>Protocol=6 · TCP<br/>源：192.168.1.10<br/>目的：198.51.100.20"]
+   subgraph tcp[TCP 段 · 20 字节]
+    tcp_header["TCP 头 · 50001 → 443<br/>Seq=x · SYN=1 · ACK=0<br/>数据偏移=5<br/>TCP 载荷=0 字节"]
+   end
+   ip_header --- tcp_header
+  end
+  tail["链路层填充 · FCS"]
+  eth --- ip_header
+  tcp_header --- tail
+ end
+ linkStyle default stroke:none
+```
+
+这里的 `ACK=0` 指 ACK 标志未置位，确认号字段因此无效。带 MSS 等选项的 SYN 仍可以是零载荷，变化的是 TCP 头的长度。时序图中的纯 ACK 也有自己的 TCP 头[^tcp-header]。
 
 ### 连接关闭：FIN、半关闭与 TIME-WAIT
 
@@ -243,10 +267,9 @@ Tokio 的 `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` 则是异步�
 
 UDP 提供端口和数据报承载，使 QUIC 可以在现有 UDP 路径上部署新的传输逻辑，常见实现可随用户态库迭代。QUIC 自己维护包号、ACK、丢失检测、流偏移、流量控制和拥塞控制；丢失的流数据可放入新包号的包重发，不能理解成简单给 UDP 载荷加密。若直接叠在 TCP 上，仍会继承 TCP 整条字节流的按序交付约束，无法仅靠上层分流消除这个等待[^4][^quic-recovery]。
 
-它主要改变了两项边界：
+### 按流交付与队头阻塞
 
-1. 跨流的按序等待：HTTP/2 多条应用流共享 TCP 字节流，缺失字节会阻止后续字节按序交付，即使后续字节属于其他请求（即传输层**队头阻塞**，Head-of-Line Blocking）。QUIC 的流各自维护偏移量；某条流等待重传时，其他已具备数据的流可以继续交付。但流之间仍共享连接的拥塞控制与部分资源，不能说彼此完全没有影响。
-2. 连接与地址组合的关系：普通 TCP 连接依赖固定地址与端口组合；网络切换导致它们改变时，通常需要重新连接。QUIC 的**连接标识**（Connection ID，CID）将连接识别与固定 IP/端口组合解耦，为在条件允许时保留已有连接提供支持。
+HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后续字节按序交付，即使后续字节属于别的请求，这就是传输层的**队头阻塞**（Head-of-Line Blocking）。QUIC 为每条流维护偏移量，某条流等重传时，其他数据已经连续的流仍可交付。多条流共享的拥塞控制和连接级资源仍会影响彼此[^4]。
 
 | 接收端的字节视图 | 首段 | 中段 | 后段 |
 | --- | --- | --- | --- |
@@ -256,7 +279,13 @@ UDP 提供端口和数据报承载，使 QUIC 可以在现有 UDP 路径上部�
 
 每行从左到右按该行的字节偏移读。TCP 行使用连接级字节序号，QUIC 两行各有自己的偏移起点。这里选用 QUIC 流 2 的连续数据已通过其他包抵达、应用依赖也已就绪的情形。
 
+### 连接标识与路径迁移
+
+普通 TCP 连接依赖固定的地址和端口组合。QUIC 使用**连接标识**（Connection ID，CID）识别连接，在路径发生变化时可在满足条件的情况下保留原连接[^quic-migration]。
+
 以客户端从 Wi-Fi 切到蜂窝网络为例：主动迁移要等握手确认，并受服务端通告的迁移参数限制。服务端发现之前未验证的客户端地址时，需要验证新路径；CID 能识别原连接，却不能证明新路径可达。为避免跨路径关联，从不同本地地址发包不能复用同一个 CID。NAT 重绑定则可能在客户端没有主动换地址、也未换 CID 的情况下改变服务端看到的源地址或端口，仍需按规则验证未验证的地址。QUIC v1 通常由客户端发起迁移；服务端通过 `preferred_address` 通告备用地址是另有规则的情形[^quic-migration]。
+
+### TLS 握手、应用数据与 0-RTT
 
 QUIC 使用 TLS 1.3 协商密钥并认证对端。TLS 握手消息经 QUIC 的 `CRYPTO` 帧可靠送达，而应用字节流走 `STREAM` 帧，由 QUIC 保护包，不使用 TLS 记录层。通常不经 Retry 的完整握手中，客户端可在一次往返后开始发送受 1-RTT 密钥保护的应用数据。满足会话恢复条件时，客户端可以尝试发送**早期数据**（early data，0-RTT），但这不表示完整握手和身份认证在零往返内结束。早期数据可能被拒绝，还存在重放风险，应用必须限制适用操作[^quic-tls]。
 
@@ -301,7 +330,7 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 - Socket 程序需要分别处理短读、短写、EOF、暂不可用和错误；半关闭允许发送结束后继续接收。
 - QUIC 在 UDP 之上提供独立流与连接迁移机制，路径验证、CID 规则和早期数据的重放边界仍需明确。
 
-接下来回到应用取得目标地址的步骤。[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)会把域名查询放到已经明确的 UDP、TCP、TLS 和 QUIC 通道上。阅读顺序按机制依赖安排，不等于一次请求的执行顺序。
+掌握 UDP、TCP 与 QUIC 的交付方式后，可以回到建连前的域名解析。[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)会展开一次传统 UDP 查询，再对照 TCP 回退与加密 DNS。
 
 ## 延伸阅读
 
@@ -353,3 +382,5 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 [^shutdown]: 〔平台与实现〕[Linux Programmer's Manual: shutdown(2)](https://man7.org/linux/man-pages/man2/shutdown.2.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。
 
 [^tcp-lifecycle]: 〔RFC〕[RFC 9293 图 5](https://www.rfc-editor.org/rfc/rfc9293.html#figure-5)给出状态机，[图 6](https://www.rfc-editor.org/rfc/rfc9293.html#figure-6)和[图 12–13](https://www.rfc-editor.org/rfc/rfc9293.html#figure-12)分别展示建连、正常关闭与同时关闭的报文交换。
+
+[^tcp-header]: 〔RFC〕[RFC 9293 §3.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.1)——TCP 头字段、数据偏移、控制标志与选项。

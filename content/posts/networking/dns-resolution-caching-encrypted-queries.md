@@ -5,7 +5,7 @@ publishDate: "21 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（四）：TCP、UDP、Socket 与可靠传输》](/posts/networking/transport-tcp-udp-socket-quic/)解释了字节流与数据报怎样交付给通信端点。但应用发起连接时，手里通常只有 `example.com` 这样的域名。**域名系统**（Domain Name System，DNS）要先将名字转换成地址及相关连接参数，传输层才能继续工作。
+上一篇[《计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口》](/posts/networking/transport-tcp-udp-socket-quic/)解释了字节流与数据报怎样交付给通信端点。但应用发起连接时，手里通常只有 `example.com` 这样的域名。**域名系统**（Domain Name System，DNS）为通过域名访问服务的应用提供地址及其他连接参数。
 
 本篇从资源记录、解析路径与缓存讲起，再解释怎样验证答案、保护查询，以及应用如何使用返回的地址。排查时可以依次核对查询类型、实际解析器、响应状态和连接目标。HTTP、TLS 与 QUIC 的连接细节在[下一篇](/posts/networking/http-evolution-tls-handshake-https/)继续解释。
 
@@ -65,6 +65,8 @@ sequenceDiagram
 
 实现**查询名最小化**（QNAME Minimisation）的递归解析器通常只把足以取得下一次委派的名字交给上级权威服务器，而不是逐级发送完整查询名。例如查询 `www.example.com. A` 时，它可以先向根查询 `com.`，再向 `.com` 查询 `example.com.`，到负责目标记录的权威端才查完整名字。存根发给递归解析器的查询并不因此缩短，这也不是通道加密[^qname-min]。
 
+## DNS 查询的报文与传输
+
 ### 把查询过程展开成实际报文
 
 用一个已配置往返路由、没有 NAT 或透明接管的实验网络看具体字段。递归器已经取得委派信息，只需向权威服务器补查 `example.com. A`。权威地址 `203.0.113.53` 与答案 `198.51.100.20` 都使用文档地址。
@@ -83,6 +85,32 @@ sequenceDiagram
 两次查询都是 `example.com. IN A`。本例的两次应答都给出 `198.51.100.20`，记录 TTL 为 300 秒。
 
 递归器在这里接收并解释 DNS 消息，再用自己的地址、源端口与事务 ID 发起上游查询；它没有把存根的原 IP 包原样送到权威端。本例为便于区分选了两个不同 ID，协议并不要求两段 ID 必须不同。缓存命中时，中间这对上游报文可以完全不出现；返回的记录 TTL 还会受缓存剩余期限等条件影响。
+
+### UDP DNS 查询的报文布局
+
+把上表第 1 行展开成客户端在以太网口发出的帧。本例是一条无 EDNS 的 `example.com. IN A` 查询。UDP 头里的端口用于交付数据报，DNS 头里的事务 ID 用于把应答对应到查询[^dns-message]。
+
+```mermaid title="一条 DNS 查询怎样装进 UDP 数据报" description="外层以太网承载 IPv4。IPv4 用 Protocol=17 标识 UDP，UDP 载荷是一条 DNS 查询消息。DNS 头下面只有一个问题，答案、权威和附加记录计数为零。图只列关键字段，省略链路层填充和 FCS。"
+flowchart TB
+ subgraph frame[Ethernet II 帧]
+  eth["帧头 · EtherType=0x0800"]
+  subgraph ip[IPv4 包]
+   ip_header["IPv4 头 · Protocol=17<br/>源：192.168.1.10<br/>目的：192.168.1.53"]
+   subgraph udp[UDP 数据报]
+    udp_header["UDP 头 · 53001 → 53<br/>长度 · 校验和"]
+    subgraph dns[DNS 查询消息]
+     dns_header["DNS 头 · ID=0x1201<br/>QR=0 · RD=1<br/>QDCOUNT=1"]
+     question["问题段<br/>example.com. · A · IN"]
+     dns_header --- question
+    end
+    udp_header --- dns_header
+   end
+   ip_header --- udp_header
+  end
+  eth --- ip_header
+ end
+ linkStyle default stroke:none
+```
 
 ### DNS 的 UDP 大小限制与 TCP 回退
 
@@ -135,6 +163,12 @@ DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的
 用 `dig example.com A` 查看 `status`、`ANSWER`、`AUTHORITY` 和 TTL，再与系统解析结果对照。只使用 `+short` 容易把不存在、没有该类型记录与某些失败都压成一段空输出。清缓存之前先记录证据，也能避免把缓存刷新与其他同时发生的变化混在一起。
 :::
 
+## DNS 答案怎样影响连接目标
+
+权威服务器一般能看到向它查询的递归解析器地址。**EDNS 客户端子网**（EDNS Client Subnet，ECS）允许解析器附带客户端地址前缀，可能影响权威端的地域调度；同时也会向更多参与者暴露客户端网络信息。公共解析服务可能使用任播与地域节点，CDN 也可能结合其他信号，不能仅凭公共 DNS 的品牌或注册地断定一定绕路[^ecs]。
+
+DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeballs 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/#用-curl-记录请求耗时)中继续核对。
+
 ## DNSSEC 与加密 DNS：数据认证和通道保密
 
 ### DNSSEC 验证数据，不隐藏查询
@@ -172,12 +206,6 @@ DoQ 的响应在发出查询的同一条流上返回，靠流对应请求与响�
 :::important[网站、代理节点与 DNS 服务是三个解析对象]
 开启代理后，目标网站、代理节点自身、加密 DNS 服务自身可能分别使用不同的解析路径。Fake-IP 能让代理先返回映射地址，但是否需要本地真实解析仍取决于规则与出站协议。具体接管与配置职责见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/)，不能把“开了 TUN”当作全部查询都由同一个解析器完成的证据。
 :::
-
-## DNS 答案怎样影响连接目标
-
-权威服务器一般能看到向它查询的递归解析器地址。**EDNS 客户端子网**（EDNS Client Subnet，ECS）允许解析器附带客户端地址前缀，可能影响权威端的地域调度；同时也会向更多参与者暴露客户端网络信息。公共解析服务可能使用任播与地域节点，CDN 也可能结合其他信号，不能仅凭公共 DNS 的品牌或注册地断定一定绕路[^ecs]。
-
-DNS 返回多个地址后，怎样选连接是下一阶段的问题。Happy Eyeballs 让支持该机制的客户端按策略安排 IPv6、IPv4 连接尝试，减少一条地址族路径异常造成的等待；它不是 DNS 自动修复地址，也不是保证每次都由 IPv6 或某个固定地址获胜[^happy]。诊断时应把“返回了什么地址”与“实际连上了哪个地址”分开，后者可以在[第八篇的 curl 阶段观察](/posts/networking/network-diagnostics-performance-troubleshooting/)中继续核对。
 
 ## DNS 查询实验与结果判读
 
