@@ -11,6 +11,36 @@ import "@/styles/blocks/search.css";
 	let stylesReady: Promise<void> | undefined;
 
 	const viewport = window.visualViewport;
+	const searchDialog = "pagefind-modal > dialog";
+	const touchPrimary = matchMedia("(pointer: coarse)");
+	let unlockSearchPage: (() => void) | undefined;
+
+	function freezeSearchPage(dialog: HTMLDialogElement): void {
+		if (!touchPrimary.matches || unlockSearchPage) return;
+
+		const { body } = document;
+		const { scrollX, scrollY } = window;
+
+		const observer = new MutationObserver(() => {
+			if (!dialog.open || !dialog.isConnected) unlock();
+		});
+
+		function unlock(): void {
+			observer.disconnect();
+			unlockSearchPage = undefined;
+			delete body.dataset.searchScrollLocked;
+			body.style.removeProperty("--search-page-top");
+			window.scrollTo({ left: scrollX, top: scrollY, behavior: "instant" });
+		}
+
+		unlockSearchPage = unlock;
+		body.style.setProperty("--search-page-top", `${-scrollY}px`);
+		body.dataset.searchScrollLocked = "";
+		observer.observe(dialog, { attributeFilter: ["open"] });
+
+		// Pagefind can replace its internal dialog when updating its markup.
+		if (dialog.parentElement) observer.observe(dialog.parentElement, { childList: true });
+	}
 
 	function fitSearchViewport(dialog: HTMLDialogElement): void {
 		if (!viewport) return;
@@ -22,23 +52,42 @@ import "@/styles/blocks/search.css";
 		dialog.style.setProperty("--search-viewport-height", `${viewport.height}px`);
 	}
 
+	const fitOpenSearch = () => {
+		const dialog = document.querySelector<HTMLDialogElement>(`${searchDialog}:modal`);
+
+		if (dialog) fitSearchViewport(dialog);
+	};
+
 	if (viewport) {
-		const fitOpenSearch = () => {
-			const dialog = document.querySelector<HTMLDialogElement>("pagefind-modal > dialog:modal");
-
-			if (dialog) fitSearchViewport(dialog);
-		};
-
-		document.addEventListener("beforetoggle", (event) => {
-			const dialog = event.target;
-
-			if (event.newState === "open" && dialog instanceof HTMLDialogElement && dialog.matches("pagefind-modal > dialog")) {
-				fitSearchViewport(dialog);
-			}
-		}, true);
 		viewport.addEventListener("resize", fitOpenSearch);
 		viewport.addEventListener("scroll", fitOpenSearch);
 	}
+
+	document.addEventListener(
+		"beforetoggle",
+		(event) => {
+			const dialog = event.target;
+
+			if (!(dialog instanceof HTMLDialogElement) || !dialog.matches(searchDialog)) return;
+
+			if (event.newState === "open") {
+				fitSearchViewport(dialog);
+				freezeSearchPage(dialog);
+			} else {
+				unlockSearchPage?.();
+			}
+		},
+		true,
+	);
+
+	// Older mobile browsers don't dispatch beforetoggle on dialogs.
+	document.addEventListener("focusin", (event) => {
+		if (event.target instanceof Element) {
+			const dialog = event.target.closest<HTMLDialogElement>(`${searchDialog}:modal`);
+
+			if (dialog) freezeSearchPage(dialog);
+		}
+	});
 
 	function loadDialogStyles() {
 		return new Promise<void>((resolve, reject) => {
@@ -128,6 +177,7 @@ import "@/styles/blocks/search.css";
 
 		// Fresh elements and registry entries keep triggers from finding detached dialogs.
 		document.querySelector<PagefindModal>("pagefind-modal")?.close();
+		unlockSearchPage?.();
 		pagefind.getInstanceManager().removeInstance("site-search");
 	});
 </script>
