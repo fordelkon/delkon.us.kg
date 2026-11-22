@@ -156,16 +156,22 @@ flowchart TB
 
 ## I/O 就绪与完成通知
 
-网络 Future 等待数据时，运行时的 I/O 驱动负责把操作系统事件连接到 Waker；执行器负责后续任务调度。这里要区分两种通知模型：
+网络 Future 等待数据时，运行时的 I/O 驱动把操作系统事件连接到 Waker，执行器负责接下来的任务调度。对同一次读操作，**就绪通知**（readiness）说明现在可以尝试读；**完成通知**（completion）则报告事先提交的读操作有了结果[^7][^8][^28]。
 
-| 模型                   | 通知的含义                         | 代表接口                        |
-| ---------------------- | ---------------------------------- | ------------------------------- |
-| 就绪通知（readiness）  | 可以尝试读写，实际操作仍由程序发起 | Linux epoll、BSD / macOS kqueue |
-| 完成通知（completion） | 提交的异步操作已有结果             | Windows IOCP、Linux io_uring    |
+```mermaid mobile-direction="TB" title="两种 I/O 通知的读操作顺序" description="就绪路径先等到可读事件，再尝试非阻塞读取；若返回 WouldBlock，还要继续等待。完成路径先提交读请求，再取回该次读取的结果。箭头表示操作顺序，不表示耗时。"
+flowchart LR
+ watch["登记可读兴趣"] --> notice["收到可读事件"]
+ notice --> read["尝试非阻塞读<br/>检查结果"]
+ submit["提交异步读"] --> completion["收到该次读的<br/>完成通知"]
+ completion --> completeResult["检查读结果"]
+ class watch,submit actor
+ class notice,completion state
+ class read,completeResult result
+```
 
-Mio 对外提供就绪事件抽象，在不同平台上适配底层机制；按接口读写事件时，必须先分清底层是就绪还是完成模型，上层抽象与底层通知方式不必一一对应[^6][^7]。io_uring 通过提交与完成队列组织操作，也不是只有它才支持完成模型[^8]。
+Linux 的 `epoll` 和 BSD / macOS 的 `kqueue` 提供就绪事件；Mio 的就绪事件可能是虚假的，若尝试读写返回 `WouldBlock`，仍要继续等待。Windows IOCP 可以报告已提交的异步 I/O 操作完成，但 Mio 在 Windows 上仍对外提供就绪抽象。可见底层机制并不决定上层接口的通知语义[^6][^7][^28]。
 
-本节的“就绪”指 I/O 可以尝试读写，不是上文 poll 返回 `Ready` 表示的“完成”。收到就绪事件后仍要检查实际操作结果。Mio 文档允许虚假就绪，尝试读写可能返回 `WouldBlock`，Future 因此还需继续等待；“被唤醒”与“读写已完成”不能画等号[^6]。
+Linux 的 `io_uring` 通过提交队列和完成队列报告操作结果，但要看提交的是什么：读请求的完成项报告该次读的结果，`IORING_OP_POLL_ADD` 的完成项则可以报告描述符就绪，并未替程序读取数据。收到通知不代表读写成功，更不等于上文整个 Future 返回 `Poll::Ready`[^8]。
 
 ## 取消与超时
 
@@ -179,7 +185,7 @@ Mio 对外提供就绪事件抽象，在不同平台上适配底层机制；按�
 
 ### timeout 与 select
 
-`timeout` 等待结果或期限：内部 Future 及时完成则返回 `Ok`，超时则返回错误并取消内部操作。下面直接传入 `query()` 返回的 Future，没有另外启动后台任务[^11]：
+`timeout` 在等待期间返回内部 Future 的结果 `Ok(value)`，或者报告超时 `Err(Elapsed)`。下面直接等待临时的 `Timeout`，没有另外启动后台任务；超时后包装器被丢弃，其中的 `query()` Future 随之析构。`Err(Elapsed)` 本身不是析构或停止的确认：如果包装器仍被持有，内部 Future 仍在其中[^11]：
 
 ```rust
 use std::time::Duration;
@@ -201,7 +207,7 @@ async fn main() {
 
 `tokio::select!` 则同时等待多个分支：当某个分支完成并匹配其模式时，执行对应处理代码，其余分支不再继续等待。若分支持有 Future 的所有权，退出选择时会丢弃它；若传入的是对外部 Future 的可变引用，被丢弃的是等待用的引用，外部 Future 仍可保留[^12]。
 
-超时不是同步代码的强制中断。Tokio 文档说明，内部 Future 会先被轮询，再检查超时；如果它长时间不让出，就可能超过期限仍返回成功[^11]。
+超时不是同步代码的强制中断。Tokio 1.53.3 先轮询内部 Future，只有它返回 `Pending` 才检查期限；即使已到期，这次轮询若得到 `Ready`，仍会返回 `Ok`。因此，长时间不交还执行权的计算可能超过期限才返回结果[^11]。
 
 ### 取消安全：中断后能否重来
 
@@ -261,7 +267,7 @@ async fn main() {
 }
 ```
 
-这里的 `Err(value)` 仅表示未通过此函数发送，示例将取消与通道关闭合并为同一种返回；业务接口可再区分原因。`Ok(())` 仍只表示已发送，不表示对端处理完成。如果容量与取消信号同时就绪，`select!` 可能选择发送；先预约容量保护的是 value 的归属，并未让取消成为禁止发送的原子屏障。取得许可后到 `permit.send(value)` 之间没有 `.await`，也没有把消息再移入一个可能被丢弃的发送 Future[^25]。
+这里的 `Err(value)` 仅表示未通过此函数发送，示例将取消与通道关闭合并为同一种返回；业务接口可再区分原因。`Ok(())` 仍只表示发送成功，不保证消息一定被领取，更不表示对端已处理；这是第五篇区分[接纳、领取、完成与确认](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)的理由。如果容量与取消信号同时就绪，`select!` 可能选择发送；先预约容量保护的是 value 的归属，并未让取消成为禁止发送的原子屏障。取得许可后到 `permit.send(value)` 之间没有 `.await`，也没有把消息再移入一个可能被丢弃的发送 Future[^25]。
 
 这个保证还依赖调用方继续等待 `send_or_return` 返回。若其父任务直接丢弃整个函数 Future，函数持有的 value 仍会随之析构；需要跨父任务取消保留消息时，应把消息或恢复责任放在生命周期更长的所有者中。
 
@@ -322,9 +328,31 @@ func main() {
 
 ### 结果与生命周期的归属
 
-**结构化并发**（structured concurrency）要求子任务的生命周期受父作用域管理：作用域退出前收束子任务，结果与错误有接收者，取消也沿依赖关系传播。它是一种组织原则，需要具体接口执行这些约束[^14]。
+**结构化并发**（structured concurrency）把子任务的生命周期交给父作用域管理。父作用域被取消时向下传递停止请求；子任务的结果或错误由父作用域接收。子任务也可以管理自己的子任务，因此收束沿任务树逐层进行：即使父作用域因错误或取消而退出，也必须先确认所属子任务都已结束[^14]。
 
-`tokio::join!` 在当前任务内组合多个 Future，正常返回前等待全部完成，但不会因某个分支返回 `Err` 就自动停止其他分支。`tokio::spawn` 则创建独立任务，丢弃返回的 `JoinHandle` 只是放弃等待，任务仍可能在运行时存活期间继续执行；父任务结束也不会自动取消它[^10][^15]。
+```mermaid title="结构化并发的责任树" description="虚线箭头是父作用域向子任务发出的停止请求；子任务向所有者交回结果、错误或取消状态。兄弟任务是否要停由父作用域决定，但所属任务必须全部退出，作用域才能退出；分离任务不在这个等待边界内。"
+flowchart TB
+ subgraph scope[父作用域的管理边界]
+  owner["父作用域<br/>选择兄弟任务策略"]
+  a["子任务 A"]
+  b["子任务 B"]
+  joined{"所属任务<br/>都已退出？"}
+  owner -.->|请求停止| a
+  owner -.->|请求停止| b
+  a -->|结果或错误| joined
+  b -->|结果或错误| joined
+ end
+ joined -->|是| exit["作用域退出"]
+ exit -.-|不等待| detached["分离任务"]
+ class owner actor
+ class a,b,joined state
+ class exit result
+ class detached risk
+```
+
+一个子任务失败后，可以让彼此独立的兄弟任务继续并汇总结果，也可以请求取消其余任务；这是失败策略，不是收束条件。Tokio 的 `join!` 与 `try_join!` 展示了两种策略：前者等待所有分支，后者在遇到首个 `Err` 时返回。它们都只在当前任务内组合 Future，并不启动独立任务[^15][^18]。
+
+`tokio::spawn` 则会创建独立任务，父任务结束不会自动取消它。丢弃 `JoinHandle` 只是放弃等待，让该任务脱离本作用域的收束边界，不是把责任自动移交给别人。有意让工作超出请求生命周期时，应交给更长寿的所有者，由它接收结果并负责关停[^10]。
 
 | 组织方式 | 结果归谁 | 停止与收束由谁负责 |
 | -------- | -------- | ------------------ |
@@ -359,7 +387,7 @@ async fn main() {
 
 一般程序中，任务也可能在取消生效前完成，此时等待仍会得到正常结果。`abort()` 只是提交取消请求，调用返回不表示析构已经完成；等待 JoinHandle 才能确认任务结束[^10]。
 
-这个区别也影响超时：把 `tokio::spawn(query())` 返回的 JoinHandle 直接交给 `timeout`，超时后丢弃的是句柄，后台任务并不会因此停止。若要管理该任务，应保留句柄，以可变引用等待；超时后请求取消，再等待收束。
+这个区别也影响超时：`timeout(d, query()).await` 超时后丢弃的是直接组合的 Future；把 `tokio::spawn(query())` 返回的句柄移入 `timeout`，超时后丢弃的只是句柄。要保留对独立任务的控制权，可以等待 `timeout(d, &mut handle).await`；若收到 `Err(Elapsed)`，再调用 `handle.abort()` 并 `await` 句柄，确认任务以何种状态结束[^10][^11]。
 
 启动多个任务时，同样需要决定成功、失败与关停三条路径如何等待所有任务。只在正常路径逐个 `await`，还不足以保证父任务被取消时自动完成结构化清理。
 
@@ -510,11 +538,19 @@ async fn main() {
 
 ### 多阶段期限与关停责任
 
-结果等待预算、请求期限和关停预算是不同的边界。一个请求若依次经历排队、获取连接和远程调用，每一阶段都重新等待完整的 1 秒，整个请求就可能远超 1 秒。需要统一请求期限时，可以在入口确定绝对 deadline，并将同一个时刻传给后续阶段，例如用 `timeout_at` 等待；后续阶段只消费剩余时间，而不重新获得一份完整预算。绝对期限也不能强制抢占长时间不返回的 `poll`[^11]。
+假设请求在入口有 1 秒预算，依次经历排队、获取连接和远程调用。下表固定各阶段开始的时刻，都从请求入口计时：逐段重置 1 秒会把到期点一路推迟；共用入口确定的绝对期限时，后续阶段只能使用剩余预算。
 
-期限到了以后，已有工作怎样结束仍需单独规定。第五篇的[关停协议](/posts/concurrency/message-passing-workers-backpressure/#关停时怎样处置已接受的工作)先明确接纳边界和排空或取消策略；异步所有者还需保持存活，接收错误、发出停止请求并等待任务退出。若应用另设收尾期限，超期后必须明确未结束工作的归属和处置。再给 `shutdown()` 套一层 timeout，只能限制这一轮等待，不会证明任务已经结束。
+| 阶段开始 | 逐段重置 1 秒：到期点 | 共用期限：到期点（剩余） |
+| -------- | ------------------- | ------------------------ |
+| 排队：0 ms | 1000 ms | 1000 ms（1000 ms） |
+| 获取连接：400 ms | 1400 ms | 1000 ms（600 ms） |
+| 远程调用：800 ms | 1800 ms | 1000 ms（200 ms） |
 
-因此，客户端停止等结果、工作被请求取消、任务实际结束和外部副作用得到确认，应分别记录。客户端超时后，可以由服务级所有者继续等待任务并报告最终状态；对于已经交付外部系统的操作，还需按业务协议确认结果或做补偿，不能把本地 JoinHandle 的取消状态当成远端没有执行的证据。
+在同一进程内，可以把入口计算的同一个 Tokio `Instant` 传给各阶段，用 `timeout_at` 等待。表中是定时器的到期点，不是任务退出时刻；绝对期限也不能抢占长时间不返回的 `poll`[^11]。
+
+请求期限决定何时不再等待结果，关停策略决定剩下的工作如何结束。照第五篇的[关停协议](/posts/concurrency/message-passing-workers-backpressure/#关停时怎样处置已接受的工作)，先停止接纳，再决定是排空，还是发信号让任务停止并完成异步善后；所有者仍要等待退出并处理结果。若另设收尾期限，超期后要明确由谁接管尚未结束的工作。给 `shutdown()` 再套一层 `timeout`，到期只表示这一轮等待超时；只有等待到集合收束，才能确认登记的任务已退出[^11][^18]。
+
+本地任务退出也不是外部副作用的确认。客户端超时只说明没有在这轮等待中收到结果：工作可能已接纳、已被领取，甚至已处理但确认未送达。应依照[交付与确认协议](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)查证结果，再决定是否重试或补偿，不能把本地 `JoinHandle` 报告的取消当成远端没有执行的证据。
 
 ## 公平性与阻塞工作
 
@@ -572,17 +608,17 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 
 [^5]: [Tokio `yield_now`](https://docs.rs/tokio/latest/tokio/task/fn.yield_now.html)——重新调度与组合器内让出行为的限制
 
-[^6]: [Mio `Poll`](https://docs.rs/mio/latest/mio/struct.Poll.html)——跨平台就绪抽象、系统实现与虚假就绪
+[^6]: [Mio 1.2.5 `Poll`](https://docs.rs/mio/1.2.5/mio/struct.Poll.html)——跨平台就绪抽象、Windows 完成通知的适配与 `WouldBlock`
 
 [^7]: [Microsoft: I/O Completion Ports](https://learn.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports)——Windows 完成端口与已完成异步 I/O 的通知
 
-[^8]: [Linux io_uring(7)](https://man7.org/linux/man-pages/man7/io_uring.7.html)——提交队列、完成队列与操作结果
+[^8]: [Linux `io_uring(7)`](https://man7.org/linux/man-pages/man7/io_uring.7.html) 与 [`io_uring_prep_poll_add(3)`](https://man7.org/linux/man-pages/man3/io_uring_prep_poll_add.3.html)——提交队列、完成队列，以及读请求结果和就绪事件掩码的区别
 
 [^9]: [Rust `Drop`](https://doc.rust-lang.org/std/ops/trait.Drop.html)——析构契约与同步的 `drop` 接口
 
-[^10]: [Tokio task：Cancellation](https://docs.rs/tokio/latest/tokio/task/#cancellation)与[`JoinHandle`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html)——任务取消时机、句柄丢弃、abort 与等待结束
+[^10]: [Tokio 1.53.3 task：Cancellation](https://docs.rs/tokio/1.53.3/tokio/task/#cancellation)与[`JoinHandle`](https://docs.rs/tokio/1.53.3/tokio/task/struct.JoinHandle.html)——句柄分离、可变引用等待的取消安全、请求取消和确认退出的区别
 
-[^11]: [Tokio 1.53.3 `timeout`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout.html)与[`timeout_at`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout_at.html)——相对时长与绝对期限、超时返回、内部 Future 的取消与非让出操作的限制
+[^11]: [Tokio 1.53.3 `timeout`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout.html)、[`timeout_at`](https://docs.rs/tokio/1.53.3/tokio/time/fn.timeout_at.html)及[`Timeout` 源码](https://docs.rs/tokio/1.53.3/src/tokio/time/timeout.rs.html)——相对时长、绝对期限、包装器的所有权与先轮询内部 Future 的顺序
 
 [^12]: [Tokio `select!`](https://docs.rs/tokio/latest/tokio/macro.select.html)——分支生命周期、取消安全、默认与 biased 轮询顺序
 
@@ -590,13 +626,13 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 
 [^14]: [Async Book: Structured concurrency](https://rust-lang.github.io/async-book/part-reference/structured.html)——任务归属、作用域与取消传播原则
 
-[^15]: [Tokio `join!`](https://docs.rs/tokio/latest/tokio/macro.join.html)——同任务并发、等待所有分支与轮询公平性
+[^15]: [Tokio 1.53.3 `join!`](https://docs.rs/tokio/1.53.3/tokio/macro.join.html)——同任务并发、等待所有分支与轮询公平性
 
 [^16]: [Tokio runtime：Detailed runtime behavior](https://docs.rs/tokio/latest/tokio/runtime/#detailed-runtime-behavior)——调度公平性的前提与顺序限制
 
 [^17]: [Tokio `spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)与[`Builder::max_blocking_threads`](https://docs.rs/tokio/latest/tokio/runtime/struct.Builder.html#method.max_blocking_threads)——阻塞线程池默认上限 512、CPU 工作限制与无法中断已开始闭包的边界
 
-[^18]: [Tokio `try_join!`](https://docs.rs/tokio/latest/tokio/macro.try_join.html)与[Tokio 1.53.3 `JoinSet::shutdown`](https://docs.rs/tokio/1.53.3/tokio/task/struct.JoinSet.html#method.shutdown)——一败俱停的分支组合；JoinSet 丢弃时请求中止任务，shutdown 则请求中止并等待集合清空，忽略收束期间子任务的 panic
+[^18]: [Tokio 1.53.3 `try_join!`](https://docs.rs/tokio/1.53.3/tokio/macro.try_join.html)与[`JoinSet::shutdown`](https://docs.rs/tokio/1.53.3/tokio/task/struct.JoinSet.html#method.shutdown)——分支遇到首个错误即返回；JoinSet 丢弃时请求中止任务，shutdown 则请求中止并等待集合清空，忽略收束期间子任务的 panic
 
 [^19]: [Async: What is blocking?](https://ryhl.io/blog/async-what-is-blocking/)——两次 `.await` 之间 10–100 微秒的参考预算，及其“取决于应用”的限定
 
@@ -616,3 +652,5 @@ Tokio 的阻塞线程池默认上限为 512 个线程，不能把大量 CPU 工�
 
 
 [^27]: [tokio-util 0.7.20 `CancellationToken`](https://docs.rs/tokio-util/0.7.20/tokio_util/sync/struct.CancellationToken.html)——取消通知、向子令牌传播，以及任务主动等待取消的接口
+
+[^28]: [Linux `epoll(7)`](https://man7.org/linux/man-pages/man7/epoll.7.html)——就绪列表、事件返回，以及程序随后发起非阻塞读写的顺序

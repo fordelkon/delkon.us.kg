@@ -5,7 +5,7 @@ publishDate: "13 Sep 2026"
 tags: ["concurrency", "synchronization", "rust", "cpp"]
 ---
 
-上一篇[《并发编程（一）：并发、并行与执行单元》](/posts/concurrency/parallelism-execution-units/)厘清了并发与并行的区别，梳理了进程、线程、协程三类执行单元，以及抢占式与协作式两种调度模型。本篇接着回答：多个线程共享同一份数据时，如何保护状态，又如何在条件不满足时等待。示例仍以 Rust 为主，条件变量部分用 C++ 展示锁与等待的配合。
+上一篇[《并发编程（一）：并发、并行与执行单元》](/posts/concurrency/parallelism-execution-units/)区分了并发和并行，也区分了进程、线程、协程等执行抽象与抢占式、协作式等调度策略。本篇接着回答：多个线程共享同一份数据时，如何保护状态，又如何在条件不满足时等待。示例仍以 Rust 为主，条件变量部分用 C++ 展示锁与等待的配合。
 
 ## 共享内存：保护状态与协调推进
 
@@ -20,16 +20,15 @@ tags: ["concurrency", "synchronization", "rust", "cpp"]
 
 这是按主要用途划分的讲解视角，并不是互不重叠的分类。锁除了互斥，还建立线程之间的同步顺序：一个线程在持锁期间做出的修改，对之后获得同一把锁的线程可见——这一保证的机制属于内存模型，第三篇用[happens-before](/posts/concurrency/atomics-memory-model/#跨线程同步与-happens-before)展开。协调机制则经常与锁组合，才能构成完整协议。
 
-| 工具     | 核心机制                           | 本篇中的用途           |
-| -------- | ---------------------------------- | ---------------------- |
-| Mutex    | 同一把锁一次只允许一个持有者       | 独占访问共享状态       |
-| RwLock   | 多个读者或一个写者                 | 允许只读访问并发进行   |
-| 条件变量 | 释放锁并等待通知，返回前重新获取锁 | 等待队列非空或生产结束 |
-| Barrier  | 等待约定数量的参与者到达           | 在阶段之间会合         |
+| 工具 | 什么时候可以继续 | 用途举例 |
+| ---- | ---------------- | -------- |
+| Mutex | 取得锁，独占访问 | 独占更新共享结果 |
+| RwLock | 取得读锁或写锁；读锁可共享，写锁独占 | 并发读取配置 |
+| 条件变量 | 重新拿锁后确认谓词为真 | 等队列非空或生产结束 |
+| Barrier | 本轮到达次数达到约定值 | 等所有 worker 完成本阶段再汇总 |
+| Semaphore | 领取到可用许可 | 限制同时使用数据库连接的 worker 数 |
 
-信号量可以先理解为一组可领取的许可：获取操作（传统名称 P）在有许可时取走一个，没有许可时等待；归还操作（V）增加可用许可，并使等待者有机会继续。初始为 1 可用于互斥，初始为 0 可用于等待另一方发出事件；具体数据发布保证仍需查看接口契约[^1]。
-
-原子操作与一次性初始化留到[《并发编程（三）：原子操作与内存模型》](/posts/concurrency/atomics-memory-model/)；管理资源许可的**信号量**（Semaphore）留到[《并发编程（五）：消息传递、任务池与背压》](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)。信号量既可用于限制并发数量，也可用于互斥或事件排序，并不只属于“协调”一侧[^1]。
+原子操作与一次性初始化留到[《并发编程（三）：原子操作与内存模型》](/posts/concurrency/atomics-memory-model/)，许可怎样限制资源用量则由第五篇的[信号量与资源并发数](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)展开。
 
 ## Send / Sync：跨线程传递与共享
 
@@ -134,7 +133,7 @@ RwLock 背后是经典的**读者-写者问题**（readers/writers）：读与�
 
 ### 临界区范围与锁的粒度
 
-理解两种锁以后，再看如何控制它们的成本，可以分成时间和空间两个维度。
+先写出锁要保护的**不变量**（invariant）：一次完整操作前后都应成立的约束，例如转账前后两账户总额不变。持锁线程可以暂时打破它，但遵守同一协议的其他线程不能看到中间状态。这个约束同时决定要持锁多久，以及哪些数据必须一起保护。
 
 **时间维度：缩短持锁时间，但保留完整操作。** OSTEP 把锁保护下的临界区描述为近似一条原子指令的执行：对于遵守同一加锁协议的线程，它们不会看到这段操作执行到一半的状态[^6]。与不变量无关的工作，例如日志、网络 I/O、耗时计算，应尽量移到锁外。但不能把必须整体完成的检查和更新拆成两个临界区，否则即使每次访问都加了锁，组合起来仍可能出错。
 
@@ -263,7 +262,20 @@ fn main() {
 
 **条件变量**（condition variable）用于实现这套等待协议。它配合互斥锁使用：锁保护状态，`wait` **原子地释放锁并进入等待**，返回前重新获取锁。Rust 的类型名是 `Condvar`；C++ 的 `std::condition_variable` 则通过 `std::unique_lock` 管理等待前后的锁所有权[^7]。
 
-下面是一种成功领取的时序。图中消费者在 `wait` 的一次原子操作里解锁并进入等待；收到通知之后，还需竞争同一把锁。C++ 和 Rust 都允许虚假唤醒，因此 `wait` 返回后仍要持锁检查谓词[^7]。
+先看一个生产者、一个消费者的**丢失唤醒**（lost wakeup）。即使所有队列读写都持有同一把锁，消费者若在检查与等待之间先解锁，仍可能错过通知：C++ 的 `notify_one()` 不会为之后才开始等待的线程保留通知[^7][^9]。下图的箭头只表示这次交错的先后，不表示经过了多久。
+
+```mermaid title="错误时序：检查与等待之间丢失唤醒" description="消费者持锁发现队列为空，却提前解锁。生产者持同一把锁入队，解锁后通知，此时没有等待者。消费者重新拿锁，不复查就调用 wait；若没有后续通知或虚假唤醒，即使队列有任务，它也可能一直等下去。"
+flowchart TB
+ check["消费者持锁检查<br/>队列为空"]
+ gap["消费者提前解锁<br/>尚未等待"]
+ notify["生产者持锁入队<br/>解锁后通知，无人等待"]
+ wait["消费者重新拿锁<br/>不复查，直接 wait"]
+ stuck["队列已有任务<br/>消费者仍可能一直等待"]
+ check --> gap --> notify --> wait --> stuck
+ class gap,stuck risk
+```
+
+正确时序不在检查与调用 `wait` 之间解锁。若生产者先入队，消费者持锁检查时会看到任务，根本不用等；若消费者先看到空队列，生产者只能在消费者原子地解锁并进入等待后拿到同一把锁。`wait` 返回时已重新持锁，但唤醒可能是虚假的，任务也可能已被另一个消费者领走，因此仍要复查谓词[^7]。
 
 ```mermaid title="条件变量的等待、通知与复查" description="消费者持锁发现空队列。wait 原子地解锁并进入等待；生产者持同一把锁入队，解锁后通知。消费者醒来后重新竞争并取得锁，wait 才返回。复查谓词成立后才领取任务。"
 sequenceDiagram
@@ -362,7 +374,7 @@ int main() {
 
 读懂这段代码，关键是三个约束：
 
-1. **条件存在于状态里。** `tasks` 和 `done` 都在同一把锁下检查、修改。通知不会累积为可供以后领取的事件；如果通知发生在等待之前，消费者仍能通过状态判断自己无需等待。避免丢失唤醒依赖两个前提配合：谓词在持有互斥锁时检查；修改谓词所依赖状态的线程（这里是生产者）也必须先拿同一把锁。假如状态不受这把锁保护，一次通知就可能落在“检查完条件”与“进入等待”之间，被永远错过；`wait` 原子地解锁并进入等待，正是在锁的保护下封住了这段窗口。
+1. **条件存在于状态里。** 消费者持锁检查 `tasks` 和 `done`，生产者入队、主线程设置退出标记也必须持有同一把锁；消费者从检查到调用 `wait` 之间不自行解锁。这样才能封住图中的空档。
 2. **唤醒后必须重新检查。** 线程可能虚假唤醒，也可能在重新获得锁之前被其他消费者取走任务。`while` 检查的是能否继续的谓词：队列非空，或者生产已经结束。C++ 的 `condition.wait(lock, predicate)` 在谓词为假时等待，本例的谓词是 `!tasks.empty() || done`。Rust 的 `Condvar::wait_while(guard, predicate)` 则在谓词为真时继续等待：若状态含有相同的 `tasks` 和 `done` 字段，闭包应检查 `state.tasks.is_empty() && !state.done`。两者表达同一等待协议时，谓词方向相反[^7]。
 3. **结束不等于立即退出。** 主线程先等待全部生产者结束，再设置 `done` 并唤醒所有消费者。消费者只有在生产结束且队列已空时退出。设想两位消费者都因队列为空而等待：主线程持锁设置 `done = true` 并解锁，`notify_all()` 让两位等待者都能重新竞争锁。两者分别在持锁时检查到队列已空且生产结束，随后退出，主线程才能依次 join。若只通知一位，另一位可能一直等下去。
 
@@ -414,7 +426,9 @@ fn main() {
 
 ### Semaphore：许可决定能否进入
 
-屏障按到达人数开放下一阶段，**信号量**（semaphore）则在还有许可时授予进入资格。以 Tokio 为例，`acquire().await` 返回 RAII 许可，作用域结束时归还；需要让新任务持有许可，可以使用 `acquire_owned()`。若对许可调用 `forget()`，它所占的容量会被扣除，直到另行补充。Tokio 按请求顺序分配许可，多许可请求位于队首时可能让后面的小请求一起等；具体实现的公平策略应查各自文档。第五篇用[可运行的资源限流示例](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)把许可的边界和整体接纳策略联系起来[^tokio-semaphore]。
+**信号量**（semaphore）记录可用许可：获取消耗许可，没有足够许可就等待；释放增加许可，即使当时没有等待者，之后也可以领取。一个许可可以构成互斥协议，但许可本身不同于 Mutex 的持有权；信号量也不要求像 Barrier 那样等一批参与者到齐[^1]。
+
+以 Tokio 为例，`acquire().await` 返回的许可在被丢弃时归还；需要转给新任务时可使用 `acquire_owned()`。Tokio 按请求顺序分配许可，多许可请求在队首时可能让后面的小请求一起等[^tokio-semaphore]。第五篇用[可运行的资源限流示例](/posts/concurrency/message-passing-workers-backpressure/#信号量与资源并发数)说明许可如何限制资源用量，以及它为什么不能独自解决排队问题。
 
 ## 减少共享可变状态
 
@@ -454,7 +468,7 @@ Rust 的所有权与借用规则提供了另一种约束：普通共享引用限
 
 [^6]: [OSTEP ch28: Locks](https://pages.cs.wisc.edu/~remzi/OSTEP/threads-locks.pdf)——临界区的互斥执行，以及粗粒度与细粒度锁策略
 
-[^7]: [C++ 标准草案：`condition_variable`](https://eel.is/c++draft/thread.condition.condvar)与[Rust `Condvar`](https://doc.rust-lang.org/std/sync/struct.Condvar.html)——原子解锁与等待、返回前重新加锁、虚假唤醒与谓词循环
+[^7]: [C++ 标准草案：`condition_variable`](https://eel.is/c++draft/thread.condition.condvar)、[条件变量的一般规则](https://eel.is/c++draft/thread.condition.general)与[Rust `Condvar`](https://doc.rust-lang.org/std/sync/struct.Condvar.html)——原子解锁并等待、返回前重新加锁、虚假唤醒与谓词循环；C++ 的通知只针对当时已在等待的线程
 
 [^8]: [Modern C++：7.4 条件变量](https://changkun.de/modern-cpp/zh-cn/07-thread/#7-4-条件变量)——C++ 生产者-消费者示例的参考资料
 
@@ -474,4 +488,4 @@ Rust 的所有权与借用规则提供了另一种约束：普通共享引用限
 
 [^java-condition]: [Java `ReentrantLock::newCondition`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/locks/ReentrantLock.html#newCondition())——与显式锁关联的条件等待集合、释放及恢复重入计数
 
-[^tokio-semaphore]: [Tokio 1.53.3 `Semaphore`](https://docs.rs/tokio/1.53.3/tokio/sync/struct.Semaphore.html) 与 [`SemaphorePermit::forget`](https://docs.rs/tokio/1.53.3/tokio/sync/struct.SemaphorePermit.html#method.forget)——许可归还、公平分配与主动遗忘的语义
+[^tokio-semaphore]: [Tokio 1.53.3 `Semaphore`](https://docs.rs/tokio/1.53.3/tokio/sync/struct.Semaphore.html)——许可获取、归还与公平分配的语义
