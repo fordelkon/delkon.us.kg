@@ -10,6 +10,36 @@ import "@/styles/blocks/search.css";
 	let stylesheet: HTMLLinkElement | undefined;
 	let stylesReady: Promise<void> | undefined;
 
+	const viewport = window.visualViewport;
+
+	function fitSearchViewport(dialog: HTMLDialogElement): void {
+		if (!viewport) return;
+
+		// The on-screen keyboard can move and shrink the visual viewport without resizing the layout.
+		dialog.style.setProperty("--search-viewport-top", `${viewport.offsetTop}px`);
+		dialog.style.setProperty("--search-viewport-left", `${viewport.offsetLeft}px`);
+		dialog.style.setProperty("--search-viewport-width", `${viewport.width}px`);
+		dialog.style.setProperty("--search-viewport-height", `${viewport.height}px`);
+	}
+
+	if (viewport) {
+		const fitOpenSearch = () => {
+			const dialog = document.querySelector<HTMLDialogElement>("pagefind-modal > dialog:modal");
+
+			if (dialog) fitSearchViewport(dialog);
+		};
+
+		document.addEventListener("beforetoggle", (event) => {
+			const dialog = event.target;
+
+			if (event.newState === "open" && dialog instanceof HTMLDialogElement && dialog.matches("pagefind-modal > dialog")) {
+				fitSearchViewport(dialog);
+			}
+		}, true);
+		viewport.addEventListener("resize", fitOpenSearch);
+		viewport.addEventListener("scroll", fitOpenSearch);
+	}
+
 	function loadDialogStyles() {
 		return new Promise<void>((resolve, reject) => {
 			const link = document.createElement("link");
