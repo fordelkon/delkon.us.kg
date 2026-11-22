@@ -131,14 +131,14 @@ QUIC Initial 的保护密钥可由公开信息导出，不能向旁观者隐藏�
 
 握手完成后，再对照应用数据怎样装进 IP 数据报。设客户端为 `192.168.1.10`，目标为文档示例地址 `198.51.100.20`。下面比较同一客户端分别建立的 HTTP/2 与 HTTP/3 连接，只画客户端出站、尚未经过 NAT 的 IP 数据报，不画外面的链路帧。为单独看清包含关系，特意选择能在一个 TCP 段中装下完整 TLS 记录、以及一个 UDP 数据报中只装一个 QUIC 1-RTT 包的情况：
 
-```mermaid title="HTTP/2 与 HTTP/3 的数据包里分别装了什么" description="上下是独立连接的应用数据封装，不表示两者逐字段等价，也不按字节比例绘制。上方仅选一条完整 TLS 记录装入一个 TCP 段的示例，实际 TLS 记录可跨段；下方仅选一个 UDP 数据报承载一个 QUIC 短头 1-RTT 包的示例。无箭头连线只排列字段；标为解密后的内容在线上属于密文。"
+```mermaid title="HTTP/2 与 HTTP/3 的数据包里分别装了什么" description="两组分别是 HTTP/2 和 HTTP/3 连接里的 IPv4 包。框的嵌套表示载荷归属。HTTP/2 组选一条完整 TLS 记录恰好装进一个 TCP 段，HTTP/3 组选一个 UDP 数据报承载一个 QUIC 短头 1-RTT 包。框内列出线上可见字段，以及密文解开后的内容。"
 flowchart TB
  subgraph h2_packet[HTTP/2：一个 IPv4 数据报]
-  ip2["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20<br/>Protocol = 6"]
+  ip2["IPv4 头 · Protocol=6<br/>192.168.1.10 → 198.51.100.20"]
   subgraph tcp_segment[TCP 报文段]
    tcp2["TCP 头<br/>50001 → 443<br/>Seq · Ack · 校验和"]
    subgraph tls_record[TLS 1.3 记录]
-    record2["公开记录头<br/>type = 23<br/>version = 0x0303<br/>length = 后续密文长度"]
+    record2["公开记录头 · type=23<br/>version=0x0303 · 密文长度"]
     cipher2["AEAD 密文与认证标签<br/>解密后：HTTP/2 DATA 帧<br/>内层类型与可选填充"]
     record2 --- cipher2
    end
@@ -147,11 +147,11 @@ flowchart TB
   ip2 --- tcp2
  end
  subgraph h3_packet[HTTP/3：一个 IPv4 数据报]
-  ip3["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20<br/>Protocol = 17"]
+  ip3["IPv4 头 · Protocol=17<br/>192.168.1.10 → 198.51.100.20"]
   subgraph udp_datagram[UDP 数据报]
    udp3["UDP 头<br/>50002 → 443<br/>长度 · 校验和"]
    subgraph quic_packet[QUIC 1-RTT 包]
-    header3["QUIC 短头<br/>目的连接 ID 可见<br/>包号受头部保护"]
+    header3["QUIC 短头 · 目的连接 ID 可见<br/>包号受头部保护"]
     cipher3["AEAD 密文与认证标签<br/>解密后：STREAM 帧<br/>流内字节承载 HTTP/3 DATA 帧"]
     header3 --- cipher3
    end

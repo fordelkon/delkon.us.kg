@@ -33,21 +33,24 @@ TCP 在两端为每条连接维护状态：本地与对端的地址和端口、�
 
 通常的主动建连过程是：客户端发送 `SYN`，**初始序列号**（Initial Sequence Number，ISN）为 $x$；服务端回复 `SYN-ACK`，携带自身初始序号 $y$ 并确认 $x+1$；客户端再确认 $y+1$。这个交换使双方同步初始序号，并确认对方能够接收自己的序号信息；连接状态机还必须处理旧报文与重复报文，避免把滞留的连接请求误认为新的有效连接[^1]。
 
-图中的被动端状态跟随本次连接，监听套接字仍可继续接收其他连接。
+图中的被动端状态跟随本次连接，监听套接字仍可继续接收其他连接[^tcp-lifecycle]。
 
-```mermaid title="TCP 主动与被动建连状态" description="普通三次握手。左、右两条链分别是主动端和被动端的本地状态转换。SYN 和 ACK 的发送、接收分别发生在两端，省略同时打开、重传、超时与拒绝。"
-stateDiagram-v2
- state "主动端 CLOSED" as Ac
- state "主动端 SYN-SENT" as As
- state "主动端 ESTABLISHED" as Ae
- state "被动端 LISTEN" as Bl
- state "被动端 SYN-RECEIVED" as Bs
- state "被动端 ESTABLISHED" as Be
- Ac --> As: 发 SYN
- As --> Ae: 收 SYN+ACK，回 ACK
- Bl --> Bs: 收 SYN，回 SYN+ACK
- Bs --> Be: 收最终 ACK
+```mermaid title="TCP 三次握手：报文方向与两端状态" description="客户端主动打开，服务端被动打开。自上而下读三段报文，注记标记各端在相关发送或接收后进入的状态。本例三段的 TCP 载荷均为空，省略同时打开、重传与超时。"
+sequenceDiagram
+ participant C as 客户端
+ participant S as 服务端
+ Note over C: CLOSED
+ Note over S: LISTEN
+ C->>S: SYN · Seq=x
+ Note over C: SYN-SENT
+ Note over S: SYN-RECEIVED
+ S->>C: SYN+ACK · Seq=y · Ack=x+1
+ Note over C: ESTABLISHED
+ C->>S: ACK · Seq=x+1 · Ack=y+1
+ Note over S: ESTABLISHED
 ```
+
+这里的确认号都在 TCP 头里。SYN 即使没有载荷也占用一个序号，纯 ACK 则不消耗序号。第三段 ACK 可以带数据，本例取纯 ACK。三个 TCP 控制段都能单独交给 IP，再由当前链路成帧，参见[封装路径对照](/posts/networking/layered-architecture-packet-journey/#同一条链路上的不同封装路径)[^1]。
 
 ### 连接关闭：FIN、半关闭与 TIME-WAIT
 
@@ -55,34 +58,26 @@ TCP 的两个方向可以分别结束。调用 `shutdown(Shutdown::Write)` 会�
 
 在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 `TIME-WAIT`。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待长度为 `2 MSL`（**最大报文段生存时间**，Maximum Segment Lifetime，MSL），用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。
 
-```mermaid title="TCP 半关闭、主动关闭与被动关闭" description="从同一条已建立连接的两端分别观察，A 先发 FIN，B 先确认再关闭自身写方向。B 在 CLOSE-WAIT 仍能发送。若两端同时关闭，FIN-WAIT-1 收到尚未确认本端 FIN 的对端 FIN 时可进 CLOSING，待本端 FIN 获确认再进入 TIME-WAIT。省略复位和超时异常。"
-stateDiagram-v2
- state "A ESTABLISHED" as Ae
- state "A FIN-WAIT-1" as A1
- state "A FIN-WAIT-2" as A2
- state "A TIME-WAIT" as At
- state "A CLOSED" as Ac
- state "B ESTABLISHED" as Be
- state "B CLOSE-WAIT" as Bw
- state "B LAST-ACK" as Ba
- state "B CLOSED" as Bc
- Ae --> A1: 应用关闭写方向，发 FIN
- A1 --> A2: 本端 FIN 被确认
- A2 --> At: 收对端 FIN，回 ACK
- At --> Ac: 2 MSL 后
- Be --> Bw: 收 FIN，回 ACK
- Bw --> Ba: 应用关闭写方向，发 FIN
- Ba --> Bc: 本端 FIN 被确认
+```mermaid title="TCP 四段关闭：两个方向分别结束" description="A 先关闭写方向，B 先单独确认，稍后才关闭自己的写方向。自上而下读四段控制报文，间距不表示耗时。半关闭期间 B 仍可向 A 发送数据。图中假设这期间无额外数据。"
+sequenceDiagram
+ participant A as 端点 A
+ participant B as 端点 B
+ Note over A,B: ESTABLISHED
+ A->>B: FIN+ACK · Seq=m · Ack=n
+ Note over A: FIN-WAIT-1
+ Note over B: CLOSE-WAIT
+ B->>A: ACK · Seq=n · Ack=m+1
+ Note over A: FIN-WAIT-2
+ Note over B: 写方向仍开放
+ B->>A: FIN+ACK · Seq=n · Ack=m+1
+ Note over B: LAST-ACK
+ A->>B: ACK · Seq=m+1 · Ack=n+1
+ Note over A: TIME-WAIT
+ Note over B: CLOSED
+ Note over A: 2 MSL 后 CLOSED
 ```
 
-下表沿用图中的正常关闭路径。A 先关闭写方向，B 稍后关闭，FIN 与 ACK 分开发送[^1]。
-
-| 事件 | A 的状态 | B 的状态与含义 |
-| --- | --- | --- |
-| A 发 FIN，B 收到 | `FIN-WAIT-1` | `CLOSE-WAIT`；读完此前字节后收到 EOF，仍可发送 |
-| B 确认 A 的 FIN，A 收到 ACK | `FIN-WAIT-2` | 等待本地应用关闭发送方向 |
-| B 发 FIN | 仍在等待对端结束 | `LAST-ACK` |
-| A 收到 FIN，发最终 ACK；B 收到 ACK | `TIME-WAIT` | `CLOSED` |
+图中的 `m`、`n` 是两端关闭前各自的下一个发送序号，每个 FIN 占用一个序号。若两端同时关闭，`FIN-WAIT-1` 收到尚未确认本端 FIN 的对端 FIN 时可进入 `CLOSING`，等本端 FIN 获确认再进入 `TIME-WAIT`。其他状态转换见 RFC 9293 的连接状态图[^tcp-lifecycle]。
 
 对已建立的连接，一端收到带复位标志（`RST`）的报文并按当前状态及序号规则接受它时，会在本地中止该连接。应用在哪次读写看到错误取决于接口与缓冲状态。`RST` 也可用于拒绝建连请求[^1]。已发出的请求仍可能在复位前被对端处理，重试需要考虑幂等性。意外断网可能没有 FIN 或 RST，需等超时或后续通信发现。
 
@@ -97,18 +92,16 @@ TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
 把这些字段放进具体报文。沿用[第三篇无 NAT 的路由实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：A 为 `192.168.1.10:50001`，B 为 `198.51.100.20:443`，两端 TCP 已建立。假设 A 下一个发送序号为 `1001`，B 下一个发送序号为 `7001`，接下来只有 A 向 B 发送数据。
 
-```mermaid title="TCP 数据、累计确认与超时重传的具体字段" description="已建立的实验连接，无 NAT 或代理，使用绝对示例序号。每个框是一份 TCP 报文段，箭头表示交互顺序，不是同一个包的转发。省略链路头、IP 头、窗口、选项与校验和。第二段丢失且超时前没有后续数据，因此用 RTO 重传；ACK 也可能延迟或合并，这只是一种合法交互，间距不代表时长。"
-flowchart TB
- data1["① A → B：发送 100 字节<br/>TCP：50001 → 443<br/>Seq=1001 · Ack=7001<br/>ACK=1 · Len=100"]
- ack1["② B → A：确认到 1100<br/>TCP：443 → 50001<br/>Seq=7001 · Ack=1101<br/>ACK=1 · Len=0"]
- lost["③ A → B：这份包在途中丢失<br/>TCP：50001 → 443<br/>Seq=1101 · Ack=7001<br/>ACK=1 · Len=60"]
- retry["④ A → B：重传相同字节范围<br/>TCP：50001 → 443<br/>Seq=1101 · Ack=7001<br/>ACK=1 · Len=60"]
- ack2["⑤ B → A：确认到 1160<br/>TCP：443 → 50001<br/>Seq=7001 · Ack=1161<br/>ACK=1 · Len=0"]
- data1 -->|B 连续收到这些字节| ack1
- ack1 -->|A 继续发送后面的 60 字节| lost
- lost -.->|尚未获确认，重传计时器到期| retry
- retry -->|B 补齐后累计确认| ack2
- class lost risk
+```mermaid title="TCP 数据、累计确认与超时重传" description="已建立的连接，使用绝对示例序号。虚线标记途中丢失的报文，B 未收到。超时前没有后续数据，本例由 RTO 触发重传。各段均置 ACK 标志，Len 只计 TCP 载荷，间距不代表耗时。"
+sequenceDiagram
+ participant A as A · 端口 50001
+ participant B as B · 端口 443
+ A->>B: Seq=1001 · Ack=7001 · Len=100
+ B->>A: Seq=7001 · Ack=1101 · Len=0
+ A-->>B: 途中丢失 · Seq=1101 · Len=60
+ Note over A: 未收到确认，RTO 到期
+ A->>B: 重传 Seq=1101 · Ack=7001 · Len=60
+ B->>A: Seq=7001 · Ack=1161 · Len=0
 ```
 
 第一段占据序号 `1001…1100`，所以 B 回复 `Ack=1101`；第二段占据 `1101…1160`，补齐后回复 `Ack=1161`。`Ack` 是确认号字段，`ACK=1` 则表示确认标志置位；`Len` 只计 TCP 载荷，不包含 TCP 头。这里纯 ACK 不携带数据，也不含 SYN 或 FIN，因此不消耗发送序号，B 的 `Seq` 一直为 `7001`[^1]。
@@ -255,19 +248,13 @@ UDP 提供端口和数据报承载，使 QUIC 可以在现有 UDP 路径上部�
 1. 跨流的按序等待：HTTP/2 多条应用流共享 TCP 字节流，缺失字节会阻止后续字节按序交付，即使后续字节属于其他请求（即传输层**队头阻塞**，Head-of-Line Blocking）。QUIC 的流各自维护偏移量；某条流等待重传时，其他已具备数据的流可以继续交付。但流之间仍共享连接的拥塞控制与部分资源，不能说彼此完全没有影响。
 2. 连接与地址组合的关系：普通 TCP 连接依赖固定地址与端口组合；网络切换导致它们改变时，通常需要重新连接。QUIC 的**连接标识**（Connection ID，CID）将连接识别与固定 IP/端口组合解耦，为在条件允许时保留已有连接提供支持。
 
-```mermaid title="TCP 字节缺口与 QUIC 流内缺口" description="上下比较相同丢包条件下的传输层交付，不按时间或字节比例绘制。HTTP/2 的后续字节受同一 TCP 字节流的缺口阻塞；QUIC 中只有已收到连续偏移、且应用依赖也已就绪的其他流才能继续交付。QUIC 的 ACK 确认包号，流数据按各自偏移重组，并非每条流都有独立的包确认空间；拥塞控制和连接级资源仍可能相互影响。"
-flowchart TB
- subgraph tcp_case[HTTP/2 over TCP：共享按序字节流]
-  tcp_gap["较早 TCP 字节缺失<br/>后续字节已到达"] --> tcp_wait["等待重传补齐缺口"]
-  tcp_wait --> tcp_streams["流 1、流 2 的后续字节<br/>都暂不能由 TCP 向上交付"]
- end
- subgraph quic_case[HTTP/3 over QUIC：按流偏移重组]
-  q_gap["流 1 缺少一段偏移"] --> q_wait["流 1 等待补齐"]
-  q_ready["其他包中的流 2 数据连续<br/>且应用依赖已满足"] --> q_deliver["流 2 可以交付给应用"]
- end
- tcp_case --- quic_case
- linkStyle 4 stroke:none
-```
+| 接收端的字节视图 | 首段 | 中段 | 后段 |
+| --- | --- | --- | --- |
+| HTTP/2 的共享 TCP 字节流 | 流 1 字节已交付 | **流 1 字节缺失** | 流 2 字节已到，但被前面的缺口挡住 |
+| QUIC 流 1 | 已交付 | **缺失** | 后续字节等待流内缺口补齐 |
+| QUIC 流 2 | 已交付 | 后续偏移连续，可继续交付 | 继续按本流偏移交付 |
+
+每行从左到右按该行的字节偏移读。TCP 行使用连接级字节序号，QUIC 两行各有自己的偏移起点。这里选用 QUIC 流 2 的连续数据已通过其他包抵达、应用依赖也已就绪的情形。
 
 以客户端从 Wi-Fi 切到蜂窝网络为例：主动迁移要等握手确认，并受服务端通告的迁移参数限制。服务端发现之前未验证的客户端地址时，需要验证新路径；CID 能识别原连接，却不能证明新路径可达。为避免跨路径关联，从不同本地地址发包不能复用同一个 CID。NAT 重绑定则可能在客户端没有主动换地址、也未换 CID 的情况下改变服务端看到的源地址或端口，仍需按规则验证未验证的地址。QUIC v1 通常由客户端发起迁移；服务端通过 `preferred_address` 通告备用地址是另有规则的情形[^quic-migration]。
 
@@ -364,3 +351,5 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 [^send-man]: 〔平台与实现〕[Linux Programmer's Manual: send(2)](https://man7.org/linux/man-pages/man2/send.2.html)——`send`/`write` 成功返回仅表示数据已写入内核发送缓冲区，不代表对端已接收或处理。
 
 [^shutdown]: 〔平台与实现〕[Linux Programmer's Manual: shutdown(2)](https://man7.org/linux/man-pages/man2/shutdown.2.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。
+
+[^tcp-lifecycle]: 〔RFC〕[RFC 9293 图 5](https://www.rfc-editor.org/rfc/rfc9293.html#figure-5)给出状态机，[图 6](https://www.rfc-editor.org/rfc/rfc9293.html#figure-6)和[图 12–13](https://www.rfc-editor.org/rfc/rfc9293.html#figure-12)分别展示建连、正常关闭与同时关闭的报文交换。

@@ -44,14 +44,21 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 
 以下是忽略缓存、别名和查询最小化等细节的单次 `A` 查询示意；`198.51.100.20` 是文档地址，不是当前真实解析结果[^1]：
 
-```mermaid title="一次未命中缓存的 DNS 查询" description="框间箭头表示处理顺序；框内箭头表示报文从谁发到谁。存根请求递归服务；递归器分别询问根、.com 和目标权威，前两站返回委派而非最终地址。此例每轮均查询 example.com. 的 A 记录，省略查询名最小化、别名、失败和地址补查。缓存命中时可跳过相应步骤。"
-flowchart TB
- start["存根 → 递归器<br/>查询 example.com. A<br/>RD=1"]
- root["递归器 → 根：查询<br/>根 → 递归器：.com 委派"]
- tld["递归器 → .com：查询<br/>.com → 递归器：<br/>example.com 委派"]
- auth["递归器 → 目标权威：查询<br/>目标权威 → 递归器：<br/>A = 198.51.100.20"]
- answer["递归器 → 存根：返回答案<br/>A = 198.51.100.20"]
- start --> root --> tld --> auth --> answer
+```mermaid title="一次未命中缓存的 DNS 查询" description="从上到下读。存根请求递归服务，递归器分别询问根、.com 与目标权威。前两站返回委派，这些服务器之间没有转发存根的查询。本例每次都查询 example.com. 的 A 记录，省略缓存、查询名最小化、别名、失败和地址补查。"
+sequenceDiagram
+ participant S as 存根
+ participant R as 递归器
+ participant Root as 根
+ participant TLD as .com
+ participant Auth as 目标权威
+ S->>R: 查询 A · RD=1
+ R->>Root: 查询 A
+ Root->>R: .com 委派
+ R->>TLD: 查询 A
+ TLD->>R: example.com 委派
+ R->>Auth: 查询 A
+ Auth->>R: A = 198.51.100.20
+ R->>S: A = 198.51.100.20
 ```
 
 客户端请求递归服务（置位 `RD=1`），意思是让解析器完成后续工作，而不是只返回下一站。解析器对权威服务器通常进行非递归查询，沿委派继续向下。父区随委派提供的名称服务器 `A` / `AAAA` 地址称为**胶水记录**（glue）；例如 `example.com` 的名称服务器是 `ns.example.com` 时，父区带上的地址可以打破“必须先联系子区，才能查到联系子区所需地址”的循环。不是附加段中的所有地址记录都是胶水[^glue]。
@@ -60,20 +67,20 @@ flowchart TB
 
 ### 把查询过程展开成实际报文
 
-上图中的每一条查询箭头都有自己的 IP、UDP 与 DNS 头。设存根为 `192.168.1.10`，递归解析器为 `192.168.1.53`；递归器已经取得委派信息，需要向权威服务器 `203.0.113.53` 补查 `example.com. A`。下面是一个已配置好往返路由、没有 NAT 或透明接管的实验网络，权威地址与答案 `198.51.100.20` 均为文档示例，不代表真实公网服务。
+用一个已配置往返路由、没有 NAT 或透明接管的实验网络看具体字段。递归器已经取得委派信息，只需向权威服务器补查 `example.com. A`。权威地址 `203.0.113.53` 与答案 `198.51.100.20` 都使用文档地址。
 
 本例选用 UDP，客户端源端口分别为 `53001` 和 `54002`，DNS 服务端口为 `53`。DNS 头中的 `ID` 标识一次查询，`QR=0` 表示查询、`QR=1` 表示响应；响应复制对应查询的 ID，问题段说明在查哪个名字、哪种记录[^dns-message]：
 
-```mermaid title="两段 DNS 查询分别使用哪些地址与事务 ID" description="按处理顺序展示四份不同报文，箭头不是同一个 IP 包的转发路径。递归器向已找到的权威发起独立查询，并按存根的原查询形成响应；省略根、TLD、重试、链路头和其他 DNS 字段。IP、端口、ID、答案和 TTL 都是本例取值；DNS 记录 TTL 的单位是秒，不是 IP 转发预算。"
-flowchart TB
- stub_query["① 存根 → 递归器<br/>IPv4 源：192.168.1.10<br/>IPv4 目的：192.168.1.53<br/>UDP：53001 → 53<br/>DNS：ID=0x1201 · QR=0 · RD=1<br/>Question：example.com. IN A"]
- upstream_query["② 递归器 → 权威<br/>IPv4 源：192.168.1.53<br/>IPv4 目的：203.0.113.53<br/>UDP：54002 → 53<br/>DNS：ID=0x8a30 · QR=0 · RD=0<br/>Question：example.com. IN A"]
- upstream_reply["③ 权威 → 递归器<br/>IPv4 源：203.0.113.53<br/>IPv4 目的：192.168.1.53<br/>UDP：53 → 54002<br/>DNS：ID=0x8a30 · QR=1<br/>Answer：example.com. IN A<br/>198.51.100.20 · TTL=300 s"]
- stub_reply["④ 递归器 → 存根<br/>IPv4 源：192.168.1.53<br/>IPv4 目的：192.168.1.10<br/>UDP：53 → 53001<br/>DNS：ID=0x1201 · QR=1<br/>Answer：example.com. IN A<br/>198.51.100.20 · TTL=300 s"]
- stub_query -->|缓存未命中，发起上游查询| upstream_query
- upstream_query -->|权威构造对应应答| upstream_reply
- upstream_reply -->|递归器形成对存根的响应| stub_reply
-```
+表中 `S` 是存根（`192.168.1.10`），`R` 是递归解析器（`192.168.1.53`），`A` 是权威服务器（`203.0.113.53`）。
+
+| 顺序 | UDP 源 → 目的 | DNS 头 |
+| --- | --- | --- |
+| 1. 存根查询 | `S:53001 → R:53` | `ID=0x1201`，`QR=0, RD=1` |
+| 2. 递归器查询 | `R:54002 → A:53` | `ID=0x8a30`，`QR=0, RD=0` |
+| 3. 权威应答 | `A:53 → R:54002` | `ID=0x8a30`，`QR=1` |
+| 4. 递归器应答 | `R:53 → S:53001` | `ID=0x1201`，`QR=1` |
+
+两次查询都是 `example.com. IN A`。本例的两次应答都给出 `198.51.100.20`，记录 TTL 为 300 秒。
 
 递归器在这里接收并解释 DNS 消息，再用自己的地址、源端口与事务 ID 发起上游查询；它没有把存根的原 IP 包原样送到权威端。本例为便于区分选了两个不同 ID，协议并不要求两段 ID 必须不同。缓存命中时，中间这对上游报文可以完全不出现；返回的记录 TTL 还会受缓存剩余期限等条件影响。
 
@@ -105,12 +112,11 @@ DNS 的**生存时间**（Time to Live，TTL，单位秒）用于约束记录的
 
 一条解析路径还可能涉及多个 TTL：别名的 `CNAME`、目标名的 `A` / `AAAA`、单独查询的 `HTTPS` RRset 都有各自的缓存期限。某个地址记录到期，并不自动使相关的全部记录同时到期。下面仅示意同一名字下三类正向记录，不表示客户端必定查询全部类型：
 
-```mermaid title="不同 DNS 记录分别计时" description="A、AAAA 与 HTTPS 是独立的查询类型，每个缓存 RRset 有自己的剩余 TTL。图中数值仅用于比较，既不是固定默认值，也不是整个网站共用的倒计时；缓存后端与刷新策略还会影响实测。"
-flowchart LR
- name["example.com. 的查询"] -->|A| ipv4["IPv4 地址 RRset<br/>剩余 TTL 60 秒"]
- name -->|AAAA| ipv6["IPv6 地址 RRset<br/>剩余 TTL 120 秒"]
- name -->|HTTPS| service["服务绑定 RRset<br/>剩余 TTL 300 秒"]
-```
+| `example.com.` 的记录类型 | 缓存内容 | 示例剩余 TTL |
+| --- | --- | ---: |
+| `A` | IPv4 地址 | 60 秒 |
+| `AAAA` | IPv6 地址 | 120 秒 |
+| `HTTPS` | 服务绑定信息 | 300 秒 |
 
 ### 否定应答、解析失败与超时
 

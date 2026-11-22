@@ -36,13 +36,15 @@ tags: ["networking"]
 
 ## 封装、解封装与数据单元
 
-分层概念落地到线上跑的数据，就是**封装**（encapsulation）与**解封装**（decapsulation）。数据从发送方应用向下穿过协议栈时，每一层都会把上一层交付的数据整体视为不透明的**载荷**（payload），并在其前方加上本层的控制头部（有时还包括链路层尾部校验）；接收方收到信号后，则自底向上逐层校验、剥离本层头部，最终把还原出的字节流或数据报交还给目标进程。
+发送端通过**封装**（encapsulation）把数据交给承载它的协议。承载协议把收到的数据放入自己的**载荷**（payload），加上本层头部，必要时再加帧尾或填充。接收端通过**解封装**（decapsulation）检查外层头部，再把载荷交给对应的协议处理。
 
+**逐层封装从产生报文的协议开始，沿实际承载路径向下。** HTTP 请求可以经 TLS、TCP、IP 和以太网发送，而 TCP 自己生成的 SYN 可以从 TCP 开始。ARP 和 ICMP 则各有自己的承载路径。
 不同层次的**协议数据单元**（Protocol Data Unit，PDU）有各自的名称，RFC 9293 在描述 TCP 时就明确区分了应用看到的字节流、网络上传输的 TCP 报文段以及承载它的 IP 数据报[^2]：
 
 | 所在层次 | 数据单元名称 | 携带的关键控制信息 |
 | --- | --- | --- |
-| 应用层 | 消息（Message）或字节流（Byte Stream） | HTTP 方法、路径、Host、状态码；TLS 记录头与密文载荷 |
+| 应用层 | 消息（Message），例如 HTTP 请求或 DNS 查询 | HTTP 方法、路径、Host、状态码；DNS 事务 ID |
+| TLS（使用时） | 记录（Record） | 记录类型与长度，受保护的载荷 |
 | 传输层 | **报文段**（Segment，TCP）或**数据报**（Datagram，UDP） | 源端口、目的端口、序号、确认号、校验和 |
 | 网络层 | **IP 数据报**（Packet / Datagram） | 源 IP、目的 IP、协议号（Protocol / Next Header）、**生存时间**（Time to Live，TTL）/ **跳数限制**（Hop Limit） |
 | 链路层 | **帧**（Frame） | 源 MAC、目的 MAC、**以太网类型**（EtherType）、**帧校验序列**（Frame Check Sequence，FCS） |
@@ -51,36 +53,26 @@ tags: ["networking"]
 
 **以太网帧**（Ethernet Frame）是以太网在数据链路层的传输单位。以基于 TCP 的 HTTPS 为例，TCP 报文段承载 TLS 编码后的部分字节，IP 数据报封装 TCP 报文段，以太网帧再把这一跳要发送的 IP 数据报装进载荷。物理层把数据编码为链路上的信号。以太网帧也可以直接承载 ARP，接收端通过 EtherType 区分载荷协议[^4]。
 
-下面按帧首到帧尾的方向纵向展开，每个头部框内再列出字段。箭头表示排列顺序，不表示数据依次经过几个设备；框的大小不代表实际字节数。
+从帧首到帧尾依次是以太网头、IPv4 包和帧尾。IP 包与 TCP 段的外框标出各自的封装边界。
 
-```mermaid title="以太网承载 TCP/IP 的封装结构" description="未加 VLAN 标签的 Ethernet II 承载 IPv4/TCP。纵向依次是 Ethernet 头、IPv4 头、TCP 头、TCP 数据和 Ethernet 帧尾，每层框内只展开关键字段。HTTPS over TCP 的数据部分是 TLS 编码后的字节。图不按字节比例，省略选项与必要的以太网填充，不表示应用消息、TLS 记录和 TCP 段一一对应。"
+```mermaid title="一个以太网帧怎样包含 IPv4 与 TCP" description="未加 VLAN 标签的 Ethernet II 承载 IPv4/TCP。外框包含帧头、IPv4 包与 FCS，IPv4 包内再包含 TCP 段。每个框内从上到下是字段顺序示意。省略部分字段、选项和必要的以太网填充，宽度不代表字节数。"
 flowchart TB
- subgraph ethernet_header[Ethernet Header · 二层]
-  destination_mac["Destination MAC<br/>目的 MAC · 6 字节"]
-  source_mac["Source MAC<br/>源 MAC · 6 字节"]
-  ether_type["EtherType · 2 字节<br/>例如 IPv4 = 0x0800"]
-  destination_mac --- source_mac
-  source_mac --- ether_type
+ subgraph frame[Ethernet II 帧]
+  eth["帧头 · 14 字节<br/>目的 MAC · 源 MAC · EtherType"]
+  subgraph ip[IPv4 包]
+   ip_header["IPv4 头 · 至少 20 字节<br/>TTL · Protocol · 校验和 · 源与目的 IP"]
+   subgraph tcp[TCP 段]
+    tcp_header["TCP 头 · 至少 20 字节<br/>源与目的端口 · Seq · Ack · Flags 等"]
+    tcp_data["TCP 载荷 · 可为空<br/>例如 TLS 编码后的字节"]
+    tcp_header --- tcp_data
+   end
+   ip_header --- tcp_header
+  end
+  fcs["帧尾 · FCS · 4 字节"]
+  eth --- ip_header
+  tcp_data --- fcs
  end
- subgraph ipv4_header[IPv4 Header · 三层 · 至少 20 字节]
-  source_ip["Source IP<br/>源 IP · 4 字节"]
-  destination_ip["Destination IP<br/>目的 IP · 4 字节"]
-  ip_control["TTL · Protocol<br/>Header Checksum 等<br/>生存时间、上层协议、头部校验和"]
-  source_ip --- destination_ip
-  destination_ip --- ip_control
- end
- subgraph tcp_header[TCP Header · 四层 · 至少 20 字节]
-  ports["Source Port / 源端口<br/>Destination Port / 目的端口<br/>各 2 字节"]
-  tcp_control["Sequence Number / 序号<br/>Acknowledgment Number / 确认号<br/>Flags · Window · Checksum 等"]
-  ports --- tcp_control
- end
- payload["Application Data / TCP 载荷<br/>HTTP 数据，或 TLS 编码字节"]
- fcs["Ethernet Trailer / 帧尾<br/>FCS · 4 字节"]
- ethernet_header --> ipv4_header
- ipv4_header --> tcp_header
- tcp_header --> payload
- payload --> fcs
- linkStyle 0,1,2,3,4 stroke:none
+ linkStyle default stroke:none
 ```
 
 这张图展开的是未分片时的协议布局。帧的载荷包含整个 IP 数据报，IP 的载荷又包含整个 TCP 报文段；以太网头与 FCS 都在 IP 包之外。路由器换掉外层帧，不代表它同时换掉了内层的目的 IP。
@@ -101,6 +93,31 @@ flowchart TB
 
 图中的包含关系描述一次封装。通过 TCP 传输一个 10 MB 文件时，TCP 会把字节流分成多个报文段，经多个 IP 数据报和链路帧完成传输。每个帧只负责当前链路的交付，路由器如何为下一跳重新封装见[主机、交换机与路由器的分工](#端到端与逐跳主机交换机与路由器的分工)。
 
+### 同一条链路上的不同封装路径
+
+下面并排看同一以太网接口可能发送的五类数据。沿箭头向下读，箭头指向负责承载该数据的协议。
+
+```mermaid title="HTTPS、TCP SYN、DNS、ICMP 与 ARP 的封装路径" description="每条路径从产生数据的协议开始。汇合只表示使用同一种承载协议，每次发送仍各自成帧。以太网使用 IPv4 或 ARP 的 EtherType；TCP、UDP 和 ICMP 对应 IPv4 Protocol 的 6、17 和 1。"
+flowchart TB
+ http["HTTP 请求"] --> tls["TLS 记录"]
+ tls --> tcp["TCP 段"]
+ syn["TCP SYN<br/>载荷 0 字节"] --> ip["IPv4 包"]
+ tcp --> ip
+ dns["DNS 查询"] --> udp["UDP 数据报"]
+ udp --> ip
+ icmp["ICMP Echo"] --> ip
+ ip --> eth["以太网帧"]
+ arp["ARP 请求"] --> eth
+ class http,dns,icmp,arp actor
+ class tls,tcp,syn,udp,ip resource
+ class eth result
+```
+
+- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)也展示了纯 ACK 如何独立发送[^2][^ethernet-frame]。
+- **ICMP Echo** 是由 IPv4 直接承载的诊断报文，自己的 ICMP 头部下面可以有探测数据。这里没有 TCP 或 UDP 头[^icmp-echo]。
+- **ARP 请求**由以太网直接承载，以本地链路上的下一跳 IPv4 地址为查询目标。ARP 消息内部虽有 IPv4 地址字段，外面没有 IPv4 头。IPv6 邻居解析使用 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)[^arp]。
+- **DNS 查询**在图中由 UDP 承载。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
+
 ### 接收端怎样选择上层协议
 
 先顺着外层到内层看接收过程。接收端知道该把载荷交给哪一个上层协议模块，靠的是头部预留的**复用标识字段**（multiplexing identifier）：
@@ -119,30 +136,24 @@ flowchart TB
 
 假设 TLS 连续生成两条记录：A 编码后共 1000 字节，B 编码后共 800 字节。把这段连续的 1800 字节从 `0` 开始编号，则 A 占 `0…999`，B 占 `1000…1799`。这里使用的是示例字节偏移，包含 TLS 记录头和受保护载荷，不是 HTTP 正文编号，也不是连接实际使用的 TCP 初始序号。
 
-下面把同一批字节按两套边界分别画出。箭头上的范围表示：上方记录的哪些字节被放进了下方报文段的载荷。
+下面按 TLS 和 TCP 的边界切出四段偏移，逐列对齐同一批字节。
 
-```mermaid title="两条 TLS 记录怎样装进三个 TCP 报文段" description="上排按 TLS 记录分组，下排按一种可能的 TCP 分段分组。A 分到段 1 和段 2，B 分到段 2 和段 3；段 2 同时包含 A 的尾部与 B 的开头。箭头表示字节归属，不表示多发了一份数据；框的宽度不代表字节长度，TCP 头部未画出。"
-flowchart TB
- a["TLS 记录 A<br/>0…999 · 共 1000 字节"]
- b["TLS 记录 B<br/>1000…1799 · 共 800 字节"]
- s1["TCP 段 1<br/>0…599 · 600 字节<br/>仅含 A 的开头"]
- s2["TCP 段 2<br/>600…1399 · 800 字节<br/>A 的尾部 + B 的开头"]
- s3["TCP 段 3<br/>1400…1799 · 400 字节<br/>仅含 B 的尾部"]
- a -->|0…599：600 字节| s1
- a -->|600…999：400 字节| s2
- b -->|1000…1399：400 字节| s2
- b -->|1400…1799：400 字节| s3
- class a,b resource
- class s1,s2,s3 state
-```
+| 字节偏移 | 0–599 | 600–999 | 1000–1399 | 1400–1799 |
+| --- | --- | --- | --- | --- |
+| TLS 记录 | A | A | B | B |
+| TCP 载荷 | 段 1 | **段 2** | **段 2** | 段 3 |
 
-顺着记录 A 的两条箭头看，它的 1000 字节分成了 600 和 400 字节，分别进入段 1、段 2。再看段 2 的两条入箭头，它装着 A 的最后 400 字节和 B 的最初 400 字节，TLS 的记录边界恰好落在这个段的载荷内部。TCP 无须知道这里换了一条记录。
+同一列表示同一段字节，相邻的同名格合起来是一条记录或一个 TCP 段的载荷。列宽只为对齐偏移范围。
+
+记录 A 的前 600 字节进入段 1，后 400 字节进入段 2。段 2 的另一半来自 B，因此 TLS 的记录边界落在段 2 的载荷内部。TCP 无须知道这里换了一条记录。
 
 这只是用于说明边界独立的一种切分，实际分段还受 MSS、发送时机及可用发送窗口等因素影响[^2]。HTTP 的边界也独立于它们：一条 HTTP 消息可以跨多个 TLS 记录，一条 TLS 记录也可以容纳多个 HTTP 消息或 HTTP/2 帧的字节[^tls-record]。
 
+也可以从长度预算看分段。假设已经有 10,000 字节待交给 TCP，IPv4 路径 MTU 为 1500 字节，IPv4 与 TCP 头均无选项、各占 20 字节，且对端通告的 MSS 没有进一步限制。在这个例子里，一个段最多承载 1460 字节。若尽量装满，前六段合计装 8760 字节，第七段装剩下的 1240 字节。这里计算的是 TCP 字节流，HTTPS 要先把 TLS 编码后的字节算进去。TCP 分段在发送端组织字节流，IPv4 分片处理的则是已形成的 IPv4 数据报。这个例子中每个 IP 包都符合 MTU，可以直接在链路上发送[^2][^3][^mss]。路径变化时怎样调整这个预算，见[第八篇的 MTU 与 MSS](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)。
+
 **接收端怎样恢复 TLS 记录？**
 
-TCP 向上交付有序字节流，TLS 则依据记录头中的 `length` 字段收齐一条记录，再认证、解密并把应用数据交给 HTTP；字节不足时就等待更多数据[^tls-record]。在上图中，段 1、段 2 的字节按序交付后才能收齐 A，B 还要等待段 3。因此，**并非每收到一个 TCP 段就能解密一条 TLS 记录**，HTTP 也仍需按自身格式识别消息或帧。
+TCP 向上交付有序字节流，TLS 则依据记录头中的 `length` 字段收齐一条记录，再认证、解密并把应用数据交给 HTTP；字节不足时就等待更多数据[^tls-record]。在上表的例子里，段 1、段 2 的字节按序交付后才能收齐 A，B 还要等待段 3。因此，**并非每收到一个 TCP 段就能解密一条 TLS 记录**，HTTP 也仍需按自身格式识别消息或帧。
 
 ## 操作系统边界：Socket 与网络接口
 
@@ -208,6 +219,17 @@ flowchart LR
 先看一次没有可用缓存或连接的访问：本机 IPv4 为 `192.168.1.10`，通过普通局域网、默认网关和家庭 NAT 访问 `https://example.com/`。浏览器需要解析地址、新建 TCP 连接并完成 TLS 1.3 握手；本例不使用 ECH、显式代理或 TUN。`198.51.100.20` 是前文转发示例中的目标地址，实际实验以当次连接报告的地址为准。
 
 **请求阶段和逐层封装回答的是两个问题。** DNS、TCP、TLS 和 HTTP 说明这次访问先后要完成什么；封装说明每次发送的数据怎样上链路。拿到网站地址前，主机就可能已经把 DNS 查询封装为 UDP 数据报、IP 包和链路帧。随后 TCP 的 SYN 也会独立封装成 IP 包和链路帧，里面没有要等到 TLS 建立后才发送的 HTTP 请求。
+
+假设客户端使用传统 UDP DNS，解析器和网站都经同一个 IPv4 默认网关可达，而且本机没有网关的邻居缓存。此时可以按下表对照客户端链路上的一次冷启动；其中每行代表一类交换。
+
+| 先后 | 发什么 | 客户端链路上的承载 |
+| --- | --- | --- |
+| 1 | 查询并取得默认网关的 MAC 地址 | ARP → 以太网 |
+| 2 | 查询网站地址并取得 DNS 应答 | DNS → UDP → IPv4 → 以太网 |
+| 3 | 交换 SYN、SYN-ACK、ACK | TCP → IPv4 → 以太网 |
+| 4 | 交换 ClientHello 等 TLS 握手消息 | TLS → TCP → IPv4 → 以太网 |
+| 5 | 发出 HTTP 请求并取得响应 | HTTP → TLS → TCP → IPv4 → 以太网 |
+| 6 | 之后按需结束连接，例如用 FIN 和 ACK | TCP → IPv4 → 以太网 |
 
 ### DNS 与 TCP：取得地址并建立连接
 
@@ -315,12 +337,21 @@ fi
 普通客户端出口捕获不到上游 NAT 改写后的地址。以太网接口上加 `-e` 可观察链路头，TUN 接口没有普通以太网 MAC 头；物理接口上可能只看到代理出站或外层隧道。若权限不足或过滤后没有包，先核对接口、连接端点与捕获时机，不能直接推断网络没有发包。
 :::
 
-接口抓包通常需要额外捕获权限。获得权限并捕获到流量后，再结合实际报文验证握手过程与接口选择。
+上面的捕获条件只保留目标网站的 TCP 流量。若要对照其他封装，可在有权限的以太网接口上另做一次捕获，保留 ARP 和 IPv4 ICMP，再用 Wireshark 的显示过滤器检查协议树[^encapsulation-filters]：
+
+| 显示过滤器 | 展开后看什么 |
+| --- | --- |
+| `tcp.flags.syn == 1 && tcp.flags.ack == 0 && tcp.len == 0` | 以太网帧承载 IPv4 和 TCP。TCP 头有 SYN，载荷长度为零 |
+| `tcp.len == 0` | 所有零载荷 TCP 段，包含 SYN、FIN 和纯 ACK 等，需结合标志区分 |
+| `arp` | 以太网下直接是 ARP；在 ARP 字段中仍能看到 IPv4 地址 |
+| `icmp.type == 8` | 在 IPv4 头下面直接展开 ICMP Echo Request |
+
+抓包位置和分段卸载也会改变工具呈现的分段边界，见[第八篇的捕获步骤与判读](/posts/networking/network-diagnostics-performance-troubleshooting/#wireshark-实验从一条连接验证阶段边界)。
 
 ## 总结
 
 - 互联网四层模型（应用、传输、网络、链路）按职责隔离变化；实际软件实现不必机械对应四段独立代码，但每一层的头部边界必须清晰。
-- 发送端自顶向下逐层封装、接收端逐层解封装，并通过链路层 EtherType、IP 协议号与传输层端口号完成解复用。
+- 每次发送从产生报文的协议开始，沿其承载路径逐层封装。TCP 能独立发控制段，IPv4 能直接承载 ICMP，以太网能直接承载 ARP。
 - 链路层 MAC 帧头逐跳重写，IP 与端口在常规直连中端到端保持；NAT 按配置改写包头中的地址或端口，而代理则在应用或传输边界终结并重建连接。
 - Socket 是操作系统向应用暴露的编程接口而非网络协议；应用写入 Socket 成功只代表本地发送路径接受了相应字节。
 
@@ -371,3 +402,11 @@ fi
 [^napi]: 〔平台与实现〕[Linux 内核文档：NAPI](https://docs.kernel.org/networking/napi.html)——中断通知与轮询处理的关系；名称在 Linux 2.4 时称 New API，现已不再对应特定全称。
 
 [^skb]: 〔平台与实现〕[Linux 内核文档：struct sk_buff](https://docs.kernel.org/networking/skbuff.html)——包的元数据与数据缓冲分离，数据可以由线性区、页片段及关联缓冲组成；协议封装顺序不等于物理内存连续布局。
+
+[^icmp-echo]: 〔RFC〕[RFC 792: Internet Control Message Protocol](https://www.rfc-editor.org/rfc/rfc792.html#page-14)——IPv4 直接承载 ICMP Echo，ICMP 头后可以有探测数据。
+
+[^arp]: 〔RFC〕[RFC 826: An Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)——定义以太网承载 ARP 的方法与消息中的协议地址字段。
+
+[^mss]: 〔RFC〕[RFC 6691 §2](https://www.rfc-editor.org/rfc/rfc6691.html#section-2)——TCP 最大段大小及发送时对 IP/TCP 选项开销的处理。
+
+[^encapsulation-filters]: 〔工具文档〕Wireshark 显示过滤字段参考：[TCP](https://www.wireshark.org/docs/dfref/t/tcp.html)、[ARP](https://www.wireshark.org/docs/dfref/a/arp.html)和[ICMP](https://www.wireshark.org/docs/dfref/i/icmp.html)。

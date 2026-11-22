@@ -101,27 +101,16 @@ PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经
 
 先用两份具体包看“变小”的含义。假定 IPv4 与 TCP 都不带选项，路径允许的 IP 包长从 1500 降到 1400 字节；发送端获知这个限制后，对后续发送或重传重新分段：
 
-```mermaid mobile-direction="TB" title="路径 MTU 变小时缩减的是哪部分数据" description="比较发送端按两种已知路径预算生成的 IPv4/TCP 包，不表示中间路由器把一个 DF=1 的大包裁短后转发。IP 头与 TCP 头各取无选项的 20 字节；MTU 只覆盖 IP 包，外部 Ethernet 头、填充与 FCS 不计入。较小包承载较少的 TCP 流字节，剩余字节由其他包继续发送；没有改变应用字节流本身。"
-flowchart LR
- subgraph large[IP 总长度 1500 字节]
-  large_ip["IPv4 头：20<br/>Total Length = 1500"]
-  large_tcp["TCP 头：20"]
-  large_data["TCP 数据：1460"]
-  large_ip --- large_tcp
-  large_tcp --- large_data
- end
- subgraph small[IP 总长度 1400 字节]
-  small_ip["IPv4 头：20<br/>Total Length = 1400"]
-  small_tcp["TCP 头：20"]
-  small_data["TCP 数据：1360"]
-  small_ip --- small_tcp
-  small_tcp --- small_data
- end
- large --- small
- linkStyle default stroke:none
-```
+| IPv4 包内的字段 | 路径 MTU 1500 | 路径 MTU 1400 |
+| --- | ---: | ---: |
+| IPv4 头 | 20 字节 | 20 字节 |
+| TCP 头 | 20 字节 | 20 字节 |
+| **TCP 数据** | **1460 字节** | **1360 字节** |
+| IPv4 总长度 | 1500 字节 | 1400 字节 |
 
-这里 `20 + 20 + 1360 = 1400`，所以新的单包 TCP 数据预算为 1360 字节。若还有 TCP 时间戳选项、IPv6 扩展头或 VPN 外层封装，就要扣除相应的实际头部开销；不能把图中的 1360 当作所有连接都应设置的 MSS。
+发送端在较小的包里少放 100 字节 TCP 数据，剩余字节可交给其他段。链路层头尾和填充在 IP 包之外。
+
+这里 `20 + 20 + 1360 = 1400`，所以新的单包 TCP 数据预算为 1360 字节。若还有 TCP 时间戳选项、IPv6 扩展头或 VPN 外层封装，就要扣除相应的实际头部开销；不能把表中的 1360 当作所有连接都应设置的 MSS。
 
 ### IPv4 与 IPv6 的发现机制
 
@@ -134,15 +123,21 @@ IP 分片在 NAT、防火墙等环境中有脆弱性，协议设计常尽量控�
 
 如果反馈在路径中被过滤，发送端可能持续发送过大的包并重传，而小包仍正常。这才构成经典 PMTUD 黑洞的机制；是否持续卡住还取决于实现有没有其他探测或回退。
 
-```mermaid title="PMTUD 黑洞：包被丢弃，反馈未到达" description="限定 IPv4、DF=1、路径 MTU 1400 字节且发送端没有有效回退。先用独立的小包作对照，再看 1500 字节包的去向。框间箭头表示观察顺序；反馈虚线表示路由器尝试回报，但 ICMP 在到达发送端之前被过滤。"
-flowchart TB
- small["小包：未超过 MTU<br/>发送端 → 瓶颈路由器<br/>路由器转发 → 接收端"]
- large["大包：1500 字节 · DF=1<br/>发送端 → 瓶颈路由器<br/>超过 MTU，路由器丢包"]
- blocked["ICMP 过滤点拦截<br/>反馈未到达发送端"]
- retry["发送端未缩小包长<br/>重传仍在瓶颈处被丢弃"]
- small -->|另发一个大包| large
- large -.->|路由器回报 MTU 1400| blocked
- blocked -->|无有效回退| retry
+```mermaid title="PMTUD 黑洞：数据和反馈分别在哪里丢失" description="IPv4 小包先成功通过。路径上的瓶颈接口 MTU 为 1400 字节，路由器丢弃 1500 字节的 DF 包。返回的 ICMP 在过滤点终止。发送端未获知较小的 MTU，若没有有效回退，重传仍可能超限。箭头表示交换顺序，间距不表示耗时。"
+sequenceDiagram
+ participant S as 发送端
+ participant F as 过滤点
+ participant R as 瓶颈路由器
+ participant D as 接收端
+ S->>R: 小包，符合路径 MTU
+ R->>D: 转发小包
+ S->>R: 大包，1500 字节 · DF=1
+ Note over R: 出口 MTU 1400<br/>丢弃大包
+ R-->>F: ICMP Type 3 Code 4 · MTU=1400
+ Note over F: 丢弃反馈
+ Note over S: 未收到 MTU 反馈
+ S->>R: 重传，仍为 1500 字节
+ Note over R: 再次超限，丢弃
 ```
 
 ### 怎样验证，而不是直接改一个 MSS 值
@@ -172,7 +167,7 @@ curl -q -4 --noproxy '*' --http1.1 \
 
 这些计时值是从本次传输开始到相应里程碑的累计秒数，而不是从 shell 启动命令的时刻起计时。在上述单次成功连接模型中，可近似用相邻里程碑之差划分等待阶段[^curl]：
 
-```mermaid mobile-direction="TB" title="curl 累积计时与相邻阶段差值" description="限定一次成功、全新、直连、无重定向的 HTTPS over TCP 传输。节点是从本次传输起点累计的时间戳，边对应相邻时间戳之差；首段 DNS 直接使用 time_namelookup。请求至首字节包含请求发送、网络往返和服务端处理，不是纯服务端耗时。图只表阶段先后，节点间距不是实测阶段长度；HTTP/3、复用和代理需另行解释。"
+```mermaid mobile-direction="TB" title="curl 的累计计时点" description="适用于新建 TCP 连接、直连且无重定向的一次成功 HTTPS 传输。每个时间值都从同一起点计算。相邻时间相减得到下表的阶段耗时；图上的距离只表示顺序。请求至首字节包括请求发送、网络往返和服务端处理。"
 flowchart LR
  start["传输开始<br/>计时起点 0"] -->|DNS| dns["解析完成<br/>time_namelookup"]
  dns -->|TCP 建连| tcp["连接完成<br/>time_connect"]

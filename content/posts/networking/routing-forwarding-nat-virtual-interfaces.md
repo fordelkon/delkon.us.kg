@@ -86,39 +86,16 @@ tags: ["networking"]
 
 A 向 B 的 TCP `443` 端口发送一段数据，源端口为 `50001`，初始 TTL 取 `64`。沿途观察承载这个 IP 包的三份帧：
 
-```mermaid title="三次链路交付中的 MAC、IP 与 TTL" description="同一个 IPv4/TCP 包在三段以太网链路上的发送快照。R1 与 R2 分别去掉入站帧，查路由，递减 TTL，并更新 IPv4 头部校验和后重新成帧。源和目的 IP、TCP 端口及载荷在本例中保持不变。每份帧有自己的 FCS，省略实际校验值与其他字段；箭头表示路由转发的先后，不代表时间或距离。"
-flowchart TB
- subgraph first[第 1 跳：A → R1 的帧]
-  eth1["Ethernet Header<br/>源 MAC = 00:00:5e:00:53:01<br/>目的 MAC = 00:00:5e:00:53:02"]
-  ip1["IPv4 Header<br/>源 IP = 192.168.1.10<br/>目的 IP = 198.51.100.20<br/>TTL = 64"]
-  tcp1["TCP Header + Data<br/>端口 = 50001 → 443<br/>载荷 = 本次发送的字节"]
-  fcs1["Ethernet Trailer / FCS"]
-  eth1 --- ip1
-  ip1 --- tcp1
-  tcp1 --- fcs1
- end
- subgraph second[第 2 跳：R1 → R2 的帧]
-  eth2["Ethernet Header<br/>源 MAC = 00:00:5e:00:53:03<br/>目的 MAC = 00:00:5e:00:53:04"]
-  ip2["IPv4 Header<br/>源 IP = 192.168.1.10<br/>目的 IP = 198.51.100.20<br/>TTL = 63"]
-  tcp2["TCP Header + Data<br/>端口 = 50001 → 443<br/>载荷 = 同一批字节"]
-  fcs2["Ethernet Trailer / FCS"]
-  eth2 --- ip2
-  ip2 --- tcp2
-  tcp2 --- fcs2
- end
- subgraph third[第 3 跳：R2 → B 的帧]
-  eth3["Ethernet Header<br/>源 MAC = 00:00:5e:00:53:05<br/>目的 MAC = 00:00:5e:00:53:06"]
-  ip3["IPv4 Header<br/>源 IP = 192.168.1.10<br/>目的 IP = 198.51.100.20<br/>TTL = 62"]
-  tcp3["TCP Header + Data<br/>端口 = 50001 → 443<br/>载荷 = 同一批字节"]
-  fcs3["Ethernet Trailer / FCS"]
-  eth3 --- ip3
-  ip3 --- tcp3
-  tcp3 --- fcs3
- end
- first -->|R1 去帧、选路、重新封装| second
- second -->|R2 去帧、选路、重新封装| third
- linkStyle 0,1,2,3,4,5,6,7,8 stroke:none
-```
+| 字段 | A → R1 | R1 → R2 | R2 → B |
+| --- | --- | --- | --- |
+| 以太网源 MAC | `…:01` | `…:03` | `…:05` |
+| 以太网目的 MAC | `…:02` | `…:04` | `…:06` |
+| IPv4 源地址 | `192.168.1.10` | `192.168.1.10` | `192.168.1.10` |
+| IPv4 目的地址 | `198.51.100.20` | `198.51.100.20` | `198.51.100.20` |
+| IPv4 TTL | 64 | 63 | 62 |
+| TCP 端口 | `50001 → 443` | `50001 → 443` | `50001 → 443` |
+
+MAC 只列末字节，完整地址见上表。R1 和 R2 各更新一遍 IPv4 头部校验和，新帧各有自己的 FCS。
 
 第一份帧的目的 MAC 是 R1 的入口，第二份的源 MAC 则是 R1 的出口；R1 不会把 A 的 MAC 原样带到下一段链路。R2 再以自己的出口 MAC 向 B 成帧。B 收到包后做本机交付，不会因为自己是第三份帧的接收者，就再执行一次路由转发的 TTL 递减。
 
@@ -174,39 +151,16 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 取表中的第一条映射，把 NAPT 两侧的出站包与返回包分别展开。这里只看 IP 与 TCP 头；以太网头仍像上一节那样按链路重新封装。
 
-```mermaid title="NAPT 两侧的出站包与返回包" description="两组分别展示一次出站与对应返回，使用表中主机 .10 的映射。出站改源 IP 与源端口；响应在映射有效且过滤允许时恢复目的 IP 与目的端口。它们属于同一条端到端 TCP 连接，NAPT 不生成 TCP 确认。省略逐跳变化的 TTL、链路头与实际校验和数值；主机 .11 的另一条映射同理，公网端口为 61002。"
-flowchart TB
- subgraph outbound[出站：内网 → 公网]
-  subgraph out_lan[内网侧]
-   out_lan_ip["IPv4 Header<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20"]
-   out_lan_tcp["TCP Header<br/>源端口 = 50001<br/>目的端口 = 443"]
-   out_lan_ip --- out_lan_tcp
-  end
-  subgraph out_wan[公网侧]
-   out_wan_ip["IPv4 Header<br/>源 = 203.0.113.5<br/>目的 = 198.51.100.20"]
-   out_wan_tcp["TCP Header<br/>源端口 = 61001<br/>目的端口 = 443"]
-   out_wan_ip --- out_wan_tcp
-  end
-  out_lan -->|改源地址端口，调整校验和| out_wan
- end
- subgraph inbound[返回：公网 → 内网]
-  subgraph in_wan[公网侧]
-   in_wan_ip["IPv4 Header<br/>源 = 198.51.100.20<br/>目的 = 203.0.113.5"]
-   in_wan_tcp["TCP Header<br/>源端口 = 443<br/>目的端口 = 61001"]
-   in_wan_ip --- in_wan_tcp
-  end
-  subgraph in_lan[内网侧]
-   in_lan_ip["IPv4 Header<br/>源 = 198.51.100.20<br/>目的 = 192.168.1.10"]
-   in_lan_tcp["TCP Header<br/>源端口 = 443<br/>目的端口 = 50001"]
-   in_lan_ip --- in_lan_tcp
-  end
-  in_wan -->|查映射，允许后恢复目的| in_lan
- end
- outbound --- inbound
- linkStyle 0,1,3,4,6 stroke:none
-```
+| 方向与字段 | 内网侧 | 公网侧 |
+| --- | --- | --- |
+| 出站源（改写） | `192.168.1.10:50001` | `203.0.113.5:61001` |
+| 出站目的 | `198.51.100.20:443` | `198.51.100.20:443` |
+| 返回源 | `198.51.100.20:443` | `198.51.100.20:443` |
+| 返回目的（还原） | `192.168.1.10:50001` | `203.0.113.5:61001` |
 
-路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。沿用图中的第一条映射：响应到达 `203.0.113.5:61001` 后，若映射仍有效且过滤允许，路由器就把目的地址与端口恢复为 `192.168.1.10:50001`，再转发至内网。公网端口如何分配、多久过期，取决于实现、协议与配置。
+出站从内网列读到公网列，返回则从公网列读到内网列。两侧观察的是同一条端到端 TCP 连接，NAPT 不替对端发送 TCP 确认。
+
+路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。沿用表中的映射：响应到达 `203.0.113.5:61001` 后，若映射仍有效且过滤允许，路由器就把目的地址与端口恢复为 `192.168.1.10:50001`，再转发至内网。公网端口如何分配、多久过期，取决于实现、协议与配置。
 
 ### 映射、过滤与连接跟踪
 
@@ -268,18 +222,24 @@ flowchart TB
 
 再把右支的封装展开。应用建立连接时选用本机隧道地址 `10.0.0.2` 访问 `198.51.100.20`；VPN 程序通过物理接口地址 `192.168.1.10` 向对端 `203.0.113.9` 发送流量。这里观察的是靠近本机的两个位置：TUN 读出的内层包，以及上游 NAT 之前的物理出口。
 
-```mermaid title="TUN 原包与 IP VPN 外层包的包含关系" description="TUN 读出的原包经加密后进入 VPN 密文区，内层 IP 头、TCP 头和原始载荷都在密文中。外框内从上到下是外层 IPv4 头、UDP 头和 VPN 数据，不表示分别发送。端口仅为示例，省略认证标签的具体格式和外层链路封装。"
+```mermaid title="VPN 密文包住完整的 TUN 原包" description="TUN 原包包含内层 IPv4 头、TCP 头和原始载荷。加密箭头指向 UDP 数据报内的 VPN 密文区。外层 IPv4、UDP 和 VPN 元数据各有自己的位置；省略外部链路帧与认证标签的具体格式。"
 flowchart TB
- original["TUN 原包 · IPv4/TCP<br/>源：10.0.0.2<br/>目的：198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
- subgraph outer_packet[物理出口的外层包]
-  outer_ip["IPv4 头<br/>Protocol = 17<br/>源：192.168.1.10<br/>目的：203.0.113.9"]
-  outer_udp["UDP 头<br/>52000 → 51820"]
-  ciphertext["VPN 元数据与密文<br/>密文：加密后的原包"]
-  outer_ip --- outer_udp
-  outer_udp --- ciphertext
+ original["TUN 原包<br/>内层 IPv4：10.0.0.2 → 198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
+ subgraph outer[物理出口的 IPv4 包]
+  ip["外层 IPv4 头 · Protocol=17<br/>192.168.1.10 → 203.0.113.9"]
+  subgraph udp[UDP 数据报]
+   udp_header["UDP 头 · 52000 → 51820"]
+   subgraph vpn[UDP 载荷 · VPN 数据]
+    metadata["VPN 元数据"]
+    cipher["密文 · 完整内层包"]
+    metadata --- cipher
+   end
+   udp_header --- metadata
+  end
+  ip --- udp_header
  end
- original -->|加密封装| ciphertext
- linkStyle 0,1 stroke:none
+ original -->|加密完整原包| cipher
+ linkStyle 0,1,2 stroke:none
 ```
 
 外层目的 IP 让普通路由把包送到 VPN 对端；对端解密、去掉外层封装后，才按内层目的 IP 继续转发。这里的内层地址没有被外层地址简单替换，外层也有自己的 TTL 与路由。反过来，左支的代理若终结应用侧 TCP，物理出口通常出现的是独立出站连接的包，不能套用这张“完整内层包在里面”的结构。

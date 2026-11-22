@@ -179,37 +179,29 @@ flowchart TB
 
 沿用前面的 Fake-IP `198.18.0.8 ↔ example.com`，设本机应用端点为 `192.168.1.10:50001`。本次规则选择 DIRECT，核心另行解析得到文档示例目标 `198.51.100.20:443`，并从物理接口 `192.168.1.10:53000` 建立独立出站。两段 TCP 均已建立，以下观察本机上游 NAT 之前的包；示例序号均为绝对值。
 
-```mermaid title="TUN 两侧的数据包为何属于两条 TCP 连接" description="限定终结应用侧 TCP、DIRECT 出站且不解密目标 TLS 的代理。四组是两段已建立连接的请求和返回快照，组内从 IP 头排到 TCP 头，组间箭头表示处理顺序。请求取 100 字节、返回取 80 字节，实际分段、读写与确认时机不要求一一对应。省略握手、纯 ACK、MAC 与其他字段；出站必须绕过 TUN，返回写入 TUN 后交给内核匹配原应用连接。"
-flowchart TB
- subgraph app_request[① 内核送入 TUN，核心读取]
-  app_ip["IPv4 头<br/>源 = 192.168.1.10<br/>目的 = 198.18.0.8"]
-  app_tcp["TCP 头与载荷<br/>端口 = 50001 → 443<br/>Seq=1001 · Ack=7001 · Len=100"]
-  app_ip --- app_tcp
- end
- subgraph outgoing[② 核心独立出站，经物理接口]
-  out_ip["IPv4 头<br/>源 = 192.168.1.10<br/>目的 = 198.51.100.20"]
-  out_tcp["TCP 头与载荷<br/>端口 = 53000 → 443<br/>Seq=9001 · Ack=3001 · Len=100"]
-  out_ip --- out_tcp
- end
- subgraph response[③ 出站连接收到目标响应]
-  response_ip["IPv4 头<br/>源 = 198.51.100.20<br/>目的 = 192.168.1.10"]
-  response_tcp["TCP 头与载荷<br/>端口 = 443 → 53000<br/>Seq=3001 · Ack=9101 · Len=80"]
-  response_ip --- response_tcp
- end
- subgraph app_response[④ 核心构造原连接回包，写回 TUN]
-  return_ip["IPv4 头<br/>源 = 198.18.0.8<br/>目的 = 192.168.1.10"]
-  return_tcp["TCP 头与载荷<br/>端口 = 443 → 50001<br/>Seq=7001 · Ack=1101 · Len=80"]
-  return_ip --- return_tcp
- end
- app_request -->|恢复域名并解析，重组字节交给出站| outgoing
- outgoing -->|目标 TCP 接收并发送响应| response
- response -->|按应用侧状态重新成包| app_response
- linkStyle 0,1,2,3 stroke:none
-```
+按 `① → ② → ③ → ④` 读取四个抓包位置。IPv4 地址和 TCP 端口合写在端点列中。
+
+| 字段 | ① TUN 入站 | ② 物理出站 |
+| --- | --- | --- |
+| 源端点 | `192.168.1.10:50001` | `192.168.1.10:53000` |
+| 目的端点 | `198.18.0.8:443` | `198.51.100.20:443` |
+| `Seq` | 1001 | 9001 |
+| `Ack` | 7001 | 3001 |
+| TCP 载荷 | 100 字节 | 100 字节 |
+
+| 字段 | ③ 物理接口收到响应 | ④ 写回 TUN |
+| --- | --- | --- |
+| 源端点 | `198.51.100.20:443` | `198.18.0.8:443` |
+| 目的端点 | `192.168.1.10:53000` | `192.168.1.10:50001` |
+| `Seq` | 3001 | 7001 |
+| `Ack` | 9101 | 1101 |
+| TCP 载荷 | 80 字节 | 80 字节 |
+
+本例两侧各取一段请求与响应数据。实际分段、读写和确认时机可以各自变化。
 
 应用侧收到的包仍以 Fake-IP 为源，才能匹配它原来的连接；核心自己的出站则使用真实目标与另一源端口。出站的 `Seq=9001` 不会原样成为应用侧的 `Seq=1001`，远端的 `Seq=3001` 也不能直接填进应用侧回包。核心在两份连接状态之间转交的是字节，各侧的确认、重传与流量控制分别进行。
 
-这与[第三篇的 NAPT 包头改写](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)不同：普通 NAPT 没有新建这两套 TCP 序号空间；也与[完整内层 IP 包的 VPN 封装](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)不同，本图中的物理出站包不包含原来那份 Fake-IP 包。
+这与[第三篇的 NAPT 包头改写](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)不同：普通 NAPT 没有新建这两套 TCP 序号空间；也与[完整内层 IP 包的 VPN 封装](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)不同，表中的物理出站包不包含原来那份 Fake-IP 包。
 
 :::important[代理的出站流量需要可用的绕行路径]
 如果出站 Socket 产生的流量又被送回同一个 TUN 入口，可能形成回环。常见处理包括为远端端点配置更具体路由、使用 socket 标记配合策略路由，或按平台能力绑定接口、排除进程。它们的效果取决于平台和整套规则；“绑定物理网卡”不能脱离实际查表结果被当作统一的绕过保证。
