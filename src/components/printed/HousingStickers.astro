@@ -53,6 +53,8 @@ const stickers = [
 		housing-stickers {
 			--sticker-height: 1.625rem;
 			position: relative;
+			/* Keep restored decals above the navigation row without capturing empty space. */
+			z-index: 1;
 			display: flex;
 			align-self: center;
 			align-items: center;
