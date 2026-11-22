@@ -85,6 +85,7 @@ const hasGutter = Astro.slots.has("gutter");
 		<TableOverflow />
 		{showDeskStickers && <DeskStickers />}
 		<slot name="floating-controls" />
+		{import.meta.env.PROD && <pagefind-modal instance="site-search" />}
 	</body>
 </html>
 

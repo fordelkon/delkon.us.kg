@@ -5,10 +5,42 @@ import "@/styles/blocks/search.css";
 <script>
 	import type { PagefindModal, PagefindModalTrigger } from "@pagefind/component-ui";
 	import dialogStyles from "@/styles/blocks/search-dialog.css?url";
+	import { containSearchTouch } from "./search-touch-scroll";
 
 	let pagefind: typeof import("@pagefind/component-ui") | undefined;
 	let stylesheet: HTMLLinkElement | undefined;
 	let stylesReady: Promise<void> | undefined;
+
+	const openSearchDialog = "pagefind-modal > dialog:modal";
+	const viewport = window.visualViewport;
+
+	function fitSearchPanel(): void {
+		if (!viewport) return;
+
+		const dialog = document.querySelector<HTMLDialogElement>(openSearchDialog);
+
+		if (!dialog) return;
+
+		// A software keyboard can shrink or pan the visual viewport without resizing the layout.
+		dialog.style.setProperty("--search-view-top", `${viewport.offsetTop}px`);
+		dialog.style.setProperty("--search-view-center", `${viewport.offsetLeft + viewport.width / 2}px`);
+		dialog.style.setProperty("--search-view-width", `${viewport.width}px`);
+		dialog.style.setProperty("--search-view-height", `${viewport.height}px`);
+	}
+
+	if (viewport) {
+		viewport.addEventListener("resize", fitSearchPanel);
+		viewport.addEventListener("scroll", fitSearchPanel);
+		document.addEventListener("focusin", (event) => {
+			if (event.target instanceof Element && event.target.closest(openSearchDialog)) fitSearchPanel();
+		});
+	}
+
+	document.addEventListener("touchstart", (event) => {
+		const dialog = document.querySelector<HTMLDialogElement>(openSearchDialog);
+
+		if (dialog) containSearchTouch(dialog, event);
+	}, { capture: true, passive: true });
 
 	function loadDialogStyles() {
 		return new Promise<void>((resolve, reject) => {
@@ -119,4 +151,3 @@ import "@/styles/blocks/search.css";
 	</button>
 </pagefind-modal-trigger>
 <span class="sr-only" id="search-load-status" role="status"></span>
-<pagefind-modal instance="site-search"></pagefind-modal>

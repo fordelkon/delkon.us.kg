@@ -1,1 +1,32 @@
 @import "@pagefind/component-ui/css" layer(pagefind);
+
+html:has(body > pagefind-modal > dialog:modal) {
+	overscroll-behavior: none;
+}
+
+body:has(> pagefind-modal > dialog:modal) {
+	overflow: hidden;
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+	pagefind-modal > dialog:modal {
+		--search-panel-gap: calc(var(--search-view-height, 100dvh) * 0.1);
+		inset: calc(var(--search-view-top, 0px) + var(--search-panel-gap)) auto auto
+			var(--search-view-center, 50%);
+		translate: -50% 0;
+		width: calc(var(--search-view-width, 100vw) * 0.9);
+		height: auto;
+		max-width: var(--pf-modal-max-width);
+		max-height: calc(var(--search-view-height, 100dvh) - 2 * var(--search-panel-gap));
+		margin: 0;
+		border-radius: 12px;
+	}
+
+	pagefind-modal .pf-modal-close {
+		display: flex;
+	}
+
+	pagefind-modal .pf-modal-footer {
+		display: none;
+	}
+}
