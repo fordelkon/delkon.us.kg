@@ -2,6 +2,7 @@
 import type { CollectionEntry } from "astro:content";
 import type { MarkdownHeading } from "astro";
 import Explainer from "@/components/blog/explainer/Explainer.astro";
+import { getScene } from "@/components/blog/explainer/scenes";
 import Masthead from "@/components/blog/Masthead.astro";
 import PostGraph from "@/components/blog/PostGraph.astro";
 import PostLinkList from "@/components/blog/PostLinkList.astro";
@@ -12,6 +13,7 @@ import { getPostExplainer } from "@/data/post-explainers";
 import { orderLinkedPosts, type PostNeighborhood } from "@/data/post-links";
 import { ogImageUrl } from "@/data/routes";
 import { getSeriesContext } from "@/data/series";
+import { type ContentFeatures, contentStyles } from "@/styles/content-styles";
 
 import BaseLayout from "./Base.astro";
 
@@ -20,20 +22,28 @@ interface Props {
 	neighborhood: PostNeighborhood | undefined;
 	headings: MarkdownHeading[];
 	readingTime: string;
-	hasMath: boolean;
+	contentFrontmatter: ContentFeatures;
 }
 
-const { post, neighborhood, headings, readingTime, hasMath } = Astro.props;
+const { post, neighborhood, headings, readingTime, contentFrontmatter } = Astro.props;
 const { ogImage, title, description, updatedDate, publishDate } = post.data;
 const socialImage = ogImage ?? ogImageUrl(post.id);
 const articleDate = updatedDate?.toISOString() ?? publishDate.toISOString();
 const series = await getSeriesContext(post);
 const linkedPosts = orderLinkedPosts(neighborhood?.neighbors ?? [], series);
-const explainer = getPostExplainer(post.id);
+const sceneId = getPostExplainer(post.id);
+const scene = sceneId ? getScene(sceneId) : undefined;
+
+const stylesheets = contentStyles(contentFrontmatter, {
+	hasExplainer: Boolean(scene),
+	hasMermaid: scene?.chapters
+		? scene.chapters.some((chapter) => Boolean(chapter.diagram))
+		: Boolean(scene?.diagram),
+});
 ---
 
 <BaseLayout
-	hasMath={hasMath}
+	stylesheets={stylesheets}
 	meta={{
 		articleDate,
 		description,
@@ -48,7 +58,7 @@ const explainer = getPostExplainer(post.id);
 			<SeriesNav entry={post} />
 		</div>
 		<div class="prose prose-sm min-w-0 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-			{explainer && <Explainer scene={explainer} />}
+			{sceneId && scene && <Explainer scene={scene} sceneId={sceneId} />}
 			<slot />
 			<WebMentions />
 		</div>

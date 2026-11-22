@@ -10,7 +10,9 @@ import "@/styles/blocks/search.css";
 	let pagefind: typeof import("@pagefind/component-ui") | undefined;
 	let stylesheet: HTMLLinkElement | undefined;
 	let stylesReady: Promise<void> | undefined;
+	let searchReady = false;
 
+	const searchStartButton = "button[data-search-start]";
 	const openSearchDialog = "pagefind-modal > dialog:modal";
 	const viewport = window.visualViewport;
 
@@ -51,6 +53,7 @@ import "@/styles/blocks/search.css";
 			link.addEventListener("error", () => {
 				link.remove();
 				stylesheet = undefined;
+				stylesReady = undefined;
 				reject(new Error("Could not load the search stylesheet."));
 			}, { once: true });
 			stylesheet = link;
@@ -58,7 +61,37 @@ import "@/styles/blocks/search.css";
 		});
 	}
 
-	async function startSearch(trigger: PagefindModalTrigger, button: HTMLButtonElement) {
+	async function loadPagefind() {
+		pagefind ??= await import("@pagefind/component-ui");
+	}
+
+	function mountSearchTrigger(button: HTMLButtonElement) {
+		const { parentElement: fallback, nextElementSibling: template } = button;
+
+		if (!fallback || !(template instanceof HTMLTemplateElement)) return;
+
+		// Importing Pagefind upgrades connected triggers and binds their shortcuts immediately.
+		const trigger = template.content.querySelector<PagefindModalTrigger>("pagefind-modal-trigger");
+
+		if (!trigger) return;
+
+		fallback.replaceWith(trigger);
+
+		return trigger;
+	}
+
+	function mountIdleSearchTrigger() {
+		const button = document.querySelector<HTMLButtonElement>(searchStartButton);
+
+		if (!button || button.hasAttribute("aria-busy")) return;
+
+		const wasFocused = document.activeElement === button;
+		const trigger = mountSearchTrigger(button);
+
+		if (wasFocused) trigger?.buttonEl?.focus({ preventScroll: true });
+	}
+
+	async function startSearch(button: HTMLButtonElement) {
 		if (button.hasAttribute("aria-busy")) return;
 
 		const status = document.getElementById("search-load-status");
@@ -67,22 +100,22 @@ import "@/styles/blocks/search.css";
 		if (status) status.textContent = "Loading search…";
 
 		try {
-			await (stylesReady ??= loadDialogStyles());
+			await Promise.all([stylesReady ??= loadDialogStyles(), loadPagefind()]);
+			searchReady = true;
 
-			if (!trigger.isConnected) return;
+			if (!button.isConnected) {
+				// Prepare the new page, but do not open search for an abandoned click.
+				mountIdleSearchTrigger();
 
-			pagefind ??= await import("@pagefind/component-ui");
+				return;
+			}
 
-			// The upgrade replaces the initial button with Pagefind's own trigger.
-			if (!trigger.isConnected) return;
-
-			trigger.buttonEl?.focus({ preventScroll: true });
-			trigger.openModal();
+			const trigger = mountSearchTrigger(button);
+			trigger?.buttonEl?.focus({ preventScroll: true });
+			trigger?.openModal();
 
 			if (status) status.textContent = "";
 		} catch {
-			if (!stylesheet) stylesReady = undefined;
-
 			if (status) status.textContent = "Search could not load. Reload the page to try again.";
 		} finally {
 			button.removeAttribute("aria-busy");
@@ -92,10 +125,9 @@ import "@/styles/blocks/search.css";
 	document.addEventListener("click", (event) => {
 		if (!(event.target instanceof Element)) return;
 
-		const button = event.target.closest<HTMLButtonElement>("button[data-search-start]");
-		const trigger = button?.closest<PagefindModalTrigger>("pagefind-modal-trigger");
+		const button = event.target.closest<HTMLButtonElement>(searchStartButton);
 
-		if (button && trigger) void startSearch(trigger, button);
+		if (button) void startSearch(button);
 	});
 
 	document.addEventListener("keydown", (event) => {
@@ -113,8 +145,8 @@ import "@/styles/blocks/search.css";
 			(activeElement instanceof HTMLElement && activeElement.isContentEditable)
 		) return;
 
-		// Pagefind handles the shortcut itself once its trigger upgrades.
-		const button = document.querySelector<HTMLButtonElement>("#search [data-search-start]");
+		// Pagefind handles the shortcut itself once its trigger is mounted.
+		const button = document.querySelector<HTMLButtonElement>(searchStartButton);
 
 		if (!button) return;
 
@@ -123,7 +155,7 @@ import "@/styles/blocks/search.css";
 	});
 
 	document.addEventListener("astro:before-swap", (event) => {
-		// Keep the loaded link matched across Astro's head swaps.
+		// Keep the loaded or pending link matched across Astro's head swaps.
 		if (stylesheet) event.newDocument.head.append(stylesheet.cloneNode());
 
 		if (!pagefind) return;
@@ -132,13 +164,17 @@ import "@/styles/blocks/search.css";
 		document.querySelector<PagefindModal>("pagefind-modal")?.close();
 		pagefind.getInstanceManager().removeInstance("site-search");
 	});
+
+	document.addEventListener("astro:after-swap", () => {
+		if (searchReady) mountIdleSearchTrigger();
+	});
 </script>
 
 <pagefind-config
 	instance="site-search"
 	baseUrl={`${import.meta.env.BASE_URL}`}
 	bundle-path={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/pagefind/`}></pagefind-config>
-<pagefind-modal-trigger instance="site-search" id="search" class="ms-auto shrink-0" hide-shortcut compact>
+<div id="search" class="ms-auto shrink-0">
 	<button
 		aria-haspopup="dialog"
 		aria-keyshortcuts="Control+K Meta+K"
@@ -149,5 +185,9 @@ import "@/styles/blocks/search.css";
 	>
 		<span aria-hidden="true" class="pf-trigger-icon"></span>
 	</button>
-</pagefind-modal-trigger>
+	<template>
+		<pagefind-modal-trigger instance="site-search" id="search" class="ms-auto shrink-0" hide-shortcut compact>
+		</pagefind-modal-trigger>
+	</template>
+</div>
 <span class="sr-only" id="search-load-status" role="status"></span>

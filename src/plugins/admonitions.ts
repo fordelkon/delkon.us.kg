@@ -46,7 +46,7 @@ export function satteriAdmonitionsPlugin(): MdastPluginDefinition {
 				children: [{ type: "text", value: serializeDirective(node) }],
 			} as const;
 		},
-		containerDirective(node) {
+		containerDirective(node, ctx) {
 			if (node.data !== undefined) return;
 			const admonitionType = node.name;
 
@@ -54,6 +54,8 @@ export function satteriAdmonitionsPlugin(): MdastPluginDefinition {
 				// Unrecognized ::: block — keep the content, drop the styling.
 				return h("div", {}, [...node.children]);
 			}
+
+			if (ctx.data.astro) ctx.data.astro.frontmatter.hasAdmonition = true;
 
 			let title: string = admonitionType;
 			let titleNode: PhrasingContent[] = [{ type: "text", value: title }];

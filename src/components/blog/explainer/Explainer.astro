@@ -1,13 +1,13 @@
 ---
 import ScenePlayer from "./ScenePlayer.astro";
-import { getScene, type SceneId } from "./scenes/index";
+import type { Scene } from "./scenes/types";
 
 interface Props {
-	scene: SceneId;
+	scene: Scene;
+	sceneId: string;
 }
 
-const { scene: sceneId } = Astro.props;
-const scene = getScene(sceneId);
+const { scene, sceneId } = Astro.props;
 ---
 
 {scene.chapters ? (

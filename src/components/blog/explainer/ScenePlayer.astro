@@ -1,7 +1,7 @@
 ---
 import Diagram from "./Diagram.astro";
 import { renderScene } from "./mermaid";
-import type { Scene } from "./scenes/types";
+import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, type Scene } from "./scenes/types";
 
 interface Props {
 	scene: Scene;
@@ -11,8 +11,8 @@ interface Props {
 
 const { scene, sceneId, study = false } = Astro.props;
 const { caption, description } = scene;
-const svgs = scene.diagram ? renderScene(sceneId, scene) : undefined;
-const staticSvgs = study && scene.diagram ? renderScene(`${sceneId}-static`, scene) : undefined;
+const svgs = scene.diagram ? renderScene(sceneId, scene, study) : undefined;
+const diagramViewBox = `0 0 ${DIAGRAM_WIDTH} ${scene.diagramHeight ?? DIAGRAM_HEIGHT}`;
 const stepDurationMs = 3000;
 const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * stepDurationMs }));
 ---
@@ -70,10 +70,11 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 					aria-hidden="true"
 				>
 					{svgs ? (
-						<div class="explainer-mermaid mermaid-diagram" set:html={svgs[index]} />
+						<div class="explainer-mermaid mermaid-diagram" set:html={svgs[index]?.svg} />
 					) : (
 						<Diagram
 							frame={frame}
+							id={study ? `${sceneId}-${index}-artwork` : undefined}
 							marker={`${sceneId}-arrow-${index}`}
 							height={scene.diagramHeight}
 						/>
@@ -124,7 +125,7 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 				{frames.map((frame, index) => (
 					<li>
 						{study &&
-							(staticSvgs ? (
+							(svgs ? (
 								<div
 									class="explainer-static-viewport"
 									role="region"
@@ -134,15 +135,13 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 									<div
 										class="explainer-mermaid mermaid-diagram"
 										aria-hidden="true"
-										set:html={staticSvgs[index]}
+										set:html={svgs[index]?.reference}
 									/>
 								</div>
 							) : (
-								<Diagram
-									frame={frame}
-									marker={`${sceneId}-static-${index}`}
-									height={scene.diagramHeight}
-								/>
+								<svg class="explainer-diagram" viewBox={diagramViewBox} aria-hidden="true" focusable="false">
+									<use href={`#${sceneId}-${index}-artwork`} />
+								</svg>
 							))}
 						<p>{frame.note}</p>
 					</li>
@@ -155,7 +154,3 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 <script>
 	import "./playback";
 </script>
-
-<style is:global>
-	@import "./styles.css";
-</style>

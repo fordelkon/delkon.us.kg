@@ -4,10 +4,11 @@ import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, type Frame, NODE_HEIGHT } from "./scenes
 interface Props {
 	frame: Frame;
 	marker: string;
+	id?: string | undefined;
 	height?: number | undefined;
 }
 
-const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
+const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 ---
 
 <svg class="explainer-diagram" viewBox={`0 0 ${DIAGRAM_WIDTH} ${height}`} aria-hidden="true" focusable="false">
@@ -24,6 +25,7 @@ const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
 			<path d="M0 0 L8 4 L0 8z" fill="context-stroke" />
 		</marker>
 	</defs>
+	<g id={id}>
 	{frame.edges?.map((line) => (
 		<path
 			class:list={["explainer-edge", { "is-active": line.active }]}
@@ -50,4 +52,5 @@ const { frame, marker, height = DIAGRAM_HEIGHT } = Astro.props;
 			))}
 		</g>
 	))}
+	</g>
 </svg>

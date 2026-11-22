@@ -51,9 +51,15 @@ const stickers = [
 <desk-stickers>
 	{
 		stickers.map(async ({ id, label, column, row, stagger, offset, tilt, height }) => {
-			const small = `/stickers/${id}-small.webp`;
-			const compact = `/stickers/${id}-compact.webp`;
 			const full = `/stickers/${id}.webp`;
+			const candidates = [
+				[`/stickers/${id}-small.webp`, 1],
+				[`/stickers/${id}-compact.webp`, 1.5],
+				[`/stickers/${id}-2x.webp`, 2],
+				[full, 3],
+			] as const;
+			const srcset = candidates.map(([url, density]) => `${url} ${density}x`).join(", ");
+			const imageSet = candidates.map(([url, density]) => `url('${url}') ${density}x`).join(", ");
 
 			return (
 				<button
@@ -64,9 +70,9 @@ const stickers = [
 					data-sticker-label={label}
 					data-sticker-outline={await stickerOutline(id)}
 					data-sticker-side={column === 1 ? "left" : "right"}
-					data-sticker-srcset={`${small} 1x, ${compact} 1.5x, ${full} 3x`}
+					data-sticker-srcset={srcset}
 					disabled
-					style={`--sticker-small: url('${small}'); --sticker-compact: url('${compact}'); --sticker-full: url('${full}'); --sticker-column: ${column}; --sticker-row: ${row}; --sticker-stagger: ${stagger}px; --sticker-offset: ${offset}px; --sticker-tilt: ${tilt}deg; --sticker-height: ${height}px`}
+					style={`--sticker-full: url('${full}'); --sticker-image-set: image-set(${imageSet}); --sticker-column: ${column}; --sticker-row: ${row}; --sticker-stagger: ${stagger}px; --sticker-offset: ${offset}px; --sticker-tilt: ${tilt}deg; --sticker-height: ${height}px`}
 					type="button"
 				>
 					<span aria-hidden="true" class="desk-sticker-lift" />
@@ -180,7 +186,7 @@ const stickers = [
 
 		@supports (background-image: image-set(url("") 1x)) {
 			.desk-sticker {
-				--sticker-image: image-set(var(--sticker-small) 1x, var(--sticker-compact) 1.5x, var(--sticker-full) 3x);
+				--sticker-image: var(--sticker-image-set);
 			}
 		}
 

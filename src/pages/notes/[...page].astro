@@ -8,6 +8,7 @@ import SeriesArchive from "@/components/SeriesArchive.astro";
 import { getPublishedNotes } from "@/data/entries";
 import { getSeriesGroups, type SeriesGroup } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
+import { contentStyles } from "@/styles/content-styles";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	const MAX_NOTES_PER_PAGE = 10;
@@ -30,8 +31,8 @@ interface Props {
 const { page, seriesGroups } = Astro.props;
 const notes = await Promise.all(page.data.map(async (note) => ({ note, ...(await render(note)) })));
 
-const hasMath = notes.some(
-	({ remarkPluginFrontmatter }) => remarkPluginFrontmatter.hasMath === true,
+const stylesheets = contentStyles(
+	...notes.map(({ remarkPluginFrontmatter }) => remarkPluginFrontmatter),
 );
 
 const meta = {
@@ -40,7 +41,7 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta} hasMath={hasMath}>
+<PageLayout meta={meta} stylesheets={stylesheets}>
 	<header class="mb-(--receipt-page-heading-gap) flex items-center gap-3">
 		<h1 class="receipt-title">Notes</h1>
 		<a class="text-printer-accent hover:text-printer-ink" href="/notes/rss.xml" target="_blank">

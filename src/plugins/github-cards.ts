@@ -6,7 +6,7 @@ const DIRECTIVE_NAME = "github";
 export function satteriGithubCardPlugin(): MdastPluginDefinition {
 	return {
 		name: "cactus-github-card",
-		leafDirective(node) {
+		leafDirective(node, ctx) {
 			if (node.name !== DIRECTIVE_NAME) return;
 
 			let repoName = node.attributes?.repo ?? node.attributes?.user ?? null;
@@ -17,6 +17,8 @@ export function satteriGithubCardPlugin(): MdastPluginDefinition {
 			repoName = repoName.startsWith("https://github.com/")
 				? repoName.replace("https://github.com/", "")
 				: repoName; // Remove leading URL
+
+			if (ctx.data.astro) ctx.data.astro.frontmatter.hasGithubCard = true;
 
 			const repoParts = repoName.split("/");
 			const simpleUUID = `GC-${crypto.randomUUID()}`;

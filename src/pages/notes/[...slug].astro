@@ -5,6 +5,7 @@ import Note from "@/components/note/Note.astro";
 import SeriesNav from "@/components/SeriesNav.astro";
 import { getSeriesContext } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
+import { contentStyles } from "@/styles/content-styles";
 import { getFormattedDate } from "@/utils/date";
 
 // if you're using an adaptor in SSR mode, getStaticPaths wont work -> https://docs.astro.build/en/guides/routing/#modifying-the-slug-example-for-ssr
@@ -31,7 +32,7 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta} hasMath={remarkPluginFrontmatter.hasMath === true}>
+<PageLayout meta={meta} stylesheets={contentStyles(remarkPluginFrontmatter)}>
 	<Note as="h1" note={note} series={series}>
 		<Content />
 	</Note>

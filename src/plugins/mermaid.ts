@@ -61,6 +61,8 @@ export function satteriMermaidPlugin(): () => MdastPluginDefinition {
 					classes.push("prose-diagram-responsive");
 				}
 
+				if (ctx.data.astro) ctx.data.astro.frontmatter.hasMermaid = true;
+
 				// Replace before code highlighting; index the caption once, not SVG labels or syntax.
 				ctx.replaceNode(node, {
 					type: "paragraph",

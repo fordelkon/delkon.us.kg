@@ -11,7 +11,6 @@
 /* Expressive Code emits unlayered resets; the decorative watermark must
    share that cascade level to retain its layout and mask. */
 @import "./components/ascii-art.css";
-@import "./components/mermaid.css";
 
 /* Native cross-document transition fallback for full page loads (e.g. when
    the ClientRouter script is unavailable). Keep this outside the cascade
@@ -132,8 +131,6 @@
 
 @layer components {
 	@import "./components/printer-housing.css";
-	@import "./components/admonition.css";
-	@import "./components/github-card.css";
 	@import "./components/receipt.css";
 	@import "./components/footnotes.css";
 	@import "./components/math.css";

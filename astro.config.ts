@@ -11,6 +11,7 @@ import robotsTxt from "astro-robots-txt";
 import webmanifest from "astro-webmanifest";
 import { satteriAdmonitionsPlugin } from "./src/plugins/admonitions";
 import { codeStamps } from "./src/plugins/code-stamps";
+import { compactCodeTokens } from "./src/plugins/compact-code-tokens";
 import { copyFrames } from "./src/plugins/copy-frames";
 import { satteriGithubCardPlugin } from "./src/plugins/github-cards";
 import { satteriMathPlugin } from "./src/plugins/math";
@@ -38,7 +39,10 @@ export default defineConfig({
 		domains: ["webmention.io"],
 	},
 	integrations: [
-		expressiveCode({ ...expressiveCodeOptions, plugins: [copyFrames(), codeStamps()] }),
+		expressiveCode({
+			...expressiveCodeOptions,
+			plugins: [copyFrames(), codeStamps(), compactCodeTokens()],
+		}),
 		icon(),
 		sitemap(),
 		mdx(),

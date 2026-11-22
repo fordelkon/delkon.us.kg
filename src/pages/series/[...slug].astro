@@ -7,6 +7,7 @@ import Note from "@/components/note/Note.astro";
 import TagLinks from "@/components/TagLinks.astro";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
+import { contentStyles } from "@/styles/content-styles";
 
 export const getStaticPaths = (async () => {
 	const groups = await getSeriesGroups();
@@ -28,7 +29,7 @@ const Content = seriesDocument?.Content;
 ---
 
 <PageLayout
-	hasMath={seriesDocument?.remarkPluginFrontmatter.hasMath === true}
+	stylesheets={contentStyles(seriesDocument?.remarkPluginFrontmatter)}
 	meta={{ title: group.title, description: group.description ?? `按顺序阅读${group.title}。` }}
 >
 	<nav aria-label="Breadcrumbs" class="mb-6 print-label">

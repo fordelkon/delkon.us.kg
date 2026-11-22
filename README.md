@@ -59,8 +59,8 @@ without the peel or snap animations. Drag and arrow-key moves are saved in the
 browser across reloads. Escape resets a decal and clears its saved position;
 Enter previews the snap and return. `public/stickers/` contains the transparent WebP
 files served by the site. Housing decals have lossless compact variants. Desk
-decals use 168-, 252-, or 504-pixel-tall artwork according to display density, with
-the same image candidates for the printed face and its WebGPU curl.
+decals use 168-, 252-, 336-, or 504-pixel-tall artwork according to display density,
+with the same image candidates for the printed face and its WebGPU curl.
 
 ## Content
 

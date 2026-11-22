@@ -40,12 +40,17 @@ export function bindHousingDrag(root: HTMLElement): (() => void) | undefined {
 				: [];
 		});
 
-		return constrainSticker(
-			button.getBoundingClientRect(),
-			placement.read(button),
-			surface,
-			reserved,
-		);
+		const target = button.getBoundingClientRect();
+		const artwork = button.firstElementChild?.getBoundingClientRect() ?? target;
+
+		const footprint = {
+			left: Math.min(target.left, artwork.left),
+			right: Math.max(target.right, artwork.right),
+			top: Math.min(target.top, artwork.top),
+			bottom: Math.max(target.bottom, artwork.bottom),
+		};
+
+		return constrainSticker(footprint, placement.read(button), surface, reserved);
 	};
 
 	function stop(restore = false): void {

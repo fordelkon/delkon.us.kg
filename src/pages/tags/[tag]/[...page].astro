@@ -10,6 +10,7 @@ import { getTagMeta, getUniqueTags, MAX_POSTS_PER_PAGE } from "@/data/post";
 import { seriesUrl } from "@/data/routes";
 import { getSeriesGroups } from "@/data/series";
 import PageLayout from "@/layouts/Base.astro";
+import { contentStyles } from "@/styles/content-styles";
 
 export const getStaticPaths = (async ({ paginate }) => {
 	// Tags are topic filters: series members stay in tag listings (docs/writing.md).
@@ -43,7 +44,7 @@ const meta = {
 };
 ---
 
-<PageLayout meta={meta} hasMath={tagDocument?.remarkPluginFrontmatter.hasMath === true}>
+<PageLayout meta={meta} stylesheets={contentStyles(tagDocument?.remarkPluginFrontmatter)}>
 	<nav aria-label="Breadcrumbs" class="mb-6 print-label">
 		<ul class="flex items-center gap-1.5">
 			<li>
