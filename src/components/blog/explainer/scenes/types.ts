@@ -7,6 +7,8 @@ export interface Box {
 	x: number;
 	y: number;
 	width: number;
+	height?: number;
+	glyph?: "cell" | "circle" | "label" | "bar" | "water" | "area";
 	lines: string[];
 	active?: boolean;
 	endpoint?: boolean;
@@ -20,6 +22,7 @@ export interface Edge {
 	path: string;
 	active?: boolean;
 	dashed?: boolean;
+	undirected?: boolean;
 }
 
 export interface Frame {

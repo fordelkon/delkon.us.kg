@@ -11,7 +11,12 @@ interface Props {
 const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 ---
 
-<svg class="explainer-diagram" viewBox={`0 0 ${DIAGRAM_WIDTH} ${height}`} aria-hidden="true" focusable="false">
+<svg
+	class="explainer-diagram"
+	viewBox={`0 0 ${DIAGRAM_WIDTH} ${height}`}
+	aria-hidden="true"
+	focusable="false"
+>
 	<defs>
 		<marker
 			id={marker}
@@ -26,31 +31,61 @@ const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 		</marker>
 	</defs>
 	<g id={id}>
-	{frame.edges?.map((line) => (
-		<path
-			class:list={["explainer-edge", { "is-active": line.active }]}
-			d={line.path}
-			stroke-dasharray={line.dashed ? "3 3" : undefined}
-			marker-end={`url(#${marker})`}
-		/>
-	))}
-	{frame.edges?.filter((line) => line.label).map((line) => (
-        <text class="explainer-edge-label" x={line.label?.x} y={line.label?.y} text-anchor="middle">{line.label?.text}</text>
-    ))}
-	{frame.boxes.map((node) => (
-		<g data-tone={node.tone} data-endpoint={node.endpoint || undefined} class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}>
-			<rect x={node.x} y={node.y} width={node.width} height={NODE_HEIGHT} rx="3" />
-			{node.endpoint && <rect class="explainer-endpoint-inset" x={node.x + 4} y={node.y + 4} width={node.width - 8} height={NODE_HEIGHT - 8} rx="2" />}
-			{node.lines.map((line, index) => (
-				<text
-					x={node.x + node.width / 2}
-					y={node.y + 19 + index * 19}
-					text-anchor="middle"
-				>
-					{line}
+		{frame.edges?.map((line) => (
+			<path
+				class:list={["explainer-edge", { "is-active": line.active }]}
+				d={line.path}
+				stroke-dasharray={line.dashed ? "3 3" : undefined}
+				marker-end={line.undirected ? undefined : `url(#${marker})`}
+			/>
+		))}
+		{frame.edges
+			?.filter((line) => line.label)
+			.map((line) => (
+				<text class="explainer-edge-label" x={line.label?.x} y={line.label?.y} text-anchor="middle">
+					{line.label?.text}
 				</text>
 			))}
-		</g>
-	))}
+		{frame.boxes.map((node) => {
+			const height = node.height ?? NODE_HEIGHT;
+			return (
+				<g
+					data-glyph={node.glyph}
+					data-tone={node.tone}
+					data-endpoint={node.endpoint || undefined}
+					class:list={["explainer-node", { "is-active": node.active, "is-muted": node.muted }]}
+				>
+					{node.glyph !== "label" && (
+						<rect
+							x={node.x}
+							y={node.y}
+							width={node.width}
+							height={height}
+							rx={node.glyph === "circle" ? height / 2 : node.glyph ? 0 : 3}
+						/>
+					)}
+					{node.endpoint && (
+						<rect
+							class="explainer-endpoint-inset"
+							x={node.x + 4}
+							y={node.y + 4}
+							width={node.width - 8}
+							height={NODE_HEIGHT - 8}
+							rx="2"
+						/>
+					)}
+					{node.lines.map((line, index) => (
+						<text
+							x={node.x + node.width / 2}
+							y={node.y + height / 2 + (index - (node.lines.length - 1) / 2) * 19}
+							dominant-baseline="central"
+							text-anchor="middle"
+						>
+							{line}
+						</text>
+					))}
+				</g>
+			);
+		})}
 	</g>
 </svg>

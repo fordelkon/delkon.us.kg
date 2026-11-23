@@ -11,14 +11,17 @@
 	display: block;
 	position: relative;
 	width: 100%;
-	max-width: 100%;
+	max-width: var(--explainer-width);
 	margin-inline: auto;
-	padding-top: 1.5rem;
 	font-family: var(--font-mono);
 	font-size: 0.875rem;
 }
+.step-explainer-canvas:has(.step-explainer-toggle) {
+	padding-block-start: 1.5rem;
+}
 .step-explainer-visual {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 	justify-items: center;
 	max-width: var(--explainer-width);
 	margin-inline: auto;
@@ -164,6 +167,17 @@
 	stroke: var(--color-printer-accent);
 	stroke-width: 2;
 }
+.explainer-node[data-glyph="bar"] rect {
+	fill: color-mix(in srgb, var(--color-printer-ink) 15%, var(--color-printer-paper));
+}
+.explainer-node[data-glyph="area"] rect,
+.explainer-node[data-glyph="water"] rect {
+	fill: color-mix(in srgb, var(--color-printer-accent) 22%, transparent);
+	stroke: var(--color-printer-accent);
+}
+.explainer-node[data-glyph="area"] rect {
+	stroke-dasharray: 5 3;
+}
 .explainer-node.is-muted {
 	opacity: 0.65;
 }
@@ -178,6 +192,7 @@
 }
 .explainer-note {
 	max-width: 34em;
+	padding-inline: 0.5rem;
 	margin: 0.75rem auto;
 	font-size: var(--explainer-copy-font-size);
 	line-height: var(--explainer-copy-line-height);
@@ -259,12 +274,15 @@
 .explainer-scenes {
 	display: block;
 	margin-block-end: var(--receipt-section-gap);
+}
+.study-explainer {
+	--diagram-node-font-size: 15px;
 	--explainer-client: #245e92;
 	--explainer-delivery: #28704c;
 	--explainer-processing: #985019;
 	--explainer-secure: #79529b;
 }
-html[data-theme="dark"] .explainer-scenes {
+html[data-theme="dark"] .study-explainer {
 	--explainer-client: #8dbfe8;
 	--explainer-delivery: #91cba7;
 	--explainer-processing: #eab284;
@@ -314,8 +332,16 @@ html[data-theme="dark"] .explainer-scenes {
 	color: var(--color-printer-ink-light);
 	margin-block: 0.75rem;
 }
-.study-explainer {
-	--diagram-node-font-size: 15px;
+.study-explainer > .step-explainer-canvas {
+	border: 1px solid var(--color-printer-ink-light);
+	border-radius: 3px;
+}
+.study-explainer .step-explainer-toggle {
+	inset-block-start: 0;
+	inset-inline-end: 0;
+}
+.study-explainer > .step-explainer-canvas:has(.step-explainer-toggle) {
+	padding-block-start: 2.75rem;
 }
 .study-explainer .explainer-node[data-tone="actor"],
 .study-explainer .explainer-node[data-tone="client"] {
@@ -380,4 +406,14 @@ html[data-theme="dark"] .explainer-scenes {
 	fill: none;
 	stroke: currentColor;
 	stroke-width: 1;
+}
+
+.step-explainer:has(.explainer-diagram) {
+	container: explainer / inline-size;
+}
+@container explainer (width < 22.5rem) {
+	.explainer-diagram {
+		/* Keep short SVG labels legible as the 360-unit drawing shrinks. */
+		font-size: 17px;
+	}
 }

@@ -53,6 +53,30 @@
 	display: none;
 }
 
+.mermaid-diagram .xychart-grid {
+	fill: var(--_inner-stroke);
+}
+.mermaid-diagram .xychart-bar {
+	fill: var(--diagram-actor-fill);
+	stroke: var(--diagram-actor-ink);
+}
+.mermaid-diagram .xychart-line,
+.mermaid-diagram .xychart-legend-line {
+	fill: none;
+	stroke: var(--diagram-risk-ink);
+	stroke-width: 2.5;
+}
+.mermaid-diagram .xychart-line-shadow {
+	display: none;
+}
+.mermaid-diagram .xychart-dot {
+	fill: var(--diagram-risk-ink);
+	stroke: var(--_paper);
+}
+.mermaid-diagram :is(.xychart-title, .xychart-axis-title, .xychart-label) {
+	fill: var(--_text);
+}
+
 .prose-diagram {
 	margin-block: var(--receipt-section-gap);
 	color: var(--color-printer-ink);
@@ -86,10 +110,21 @@
 	max-width: none;
 	margin-inline: auto;
 }
+.prose-diagram .mermaid-diagram:has(.xychart-label) {
+	width: 100%;
+	min-width: 30rem;
+}
+.prose-diagram svg:has(.xychart-label) {
+	width: 100%;
+	height: auto;
+}
+.prose-diagram-responsive {
+	container: prose-diagram / inline-size;
+}
 .prose-diagram .prose-diagram-narrow {
 	display: none;
 }
-@media (max-width: 639px) {
+@container prose-diagram (inline-size < 36rem) {
 	.prose-diagram .prose-diagram-wide {
 		display: none;
 	}

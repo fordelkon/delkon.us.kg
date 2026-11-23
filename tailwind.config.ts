@@ -176,6 +176,12 @@ export default {
 								minWidth: "9rem",
 							},
 						},
+						".algorithm-table table :is(th, td)": {
+							"@media (max-width: 639px)": {
+								minWidth: "0",
+								paddingInline: "0.25em",
+							},
+						},
 						"table .katex": {
 							display: "inline-block",
 							whiteSpace: "nowrap",
