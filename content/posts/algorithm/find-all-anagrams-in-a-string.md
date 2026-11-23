@@ -190,7 +190,7 @@ public:
 
 `std::array` 在对象内部连续存放固定数量的元素，不自行动态分配存储；这里局部对象具有自动存储期，常见实现会放在栈上，但 C++ 标准不规定必须使用物理栈。除输出外，辅助空间为 $O(A)$，时间与 Python 差分版相同，为 $O(n + m + A)$（$n \ge m$）。数组寻址依赖执行字符集中小写字母连续排列，LeetCode 的 ASCII 兼容环境满足这一条件。
 
-[LeetCode 567. 字符串的排列](https://leetcode.cn/problems/permutation-in-string/)与本题的数学本质相同——排列即字母异位词——区别只在输出形态：它只需判断存在性，循环中一旦检测到 `differ == 0` 即可短路返回，不必收集全部下标。与[《和为 K 的子数组：先查前缀，再记录频次》](/posts/algorithm/subarray-sum-equals-k/)的方向相反：那道题的数组允许负数，仅凭当前和与目标大小决定伸缩方向的简单单调性失效；本题窗口长度严格固定为 $|p|$，频次随进出守恒，滑动窗口是天然解。若把单字符步长换成定长单词，问题升维为 [LeetCode 30. 串联所有单词的子串](https://leetcode.cn/problems/substring-with-concatenation-of-all-words/)，若每个单词长度为 $w$，可按起始下标模 $w$ 的余数分成 $w$ 组扫描，每组以一个单词为步长，增量维护单词频次。
+[LeetCode 567. 字符串的排列](https://leetcode.cn/problems/permutation-in-string/)与本题的数学本质相同——排列即字母异位词——区别只在输出形态：它只需判断存在性，循环中一旦检测到 `differ == 0` 即可短路返回，不必收集全部下标。与[《和为 K 的子数组：先查前缀，再记录频次》](/posts/algorithm/subarray-sum-equals-k/)的方向相反：那道题的数组允许负数，仅凭当前和与目标大小决定伸缩方向的简单单调性失效；本题窗口长度严格固定为 $|p|$，频次随进出守恒，滑动窗口是天然解。当窗口长度不再固定时，这套频次差分与单调收缩思路可分别延伸到[《无重复字符的最长子串：用末次下标移动窗口左端》](/posts/algorithm/longest-substring-without-repeating-characters/)与[《最小覆盖子串：计数判断覆盖与双指针收缩》](/posts/algorithm/minimum-window-substring/)。若把单字符步长换成定长单词，问题升维为 [LeetCode 30. 串联所有单词的子串](https://leetcode.cn/problems/substring-with-concatenation-of-all-words/)，若每个单词长度为 $w$，可按起始下标模 $w$ 的余数分成 $w$ 组扫描，每组以一个单词为步长，增量维护单词频次。
 
 [^counter-eq]: [Python 文档：`collections.Counter`](https://docs.python.org/3/library/collections.html#collections.Counter)——说明相等比较把缺失元素视为 0 计数，Python 3.10 起生效；此前 `Counter(a=1)` 与 `Counter(a=1, b=0)` 不相等。
 

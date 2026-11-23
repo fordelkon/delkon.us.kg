@@ -93,7 +93,7 @@ public:
 
 设可达的不同节点共有 $n$ 个。有环时第一阶段耗时 $O(a + b)$，第二阶段耗时 $O(a)$；无环时最多扫描到末尾。两版的总时间均为 $O(n)$，辅助空间为 $O(1)$。算法只读 `next`，不分配、释放或修改节点，返回的入口仍是输入节点；C++ 调用方保留所有权，并须保证遍历期间节点与链接有效且不被其他代码改写。
 
-[《相交链表：把状态判定收进循环条件》](/posts/algorithm/linked-list-intersection/)也通过调整路程让指针对齐，但它依赖两条无环路径的长度相等；这里依赖环长整倍数的同余关系。理解各自的对齐条件，比把两者概括成同一种技巧更有助于判断何时可以复用。
+[《相交链表：把状态判定收进循环条件》](/posts/algorithm/linked-list-intersection/)也通过调整路程让指针对齐，但它依赖两条无环路径的长度相等；这里依赖环长整倍数的同余关系。理解各自的对齐条件，比把两者概括成同一种技巧更有助于判断何时可以复用。同一套 Floyd 快慢指针与环入口推导还可直接迁移到数组值域映射的隐式函数图上，见[《寻找重复数：下标映射与环入口》](/posts/algorithm/find-the-duplicate-number/)。
 
 [^python-while-else]: [Python 文档：`while` 语句](https://docs.python.org/3/reference/compound_stmts.html#the-while-statement)——说明循环条件变为假时执行 `else` 子句，而通过 `break` 提前跳出循环则会跳过 `else` 子句。
 

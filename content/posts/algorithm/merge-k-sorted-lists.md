@@ -115,7 +115,7 @@ private:
 
 总时间为 $O(k + n \log(k + 1))$：$O(k)$ 用于各轮的配对，节点扫描至多发生 $O(\log k)$ 轮。实现不使用递归，哨兵是自动存储期的局部对象，不为结果分配新节点，辅助空间为 $O(1)$[^cpp-storage-duration]。
 
-[《排序链表：递归归并与自底向上归并》](/posts/algorithm/sort-list/)会继续使用双路归并，区别在于需要先把一条无序链表切成若干段。
+[《排序链表：递归归并与自底向上归并》](/posts/algorithm/sort-list/)会继续使用双路归并，区别在于需要先把一条无序链表切成若干段。而小顶堆维护固定容量候选集与动态极值门槛的用法，则进一步延伸到[《第 K 大元素与前 K 个高频元素：小顶堆、快速选择与频次桶》](/posts/algorithm/top-k-elements/)与[《数据流的中位数：用对顶堆维护左右两半》](/posts/algorithm/find-median-from-data-stream/)。
 
 [^python-compare]: [Python 文档：值比较](https://docs.python.org/3/reference/expressions.html#value-comparisons)——说明元组按位置字典序依次比较，一旦某一项分出大小便直接决定结果，不再比较后续元素。
 

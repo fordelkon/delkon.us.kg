@@ -9,7 +9,7 @@ tags: ["algorithm", "dynamic-programming", "python", "cpp"]
 
 ## 单调性破坏与极值双状态模型
 
-**最大子数组和**（Kadane's algorithm）只需保留结尾最大和，因为加上同一个数不会改变大小关系：若 $A\ge B$，则 $A+x\ge B+x$。乘法遇到负数时，大小关系却会反过来。
+[《最大子数组和：Kadane 递推与分治合并》](/posts/algorithm/maximum-subarray/)只需保留结尾最大和，因为加上同一个数不会改变大小关系：若 $A\ge B$，则 $A+x\ge B+x$。乘法遇到负数时，大小关系却会反过来。
 
 乘法需要分别考虑符号与零：
 
