@@ -5,7 +5,7 @@ publishDate: "22 Nov 2026"
 tags: ["networking"]
 ---
 
-上一篇[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)解释了如何取得目标地址与连接参数。接下来要分别解决两个问题：应用怎样表达请求与响应，客户端怎样确认通信对端并保护消息。**超文本传输协议**（Hypertext Transfer Protocol，HTTP）规定前者，TLS 为后者提供认证与加密机制。
+上一篇[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)解释了如何取得目标地址与连接参数。建立连接后，**超文本传输协议**（Hypertext Transfer Protocol，HTTP）规定应用怎样表达请求与响应，TLS 提供服务身份认证和消息保护。
 
 本篇先读一组最小 HTTP 消息，再比较三个版本怎样复用连接。随后沿 TLS 1.3 握手看客户端怎样验证服务身份，再对照 HTTP/2 和 HTTP/3 在握手和传输应用数据时的线上封装，最后用实验核对协商结果。分清谁能看到什么，也为[第七篇的两段 TCP 与目标 TLS](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls)打下基础：代理把传输连接分成两段，不表示应用的 TLS 也在那里终止。
 
@@ -32,7 +32,7 @@ Content-Length: 6
 hello
 ```
 
-`Host` 表示请求指向的主机；路径 `/hello` 标识该主机上的目标资源。`Content-Length` 参与消息定界，不是让 TCP 产生消息边界——[第四篇的 TCP 字节流](/posts/networking/transport-tcp-udp-socket-quic/)仍可能把这一响应交付为多次读取。
+`Host` 表示请求指向的主机，路径 `/hello` 标识该主机上的目标资源。对于这条响应，`Content-Length` 告诉客户端要收齐多少正文。客户端可能需要[从 TCP 字节流分次读取](/posts/networking/transport-tcp-udp-socket-quic/#短读短写eof-与-wouldblock)。
 
 | 状态码 | 常见含义 | 读响应时还要看什么 |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ hello
 | `404` | 未找到目标资源 | 说明已拿到 HTTP 响应，不等于 DNS 或 TCP 连接失败 |
 | `500` / `502` / `504` | 服务端错误 / 网关收到无效上游响应 / 网关等待上游超时 | 需要结合响应来源及服务日志；状态码不单独定位底层根因 |
 
-重定向意味着客户端还可能访问另一个 URL，形成新的解析、连接或身份校验。`curl` 默认不自动跟随 HTTP 重定向，`-L` 才请求跟随[^curl]；做阶段计时应先确认是否发生重定向，具体方法见[第八篇](/posts/networking/network-diagnostics-performance-troubleshooting/)。
+重定向意味着客户端还可能访问另一个 URL，形成新的解析、连接或身份校验。`curl` 默认不自动跟随 HTTP 重定向，`-L` 才请求跟随[^curl]；做阶段计时应先确认是否发生重定向，可参照[固定单次传输的 curl 计时模型](/posts/networking/network-diagnostics-performance-troubleshooting/#先限定本次计时模型)。
 
 ### HTTP 缓存与 Cookie
 
@@ -95,7 +95,7 @@ sequenceDiagram
 在图中的 TCP 链路上，旁观者能读到 `ClientHello` 和 `ServerHello`。从 `EncryptedExtensions` 开始，握手消息的内容不再公开：服务端选中的 ALPN、证书链、`CertificateVerify` 和双方的 `Finished` 都受保护[^5][^7]。这也与常见 TLS 1.2 完整握手的明文证书消息不同。
 
 - **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 本身不认证身份[^6]。
-- [ALPN](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)：在未启用 ECH 的例子中，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选，却不能从 TLS 1.3 的 `EncryptedExtensions` 直接读出服务端最终选了哪个[^7]。
+- **ALPN** 在本次握手中选定应用协议。[DNS HTTPS 记录中的 `alpn` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)可供客户端事先发现服务支持的候选协议。在图中未启用 ECH 的例子里，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选。服务端的最终选择受 `EncryptedExtensions` 保护[^7]。
 
 ### 证书链可信，还要检查名字
 
@@ -119,7 +119,7 @@ TLS 1.3 的服务端可以在握手后发送 `NewSessionTicket`，把票据与�
 
 ## HTTPS 在线上如何承载握手与应用数据
 
-前面的握手图按 TLS 消息展开。抓包时，还要区分这些消息的载体。先看握手落在哪一层，再看握手结束后的两种应用数据布局。
+回到[同一次 HTTPS 访问的阶段对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)。在 HTTP/1.1 over TLS 的完整握手示例里，TCP 先建立字节流，TLS 随后在其中传送握手消息，客户端验证服务身份并发送 `Finished` 后，才把 HTTP 请求交给记录层保护[^5]。从封装看，握手消息和 HTTP 字节都通过 TLS 记录占用这条 TCP 流，但内容及用于保护它们的密钥阶段不同。HTTP/2 over TLS 也使用这套承载关系。改用 HTTP/3 时，握手消息和应用数据则走 QUIC 的两种帧。
 
 ### HTTP/3 怎样把 TLS 放进 QUIC
 
@@ -274,7 +274,7 @@ curl --noproxy '*' -v --http2 https://example.com/ -o /dev/null
 
 HTTP 的语义与消息传输版本分别演进；HTTP/1.1 允许流水线但要求响应有序，HTTP/2 在 TCP 上复用流，HTTP/3 借助 QUIC 避免跨流的传输按序交付阻塞。TLS 则另行规定密钥、身份和加密边界，SNI、名字校验与证书链验证各有职责。
 
-到这里，本系列选取的客户端访问主线已经从本地交付延伸到应用消息。下一篇[《计算机网络（七）：代理协议、透明接管与分流实现》](/posts/networking/proxies-tunnels-transparent-interception/)将把这些机制放入代理场景，分别追踪流量从哪里进入、域名在哪里解析，以及哪一端建立目标连接。
+回看[第一篇的冷启动时序](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)，可以先认出 DNS 答案、TCP 建连、TLS 验证和 HTTP 响应各自完成了什么，再沿对应的封装路径找到这些信息落在哪个头部或载荷。把这个方法用到 HTTP/3，TLS 仍处理密钥与身份，线上承载则改由 QUIC 完成。下一篇[《计算机网络（七）：代理协议、透明接管与分流实现》](/posts/networking/proxies-tunnels-transparent-interception/)将沿一条代理路径追踪流量入口、域名解析位置以及建立目标连接的一端。
 
 ## 延伸阅读
 

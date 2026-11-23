@@ -13,18 +13,18 @@ title: "计算机网络系列"
 description: "从分层封装、局域网寻址、路由转发与传输控制，到域名解析、TLS 加密边界、代理隧道接管与分层故障诊断。"
 ---
 
-一次网络访问既要把应用消息转换成能够在物理链路上传输的分组，也要在跨网转发、丢包重传、名字解析与代理介入时保持明确的职责边界。本系列围绕一次客户端访问远端服务的主线，从协议分层与本地链路出发，逐步讨论跨网路由、端到端传输、域名解析、Web 加密通信、流量接管与分层排障。
+从[一次冷启动 HTTPS 访问](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)开始。先顺着时序图看客户端分别与解析器、网关和网站交换什么，再用[报文与封装对照表](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)找出每次交换使用的承载协议。
 
 ## 阅读路线
 
-| 阶段 | 篇章 | 核心问题 |
+| 主题 | 篇章 | 核心问题 |
 | ---- | ---- | -------- |
 | 协议体系与本地网络交付 | [① 协议分层、封装与一次请求的路径](/posts/networking/layered-architecture-packet-journey/)、[② IP 寻址、子网划分与局域网通信](/posts/networking/ip-addressing-subnet-lan-delivery/) | 一次请求经过哪些协议层与设备？主机怎样获得地址并把帧交给下一跳？ |
 | 网络层转发与端到端传输 | [③ 路由转发、NAT 与虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)、[④ TCP、UDP、QUIC 与 Socket 接口](/posts/networking/transport-tcp-udp-socket-quic/) | 路由和 NAT 怎样逐包处理？传输端点又如何向应用提供字节流或数据报服务？ |
 | 域名解析与 Web 通信安全 | [⑤ DNS 解析、缓存层级与加密查询](/posts/networking/dns-resolution-caching-encrypted-queries/)、[⑥ HTTP 演进、TLS 握手与加密边界](/posts/networking/http-evolution-tls-handshake-https/) | 应用如何取得地址与连接参数？HTTP 怎样组织消息，TLS 又如何建立认证与加密边界？ |
 | 代理流量处理与网络诊断 | [⑦ 代理协议、透明接管与分流实现](/posts/networking/proxies-tunnels-transparent-interception/)、[⑧ 网络诊断、性能指标与分层排障](/posts/networking/network-diagnostics-performance-troubleshooting/) | 代理如何改变解析路径和连接端点？又该在哪一段取证，区分连接失败、请求失败和传输缓慢？ |
 
-八篇按知识依赖排列，不等于一次请求的实际发生顺序。第二篇先回答主机怎样把包交给本地下一跳，第三篇再追踪网关如何决定下一段路径；第四篇换到端点视角，区分传输协议与 Socket 接口。第五篇用这套传输模型比较传统 DNS、DoT、DoH 和 DoQ，并引入 HTTPS/SVCB 服务参数；第六篇再区分 DNS 发布 ECH 配置与 TLS 握手实际使用该配置。第七篇以 Mihomo 为例，把选路、DNS、传输端点和 TLS 边界放回同一条代理路径；第八篇用受控实验检验这些环节能从哪里观察、各项证据能说明什么。
+八篇按知识依赖排列。第二至第六篇展开直连示例中的机制，第七篇引入[应用侧连接与代理出站](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)，第八篇把各个通信环节落实到[诊断时可以取得的证据](/posts/networking/network-diagnostics-performance-troubleshooting/#按请求阶段选择观测点)。
 
 需要具备基本命令行经验；Rust 和 Go 程序分别展示 TCP 半关闭与 HTTP CONNECT 转发，Python 标准库用于回环验证和响应计时对照。命令以 macOS 为主，同时给出 Linux（`iproute2` / `ss`）对应写法。实验说明会交代环境前提、观察重点与判断边界，本机输出不必与示例逐字一致。
 
@@ -35,8 +35,6 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 - 从本地交付继续学习：VLAN、Trunk、STP、无线接入、组播与物理层。
 - 从静态与策略路由继续学习：OSPF、BGP，以及防火墙、ACL 和连接状态的策略设计。
 - 从代理与隧道继续学习：IPsec、VPN 的密钥管理和跨站组网。
-
-系列日期用于计划发布，阅读路线由上面的知识依赖决定。
 
 ## 本地实验与平台命令
 

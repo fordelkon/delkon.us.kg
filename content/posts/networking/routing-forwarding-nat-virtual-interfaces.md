@@ -7,8 +7,6 @@ tags: ["networking"]
 
 上一篇[《计算机网络（二）：IP 寻址、子网划分与局域网通信》](/posts/networking/ip-addressing-subnet-lan-delivery/)用普通单接口配置解释了[直连子网与默认网关](/posts/networking/ip-addressing-subnet-lan-delivery/#子网掩码cidr-与同网段判定)。本篇把这一模型推广到多接口和多条路由：先看下一跳如何选出，再追踪每一跳的头部变化和 ICMP 反馈。最后区分 NAT 地址转换与 TUN、TAP 的用户态交付。
 
-[第七篇的代理接管与出站](/posts/networking/proxies-tunnels-transparent-interception/)会把这些机制组合成一条完整的流量路径。
-
 ## 路由表与最长前缀匹配
 
 应用要发出一个 IP 包时，内核需要根据包的目的地址，决定从哪个接口发出、下一跳交给谁。路由表按“目的网络前缀 → 下一跳 / 出接口 / 其他属性”组织条目，一条前缀可以匹配一组目的地址，不必为每一个可能的 IP 单独建表。
@@ -208,6 +206,8 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 出站从内网列读到公网列，返回则从公网列读到内网列。两侧观察的是同一条端到端 TCP 连接，NAPT 不替对端发送 TCP 确认。
 
+把第一条映射放回[冷启动访问的时序](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)。客户端与直连解析器之间的 DNS 查询走局域网，网站连接的首个 SYN 才经过这里的出口转换。之后从同一条连接发出的 TLS 握手与 HTTP 数据继续使用这条映射。表中两列对应网关的两个观测位置，转换发生在网关转发各个包时。
+
 路由器修改出站包的源地址和端口，并更新 IPv4 头部和 TCP 校验和。使用 UDP 时，已启用的 UDP 校验和也要更新。TCP 和 UDP 的校验都涉及包含 IP 地址的伪头部[^4]。
 
 动态映射有自己的生命周期，即使两端的 Socket 仍打开，映射也可能过期：
@@ -345,7 +345,7 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 左侧数字对应探测包的初始 TTL，右侧若有响应则显示响应者地址与测得的往返耗时。最多 5 跳未到目标是这个实验主动设置的范围限制，不能据此判断目标不可达。实际目标可换成已经确认解析出的 IPv4 地址。
 
-`route get` 观察本地决策，不知道后续路由器会怎样转发；`traceroute` 记录这轮探测的响应，不保证不同探测经过同一条路径。去程与回程也可能不对称，单侧结果不能证明响应沿原路返回。需要判断业务连接时，还应结合第八篇的[分层排障与控制变量实验](/posts/networking/network-diagnostics-performance-troubleshooting/)。
+`route get` 观察本地决策，不知道后续路由器会怎样转发；`traceroute` 记录这轮探测的响应，不保证不同探测经过同一条路径。去程与回程也可能不对称，单侧结果不能证明响应沿原路返回。要诊断业务连接，可按[本次请求实际发生的阶段选择观测点](/posts/networking/network-diagnostics-performance-troubleshooting/#按请求阶段选择观测点)。
 
 ## 总结
 

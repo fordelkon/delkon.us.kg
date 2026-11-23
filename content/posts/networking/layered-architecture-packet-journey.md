@@ -7,7 +7,7 @@ tags: ["networking"]
 
 在浏览器里打开一个网址，应用交给操作系统的是什么，路由器看到的又是什么？我们跟着一次 HTTPS 请求，看看数据怎样在应用、传输、网络和链路四层之间交付，再顺着一条具体路径追踪哪些字段会变、哪些会留到对端。这是[计算机网络系列](/series/networking/)的第一篇，实验以 macOS 和 Linux 为例。
 
-先建立分层与封装的概念，再看主机通过什么接口发包、沿途设备怎样转发，最后按 DNS、TCP、TLS、HTTP 的实际阶段走通一次请求。后续篇章按机制依赖展开，先解释承载数据的链路、路由与传输，再讨论 DNS 和 Web 通信；阅读顺序不是一次请求的执行顺序。
+读一次 HTTPS 通信，可以先问「现在是谁和谁交换什么报文？」，再问「这份报文由哪些下层协议承载？」。前一个问题用时序图回答，后一个问题要展开报文的头部与载荷。本篇先认识各层与沿途设备，再把这两个问题放到[同一次冷启动访问](#冷启动时客户端会发哪些报文)里。后续篇章按机制依赖展开，先解释链路、路由与传输，再讨论 DNS 和 Web 通信。
 
 ## 为什么需要分层模型
 
@@ -223,21 +223,22 @@ flowchart LR
 
 ### 冷启动时客户端会发哪些报文
 
-先看客户端没有可用缓存、连接或 TLS 恢复状态时访问 `https://example.com/`。本机已配置 IPv4 地址 `192.168.1.10`，递归 DNS 解析器与网站都经同一个家庭网关可达，本机尚无网关的邻居映射。这次用 UDP 查询 DNS，新建 TCP 连接，完成 TLS 1.3 完整握手后用 HTTP/1.1 交换消息。不考虑 ECH、代理或 TUN；网站地址 `198.51.100.20` 仅作示意，不是 `example.com` 的真实查询结果[^example-ip]。
+假设浏览器首次访问 `https://example.com/`，本机已经接入 IPv4 以太网，地址为 `192.168.1.10/24`。递归解析器 `192.168.1.53` 与本机同网段，网站 `198.51.100.20:443` 经默认网关 `192.168.1.1` 可达。两个下一跳的 MAC 均未缓存，浏览器也没有可用的 DNS 结果、连接或 TLS 恢复状态。本例采用 UDP DNS、新建 TCP 连接、TLS 1.3 完整握手与 HTTP/1.1，使用无 ECH、无代理或 TUN 的路径。网站地址和下文的网关公网侧地址均为文档示例[^example-ip]。
 
-**请求阶段和逐层封装回答不同的问题。** 下图按协议端点画交换顺序；要看每类数据如何上链路，可对照前面的[封装路径](#同一条链路上的不同封装路径)。DNS 查询已作为自己的 UDP 数据报发送，之后 TCP 才独立发送 SYN；HTTP 请求还要等 TLS 握手完成。
+浏览器先从 URL 取得主机名与默认端口 `443`[^7]。系统准备发送 DNS 查询时，先按路由选出直连解析器，再补齐它的 MAC。得到网站地址后，系统为网站连接重新选路，这次选出的下一跳是网关，又需要一次 ARP。**ARP 的时机取决于下一跳和邻居缓存**，已有可用映射时，主机可以直接发出相应的帧[^arp]。
 
-```mermaid title="从查询地址到收到 HTTPS 响应" description="只有 ARP 直接与网关交换；DNS、TCP、TLS 和 HTTP 的箭头连的是逻辑端点，网关转发流量。虚线表示受 TLS 保护的消息。省略 DNS 上游查询、握手后的 TCP 确认、重传与连接关闭。箭头表示先后，不表示一箭一包或固定耗时。"
+```mermaid title="从解析下一跳到收到 HTTPS 响应" description="自上而下读交换顺序。两次 ARP 请求都在本地链路广播，箭头指向应答者。DNS 在本地链路交付，网站流量经网关转发。虚线标示受 TLS 保护的消息。箭头按协议消息或交换标示，不对应固定的包数或耗时。省略 DNS 上游查询、额外的 TCP 确认、重传与连接关闭。"
 sequenceDiagram
  participant C as 客户端
- participant G as 默认网关
  participant D as 递归解析器
+ participant G as 默认网关
  participant S as 网站
+ C->>D: 广播 ARP：查询解析器的 MAC
+ D->>C: ARP 应答：解析器的 MAC
+ C->>D: DNS 查询：example.com 的 A 记录
+ D->>C: DNS 应答：198.51.100.20
  C->>G: 广播 ARP：查询网关的 MAC
  G->>C: ARP 应答：网关的 MAC
- Note over G: 转发并做 NAPT<br/>不是 DNS 或 HTTPS 对端
- C->>D: DNS 查询：example.com 的 A 记录
- D->>C: DNS 应答：IPv4 地址
  C->>S: TCP SYN
  S->>C: TCP SYN-ACK
  C->>S: TCP ACK
@@ -249,19 +250,24 @@ sequenceDiagram
  S-->>C: HTTP 响应
 ```
 
-本例中，[客户端用 ARP 解析选出的本地下一跳](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp)。发往网站的包以网站地址为目的 IP，本地以太网帧却以网关接口的 MAC 为目的 MAC。收到 HTTP 响应后不一定要立即关闭 TCP；连接能否继续使用见[状态复用](#状态复用缓存与已有连接会跳过哪些阶段)。
+### 按阶段对照报文与封装
 
-#### DNS 与 TCP：取得地址并建立连接
+按时序图从上到下找当前的交换，再沿同一行从内到外读承载关系。每行对应一组独立的协议交换，上一行留下的地址、连接或密钥会被后续阶段使用。
 
-1. **DNS**：浏览器从 URL 取得方案和主机名；`https` 未显式指定端口时默认使用 `443`[^7]。本例由客户端向递归解析器查询 IPv4 地址；解析器可以从缓存回答，也可以继续向上游查询[^dns-resolver]。这两种路径见[第五篇的递归与迭代](/posts/networking/dns-resolution-caching-encrypted-queries/#递归与迭代一次查询如何穿越层级)。
-2. **TCP**：浏览器按目标 IP 和端口建立连接。本机按路由和邻居映射把报文送给网关，家庭路由器在本例改写出站源地址与端口。具体报文和序号见[第四篇的三次握手](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)[^2]。
+| 本次交换 | 得到什么 | 客户端链路上的封装（从内到外） |
+| --- | --- | --- |
+| [为 DNS 解析下一跳](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp) | 解析器的 MAC | ARP → 以太网 |
+| [查询 DNS](/posts/networking/dns-resolution-caching-encrypted-queries/#udp-dns-查询的报文布局) | 网站的 IPv4 地址 | DNS → UDP → IPv4 → 以太网 |
+| 为网站连接解析下一跳 | 网关的 MAC | ARP → 以太网 |
+| [TCP 三次握手](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手) | 同步初始序号并建立连接 | TCP → IPv4 → 以太网 |
+| [TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn) | 验证服务身份并派生流量密钥 | TLS 握手消息 → TLS 记录 → TCP → IPv4 → 以太网 |
+| [HTTP 请求与响应](/posts/networking/http-evolution-tls-handshake-https/#http-请求响应与消息语义) | 服务器处理 GET 并返回响应 | HTTP 字节 → 受保护的 TLS 记录 → TCP → IPv4 → 以太网 |
 
-#### TLS 与 HTTP：建立加密信道并交换消息
+DNS 应答为后续连接提供地址。TCP 自己生成以该地址为目的 IP 的 SYN，控制信息写在 TCP 头内，本例的 SYN 载荷为零[^2]。递归解析器可从缓存回答，也可继续向上游查询，详见[第五篇的递归与迭代](/posts/networking/dns-resolution-caching-encrypted-queries/#递归与迭代一次查询如何穿越层级)[^dns-resolver]。
 
-3. **TLS**：浏览器在 TCP 字节流上执行 TLS 1.3 握手，验证服务身份并建立加密密钥。证书验证与加密起点见[第六篇的 TLS 1.3 握手](/posts/networking/http-evolution-tls-handshake-https/#tls-13-握手密钥协商证书校验与-sni--alpn)[^5]。
-4. **HTTP**：浏览器把 HTTP/1.1 请求交给 TLS 记录层保护，再由 TCP 分段并逐层封装。若协商的是 HTTP/2，交给 TLS 的则是 HTTP/2 帧。TLS 终止端解密并解析请求，再送回响应；回程路径未必与去程相同。
+**在客户端链路上，DNS 查询的目的 MAC 属于解析器，SYN 的目的 MAC 属于网关。** SYN 的目的 IP 仍是网站地址。网关收到 SYN 就开始转发，本例同时用 [NAPT](/posts/networking/routing-forwarding-nat-virtual-interfaces/#napt地址端口映射与回包转换) 将客户端源 `192.168.1.10:50001` 映射为 `203.0.113.5:61001`。回包按映射还原目的地址和端口；后续网站流量也使用这条映射。
 
-握手里的 `ClientHello` 和之后的 HTTP 应用数据都经过 TLS 记录层。同一条 TLS 记录可以分散在多个 TCP 段中，抓包时应按字节流重组来判断阶段。分段示例见[两套独立的边界](#tls-记录与-tcp-报文段两套独立的边界)。
+握手里的 `ClientHello` 和之后的 HTTP 应用数据都经过 TLS 记录层，占用同一条 TCP 连接上的不同字节范围[^5]。一行封装路径可以对应多个 TCP 段，一段 TCP 载荷也可能跨记录边界，抓包时应先[重组字节流](#tls-记录与-tcp-报文段两套独立的边界)再判断其中的消息。服务器收到数据后，依次恢复 TCP 字节流、验证并解密 TLS 记录，再按 HTTP 格式读取请求。响应沿相同的协议关系封装，回程路由可以与去程不同。
 
 在本例中，浏览器与 TLS 终止端能读取 HTTP 路径和内容。终止端也可能是**内容分发网络**（Content Delivery Network，CDN）节点或反向代理。途中观察者能看到所在链路上的地址、端口和流量特征，还可能从重组后的 `ClientHello` 读取 [SNI](/posts/networking/http-evolution-tls-handshake-https/#握手消息与协议协商) 中的目标服务名。使用 [ECH](/posts/networking/http-evolution-tls-handshake-https/#ech保护真实的-clienthello) 时，真实的 SNI 则位于加密的内层 `ClientHello`。
 
@@ -274,9 +280,9 @@ sequenceDiagram
 | 本地 HTTP 缓存可直接满足请求 | 可能完全不发网络请求；需要验证缓存时则仍会访问服务端 |
 | 同一来源已有可用 HTTP/2 连接 | 在已有 TLS 连接上创建 HTTP 流，不重新执行 TCP/TLS 握手 |
 | 连接已关闭，但 DNS 和 TLS 恢复状态仍有效 | 可以复用地址和恢复材料，仍需新建传输连接并执行恢复握手 |
-| 首次访问且没有可用状态 | 按前面的 DNS、TCP、TLS、HTTP 模型展开 |
+| 只剩可用的 DNS 解析结果 | 直接用已有地址建连并执行完整握手，仍按路由和邻居缓存决定是否发 ARP |
 
-连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。HTTP/3 的传输建立方式另见[第六篇](/posts/networking/http-evolution-tls-handshake-https/)。
+连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。改用 HTTP/3 时，[TLS 握手在 QUIC 建连过程中进行](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)。
 
 下面从最先能省掉的网络工作开始，依次检查 HTTP 缓存、已有连接和解析结果。TLS 恢复材料只参与新握手，不等同于复用已有连接。
 
@@ -395,7 +401,7 @@ fi
 
 [^dns-resolver]: 〔RFC〕[RFC 1034 §4.3.1、§4.3.2、§5.3.1](https://www.rfc-editor.org/rfc/rfc1034.html#section-5.3.1)——客户端可将递归查询交给配置的解析服务；解析服务可使用缓存或继续查询。
 
-[^example-ip]: 〔RFC〕[RFC 5737 §3](https://www.rfc-editor.org/rfc/rfc5737.html#section-3)——`198.51.100.0/24` 是文档示例网段。
+[^example-ip]: 〔RFC〕[RFC 5737 §3](https://www.rfc-editor.org/rfc/rfc5737.html#section-3)——`198.51.100.0/24` 与 `203.0.113.0/24` 是文档示例网段。
 
 [^4]: 〔编号表〕[IANA: IEEE 802 Numbers — Ethertypes](https://www.iana.org/assignments/ieee-802-numbers/ieee-802-numbers.xhtml#ieee-802-numbers-1)——列出 IPv4、ARP 与 IPv6 的 EtherType。
 

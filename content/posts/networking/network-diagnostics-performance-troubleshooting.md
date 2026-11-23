@@ -5,7 +5,7 @@ publishDate: "24 Nov 2026"
 tags: ["networking"]
 ---
 
-前七篇从[封装与端点边界](/posts/networking/layered-architecture-packet-journey/)讲到[代理怎样接管连接](/posts/networking/proxies-tunnels-transparent-interception/)。遇到“能连上却打不开网页”“测速很快但页面慢”时，要先把症状对应到请求阶段，再用对照实验缩小范围。一次成功、一次超时或一个偏高的指标，都不足以独立确定根因。
+遇到“能连上却打不开网页”“测速很快但页面慢”时，先用[直连 HTTPS 的报文与封装对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)定位症状所处的阶段。若流量由代理处理，再按[应用侧与出站的实际连接](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)选观测点。一次成功、一次超时或一个偏高的指标，都不足以独立确定根因。
 
 本篇先按请求阶段选观测点，再按症状设计对照。接着用性能指标、TCP 窗口和路径 MTU 解释两种现象：单连接为什么跑不满，以及为什么小包能通过，大包却可能卡住。后面的实验先用 curl 计时，再用 Wireshark 把时间差与报文对应起来。
 
@@ -40,9 +40,9 @@ flowchart TB
 
 | 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
 | --- | --- | --- | --- |
-| 本地配置与邻居 | 接口地址、前缀与下一跳是否符合预期？ | `ifconfig` / `ip addr`，`arp -a`、`ndp -a` / `ip neigh` | 邻居表不是在线设备清单；见[第二篇](/posts/networking/ip-addressing-subnet-lan-delivery/) |
-| 选路与接管 | 对实际目标地址，选中了哪个接口和下一跳？ | `route -n get <IP>` / `ip route get <IP>` | 只观察本机决策；更具体路由、策略和 IPv6 需分别检查，见[第三篇](/posts/networking/routing-forwarding-nat-virtual-interfaces/) |
-| 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | `dig @服务器` 仍可能被接管；错误类型、Fake-IP 与真实公网地址应分开，见[第五篇](/posts/networking/dns-resolution-caching-encrypted-queries/) |
+| 本地配置与邻居 | 接口地址、前缀与下一跳是否符合预期？ | `ifconfig` / `ip addr`，`arp -a`、`ndp -a` / `ip neigh` | 邻居表只记录本机已知的映射，见[ARP 与 NDP 邻居表实验](/posts/networking/ip-addressing-subnet-lan-delivery/#实验二观察-arp-与-ndp-邻居表) |
+| 选路与接管 | 对实际目标地址，选中了哪个接口和下一跳？ | `route -n get <IP>` / `ip route get <IP>` | 按实际地址族[核对本机的路由与出口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果) |
+| 名称解析 | 系统接口与独立 DNS 查询为何不同？ | `dscacheutil` / `resolvectl`，`dig` | 对照[默认 DNS、指定解析器与系统解析](/posts/networking/dns-resolution-caching-encrypted-queries/#实验一对照默认-dns指定解析器与系统解析)，再核对[查询接管范围](/posts/networking/dns-resolution-caching-encrypted-queries/#判读边界tun-与-dns-接管) |
 | TCP | 本段建连失败，还是建连后读写停顿？ | `nc -zv -w 3 <IP> <Port>`、抓包、端点 TCP 状态 | 相关 RST 表示在观察点收到复位，要核实来源；只见 SYN 重试则不能区分去程、回程和对端未应答。已建连只说明本段传输可用[^tcp-handshake] |
 | QUIC | 有本次尝试对应的 UDP 回包吗？端点的握手结果是什么？ | 抓包看 QUIC Initial 和回包；对照客户端或服务端日志 | 对应的 Initial 或 Retry 回包支持该次探测有往返；仅见回包不代表身份验证通过或已经协商 HTTP/3[^quic-setup] |
 | TLS、HTTP 与代理 | 身份校验、状态码和出站选择分别是什么结果？ | `openssl s_client`（这里仅用于 TCP 上的 TLS）、`curl -v`、代理连接日志 | [SNI 与服务名校验不同](/posts/networking/http-evolution-tls-handshake-https/#证书链可信还要检查名字)；[目标 TLS 与代理传输不同](/posts/networking/proxies-tunnels-transparent-interception/#两段-tcp-与目标-tls) |
@@ -116,7 +116,7 @@ $$
 - [接口 MTU](/posts/networking/layered-architecture-packet-journey/#以太网帧的封装与结构)限制整个 IP 包的长度。以太网常见 MTU 为 1500 byte，[路径 MTU](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由器怎样报告差错)取各链路约束中的最小值。
 - [MSS](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)只计 TCP 数据。以 MTU 1500、基本 IPv4/TCP 头各 20 byte 估算，得到 1460 byte；IPv6 基本头为 40 byte，对应 1440 byte。实际发送还要考虑选项、扩展头与路径限制[^mss]。
 
-PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经[区分 TUN、代理重建连接与 IP 隧道](/posts/networking/routing-forwarding-nat-virtual-interfaces/)：TUN 只是一种接口，不能从“启用了 TUN”推出每个原包都被完整加上外层头。若代理终结本地 TCP 后创建出站 TCP，两段连接各有自己的 MSS 与路径 MTU；若 VPN 承载完整内层包，才要进一步计算内外层封装开销。
+PPPoE 和 IP 隧道可能减少可用于内层 IP 包的空间。第三篇已经[区分 TUN、代理重建连接与 IP 隧道](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)：TUN 只是一种接口，不能从“启用了 TUN”推出每个原包都被完整加上外层头。若代理终结本地 TCP 后创建出站 TCP，两段连接各有自己的 MSS 与路径 MTU；若 VPN 承载完整内层包，才要进一步计算内外层封装开销。
 
 先用两份具体包看“变小”的含义。假定 IPv4 与 TCP 都不带选项，路径允许的 IP 包长从 1500 降到 1400 字节；发送端获知这个限制后，对后续发送或重传重新分段：
 
@@ -208,7 +208,7 @@ flowchart LR
 明文 HTTP 的直连没有 TLS 阶段，不能把 `time_appconnect` 的零值当作握手完成的时间点。在同样是新建 TCP 连接且无重定向的条件下，改用 `time_starttransfer - time_connect` 估算建连完成后到首字节的等待；这个差值也不是纯服务端处理时间[^curl]。区分网络等待和服务端处理，还需日志、服务端指标或抓包。HTTP/3、连接复用、并行传输或 `-L` 跟随重定向时，不能直接套用这张表。
 
 :::important[计时中的端点是谁]
-普通网关做 IP 转发，不会因此成为 TCP 握手的终点；TUN 接口也不规定 TCP 在哪里终结。显式代理、用户态终结 TCP 的透明代理，以及承载完整 IP 包的 VPN，分别有不同连接关系。先核对第三篇的 [TUN、代理与 IP 隧道对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)和第七篇的接管实现，再解释时间。
+普通网关做 IP 转发，不会因此成为 TCP 握手的终点；TUN 接口也不规定 TCP 在哪里终结。显式代理、用户态终结 TCP 的透明代理，以及承载完整 IP 包的 VPN，分别有不同连接关系。先核对第三篇的 [TUN、代理与 IP 隧道对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)和[代理入站与出站的连接端点](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)，再解释时间。
 :::
 
 ### 阶段差值不等于根因
@@ -345,7 +345,7 @@ sudo tcpdump -i lo0 -nn -s 0 -w networking-lab.pcap 'tcp port 18080'
 
 一个有用的结论包含三部分：观察到什么，这些证据排除了什么，还需要什么证据。例如：“连续三次 TCP 建连成功，但都在 TLS 完成前超时，故障不是发生在已观测到的这段 TCP 建连上。当前选路经过 TUN，尚不能确认代理是否连到远端，下一步查出站连接和握手日志。”附上测量时间、命令与工具版本、实际连接地址、代理方式、退出码和多次测量结果，便于在相同条件下复查。
 
-至此，本系列选取的客户端访问主线已经串联起来：从[协议分层与封装](/posts/networking/layered-architecture-packet-journey/)、[局域网交付](/posts/networking/ip-addressing-subnet-lan-delivery/)、[路由与虚拟接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/)到[传输层与 Socket](/posts/networking/transport-tcp-udp-socket-quic/)，再穿过[域名解析](/posts/networking/dns-resolution-caching-encrypted-queries/)、[HTTP 与 TLS 边界](/posts/networking/http-evolution-tls-handshake-https/)以及[代理与透明接管](/posts/networking/proxies-tunnels-transparent-interception/)。排障时沿这些边界回查，就能让每个推断都对应到具体连接、具体观察位置和下一项可证伪的实验。
+回查证据时，可以先把它放回[第一篇的报文与封装对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)。例如，看到网关 MAC，可以确定本地帧交给哪一跳。收到 SYN-ACK 时，则要确认它属于应用侧连接还是代理出站。各篇和实验的入口见[系列阅读路线](/series/networking/#阅读路线)。
 
 ## 延伸阅读
 

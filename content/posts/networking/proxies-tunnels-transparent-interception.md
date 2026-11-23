@@ -5,7 +5,7 @@ publishDate: "23 Nov 2026"
 tags: ["networking", "go"]
 ---
 
-前六篇沿客户端访问的主线介绍了寻址、路由、传输、DNS 与 Web 通信。代理把这些机制组合到新的连接路径中：应用先连接谁、域名由谁解析、代理选哪个出站，以及目标 TLS 在哪里终止，都取决于这条连接的实际路径。
+[第一篇的直连 HTTPS 场景](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)里，客户端向网站发起 TCP 握手，网关负责转发。引入代理后，应用侧和出站可能各自建立连接或发起解析。追踪请求时，要先确定应用连向哪一端、哪一端取得网站地址，再看目标 TLS 在哪里终止。
 
 本篇以 Mihomo 为配置参照，先说明代理的连接模型，再追踪 HTTP CONNECT、SOCKS5 和第三篇介绍的 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)如何交付流量，以及代理如何识别目标、选择出站和交付响应。最后用 Go 标准库演示最小 CONNECT 代理，再用 `curl` 对照解析位置与连接路径。
 
@@ -20,7 +20,7 @@ tags: ["networking", "go"]
 | CONNECT 隧道，只转发字节 | 客户端 ↔ 源站，一条 TLS 会话跨过两段 TCP | 代理知道 CONNECT 指定的目标，转发目标 TLS 字节，但不因此看见加密的 HTTP 内容 |
 | 有意终止 TLS，例如站点的反向代理，且回源也用 TLS | 客户端 ↔ 代理；代理 ↔ 源站，两条独立 TLS 会话 | 代理解密前一段，可在重新加密前读取 HTTP；客户端验证前一段服务身份，代理独立验证回源服务身份 |
 
-即使客户端先用 TLS 连接显式代理，这层加密也只保护到代理，隧道内的目标 TLS 仍可端到端。证书校验与中间节点的可见范围，见第六篇的[服务名校验](/posts/networking/http-evolution-tls-handshake-https/#证书链可信还要检查名字)与[可见性矩阵](/posts/networking/http-evolution-tls-handshake-https/#端到端可见性边界谁能看到什么)。
+即使客户端先用 TLS 连接显式代理，这层加密也只保护到代理，隧道内的目标 TLS 仍可端到端。证书校验与中间节点的可见范围，见第六篇的[服务名校验](/posts/networking/http-evolution-tls-handshake-https/#证书链可信还要检查名字)与[各参与者的可见性对照](/posts/networking/http-evolution-tls-handshake-https/#各参与者能看到什么)。
 
 ### 入站、运行模式、DNS 与出站
 
@@ -220,7 +220,7 @@ flowchart TB
 
 应用侧收到的包仍以 Fake-IP 为源，才能匹配它原来的连接；核心自己的出站则使用真实目标与另一源端口。出站的 `Seq=9001` 不会原样成为应用侧的 `Seq=1001`，远端的 `Seq=3001` 也不能直接填进应用侧回包。核心在两份连接状态之间转交的是字节，各侧的确认、重传与流量控制分别进行。
 
-这与[第三篇的 NAPT 包头改写](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)不同：普通 NAPT 没有新建这两套 TCP 序号空间；也与[完整内层 IP 包的 VPN 封装](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)不同，表中的物理出站包不包含原来那份 Fake-IP 包。
+这与[第三篇的 NAPT 两侧包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#napt地址端口映射与回包转换)不同：普通 NAPT 没有新建这两套 TCP 序号空间；也与[完整内层 IP 包的 VPN 封装](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun代理与-ip-隧道的处理区别)不同，表中的物理出站包不包含原来那份 Fake-IP 包。
 
 :::important[代理的出站流量需要可用的绕行路径]
 如果出站 Socket 产生的流量又被送回同一个 TUN 入口，可能形成回环。常见处理包括为远端端点配置更具体路由、使用 socket 标记配合策略路由，或按平台能力绑定接口、排除进程。它们的效果取决于平台和整套规则；“绑定物理网卡”不能脱离实际查表结果被当作统一的绕过保证。
@@ -465,7 +465,7 @@ client received: response after EOF
 
 无效请求仍带有合法的 `Host` 字段，以确认它不能替代请求行里的目标。正常请求用一次 `sendall` 写入 CONNECT 头与首段载荷，随后关闭写方向。验证检查目标能否收到完整载荷，以及目标读到 EOF 后客户端能否继续收到响应。头部解析是否在本次运行中预读了载荷取决于实际读取时机，两段连接的 TCP 分段也各自决定。验证结束后，在代理终端按 Ctrl+C 停止监听。
 
-在回环实验中，目标看到的对端是代理的出站 Socket。对照[第三篇的 NAT 映射](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)，也可以从连接状态判断地址改写和代理重建连接各自发生在哪里。
+在回环实验中，目标看到的对端是代理的出站 Socket。对照[第三篇的 NAPT 与 TCP 代理对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat-与-tcp-代理改写包头还是重建连接)，也可以从连接状态判断地址改写和代理重建连接各自发生在哪里。
 
 ## 命令行验证：先确认入站，再对照解析位置
 

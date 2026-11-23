@@ -7,7 +7,7 @@ tags: ["networking", "rust"]
 
 上一篇[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)追踪了 [IP 包的逐跳交付](/posts/networking/routing-forwarding-nat-virtual-interfaces/#逐跳转发时哪些字段会变)。IP 尽力把包送到目标主机：包可能丢失、乱序或重复；目的 IP 也不说明该把载荷交给哪个应用。本篇从传输层端点接着看。
 
-本篇先比较TCP 字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。示例用 Rust 标准库演示 `TcpStream` 的分次读取、**文件结束**（End of File，EOF）与半关闭，连接状态观察以 macOS 与 Linux 为例。
+本篇先比较 TCP 字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。示例用 Rust 标准库演示 `TcpStream` 的分次读取、**文件结束**（End of File，EOF）与半关闭，连接状态观察以 macOS 与 Linux 为例。
 
 ## 传输层端点：端口、TCP 字节流与 UDP 数据报
 
@@ -25,7 +25,7 @@ TCP 和 UDP 直接由 IP 承载；[QUIC](#quic为什么在-udp-之上重建可�
 
 UDP 的“保留边界”不表示每次都能取得完整消息。Rust `UdpSocket::recv_from` 明确说明：消息超过调用方提供的缓冲区时，超出的字节可能被丢弃；具体返回和截断指示依接口与平台而定。一次成功发送也不保证对端收到该数据报[^2][^udp-api]。
 
-TCP 中，发送方分别写入 `"hello "` 和 `"world"`，接收方可能一次读到两者，也可能多次才读完。TCP 提供可靠、有序的字节流，但连接仍可能报错或中断；**可靠传输不等于每次业务请求都一定完成**。需要区分请求与响应时，应用必须定义**帧定界**（framing），例如固定长度、长度前缀或分隔符。[第六篇的 HTTP 消息](/posts/networking/http-evolution-tls-handshake-https/)会展示应用协议怎样使用这一契约。
+TCP 中，发送方分别写入 `"hello "` 和 `"world"`，接收方可能一次读到两者，也可能多次才读完。TCP 提供可靠、有序的字节流，连接仍可能报错或中断。应用需要**帧定界**（framing）才能从字节流识别出一条完整消息，常见做法是使用固定长度、长度前缀或分隔符。HTTP/1.1 的实例见[请求与响应的头部及正文边界](/posts/networking/http-evolution-tls-handshake-https/#一组-http-请求与响应)。
 
 ## TCP 连接的建立与关闭
 
@@ -57,6 +57,8 @@ sequenceDiagram
 #### 初始 SYN 的报文布局
 
 把时序图里的第一支箭头展开。例中客户端从 `192.168.1.10:50001` 连接 `198.51.100.20:443`，初始序号仍记为 `x`。TCP 头里的数据偏移字段以 32 位字为单位。无选项时它的值为 `5`，表示 TCP 头占 20 字节[^tcp-header]。
+
+在[同一次 HTTPS 访问的阶段对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)中，DNS 答案提供目的 IPv4 地址，TCP 用自己的头部发出 SYN。建连后，TLS 才把 `ClientHello` 编码成记录字节写入 TCP 流。对照这两个发送动作，SYN 的控制信息位于 TCP 头部，TLS 记录的字节则位于后续段的 TCP 载荷。
 
 ```mermaid title="初始 SYN 装在 IPv4 包里" description="未加 VLAN 标签的 Ethernet II 帧。IPv4 和 TCP 都无选项，IPv4 总长度 40 字节。TCP 段只含 TCP 头，SYN 标志与初始序号就在头中。帧填充和 FCS位于 IPv4 包之外。图只列关键字段。"
 flowchart TB
@@ -294,7 +296,7 @@ HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后
 
 QUIC 使用 TLS 1.3 协商密钥并认证对端。TLS 握手消息经 QUIC 的 `CRYPTO` 帧可靠送达，而应用字节流走 `STREAM` 帧，由 QUIC 保护包，不使用[第一篇介绍的 TLS 记录层](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。通常不经 Retry 的完整握手中，客户端可在一次往返后开始发送受 1-RTT 密钥保护的应用数据。满足会话恢复条件时，客户端可以在本次握手的第一次往返完成前尝试发送**早期数据**（early data），这就是 0-RTT 发送。完整握手和身份认证仍需后续交换。早期数据可能被拒绝，还存在重放风险，应用必须限制适用操作[^quic-tls]。
 
-QUIC 也有部署代价：UDP 可能受路径策略影响，高吞吐实现需要控制用户态处理和系统调用开销。浏览器能否回退到 TCP，还取决于是否存在可用的 HTTP/2 或 HTTP/1.1 服务以及客户端策略。[第六篇](/posts/networking/http-evolution-tls-handshake-https/)会继续比较这些 HTTP 传输方式。
+QUIC 也有部署代价：UDP 可能受路径策略影响，高吞吐实现需要控制用户态处理和系统调用开销。浏览器能否回退到 TCP，还取决于是否存在可用的 HTTP/2 或 HTTP/1.1 服务以及客户端策略。应用如何利用底层流来复用请求，见[HTTP/2 与 HTTP/3 的连接和复用对照](/posts/networking/http-evolution-tls-handshake-https/#http11-到-http3-的连接与复用)。
 
 ## TCP 状态与队列观测实验
 
