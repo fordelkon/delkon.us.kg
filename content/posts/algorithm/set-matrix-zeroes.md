@@ -129,5 +129,3 @@ public:
 - **辅助空间复杂度**：仅使用两个布尔标志与循环索引，额外空间为 $O(1)$。
 
 这种“复用输入容器自身空间存放元数据、再通过严格读写顺序防污染”的思路，与[《缺失的第一个正数：把正数放回对应下标》](/posts/algorithm/first-missing-positive/)及[《轮转数组与旋转图像：分段反转与矩阵转置》](/posts/algorithm/rotate-array-and-matrix/)共同构成了常数空间原地矩阵/数组处理的三大代表手法。
-
-[^cpp-fill]: [cppreference：`std::fill`](https://tcs.rwth-aachen.de/docs/cpp/reference/en.cppreference.com/w/cpp/algorithm/fill.html)——以线性时间将指定迭代器区间内的所有元素赋为给定值。

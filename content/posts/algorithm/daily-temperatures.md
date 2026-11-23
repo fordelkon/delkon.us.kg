@@ -65,6 +65,7 @@ public:
         stack.reserve(static_cast<std::size_t>(n));
 
         for (int i = 0; i < n; ++i) {
+            // Equal temperatures leave the earlier day unresolved.
             while (!stack.empty() && temperatures[i] > temperatures[stack.back()]) {
                 const int prev = stack.back();
                 stack.pop_back();

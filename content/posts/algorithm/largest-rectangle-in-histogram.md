@@ -93,6 +93,7 @@ public:
         int max_area = 0;
         for (int i = 0; i <= n; ++i) {
             const int curr_h = (i == n) ? 0 : heights[i];
+            // Keep equal heights on the stack so the leftmost one can claim the full width.
             while (stack.back() != -1 && curr_h < heights[stack.back()]) {
                 const int h = heights[stack.back()];
                 stack.pop_back();

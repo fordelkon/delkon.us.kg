@@ -40,7 +40,7 @@ xychart-beta
 
 比较结果从「大于」变成「小于等于」的第一格就是枢轴。
 
-这一划分立刻给出了 **LeetCode 153（找最小值）** 的单调布尔谓词：在当前闭区间 $[lo, hi]$ 内，比较中点 `nums[mid]` 与右端点 `nums[hi]`：
+这一划分立刻给出了 **LeetCode 153**（找最小值） 的单调布尔谓词：在当前闭区间 $[lo, hi]$ 内，比较中点 `nums[mid]` 与右端点 `nums[hi]`：
 
 - 若 `nums[mid] > nums[hi]`，说明 `mid` 落在左段，最小值一定在 `mid` 严格右侧，令 `lo = mid + 1`；
 - 若 `nums[mid] <= nums[hi]`，说明 `mid` 落在右段，最小值可能是 `mid` 本身或在其左侧，令 `hi = mid`。

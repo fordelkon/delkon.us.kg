@@ -63,7 +63,7 @@ class Solution:
 
 ## C++：极小值初始化与引用参数更新
 
-在 C++ 中，可以使用 `<limits>` 中的 `std::numeric_limits<int>::min()`[^cpp-limits] 作为初始下界，并在后序回退时通过 `std::max`[^cpp-max] 进行单侧裁剪与全局更新：
+在 C++ 中，可以使用 `<limits>` 中的 `std::numeric_limits<int>::min()` 作为初始下界[^cpp-limits]，并在后序回退时通过 `std::max` 进行单侧裁剪与全局更新[^cpp-max]：
 
 ```cpp
 #include <algorithm>

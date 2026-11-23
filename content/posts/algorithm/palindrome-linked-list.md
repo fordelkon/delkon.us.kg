@@ -17,6 +17,12 @@ tags: ["algorithm", "linked-list", "python", "cpp"]
 
 反转子步骤对应 [LeetCode 206. 反转链表](https://leetcode.cn/problems/reverse-linked-list/)。三个引用就够了：`prev` 指向已反转部分，`curr` 指向待处理部分，`next_node` 暂存原来的后继。
 
+```mermaid mobile-direction="TB" title="改写 next 前先保住后继" description="设已反转部分以 A 开头，当前节点为 B，原后继为 C。写入 B.next = A 后，下一轮从保存的 C 继续。"
+flowchart LR
+ B["curr：B"] -->|改写后| A["prev：A"]
+ B -.->|原后继| C["next_node：C"]
+```
+
 每轮把 `curr` 从待处理部分移到已反转部分的头部。先保存后继，再改写 `curr.next`，就不会丢失剩余链表的入口；循环结束后，`prev` 是反转后的头节点。完整的 `_reverse` 辅助方法与回文判定一起放在下方的 `Solution` 类中。反转 $k$ 个节点需要 $O(k)$ 时间和 $O(1)$ 额外空间（多组区间局部反转的泛化延伸见[《K 个一组翻转链表：确认边界后再反转》](/posts/algorithm/reverse-nodes-in-k-group/)）。
 
 ### 切分：让 slow.next 指向后半段

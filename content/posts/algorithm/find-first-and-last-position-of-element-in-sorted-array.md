@@ -27,8 +27,8 @@ tags: ["algorithm", "binary-search", "python", "cpp"]
 
 ### 一套原语同时求解两题
 
-- **LeetCode 35（搜索插入位置）**：数组无重复，若 `target` 存在，第一个 $\ge \text{target}$ 的位置就是它的下标；若不存在，第一个 $> \text{target}$ 的位置恰好是应插入的下标。因此 `lower_bound(nums, target)` **直接就是最终答案**。
-- **LeetCode 34（首尾位置）**：
+- **LeetCode 35**（搜索插入位置）：数组无重复，若 `target` 存在，第一个 $\ge \text{target}$ 的位置就是它的下标；若不存在，第一个 $> \text{target}$ 的位置恰好是应插入的下标。因此 `lower_bound(nums, target)` **直接就是最终答案**。
+- **LeetCode 34**（首尾位置）：
   - 起点 `first = lower_bound(nums, target)`。如果 `first == n` 或 `nums[first] != target`，说明 `target` 不在数组中，直接返回 `[-1, -1]`。
   - 终点 `last` 等于**第一个严格大于 `target` 的位置减 1**。对于整数数组，这既可以复用同一个函数调用 `lower_bound(nums, target + 1) - 1`，也可以用条件改为 `nums[mid] <= target` 的 `upper_bound(nums, target) - 1`（后者不需要构造 `target + 1`，不存在 `target == INT_MAX` 时的整数溢出风险）。
 

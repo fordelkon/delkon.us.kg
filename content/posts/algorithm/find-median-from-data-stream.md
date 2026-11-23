@@ -36,30 +36,32 @@ flowchart TB
 我们约定两条核心不变式：
 
 1. **数量不变式**：`len(small) == len(large)` 或 `len(small) == len(large) + 1`（即总数为奇数时，多出来的那 1 个元素固定放在左半大顶堆 `small`）；
-2. **有序不变式**：`small` 中的所有元素都不大于 `large` 中的所有元素，等价于 $\text{top}(\text{small}) \le \text{top}(\text{large})$。
+2. **有序不变式**：`small` 中的所有元素都不大于 `large` 中的所有元素，两堆均非空时，等价于 $\text{top}(\text{small}) \le \text{top}(\text{large})$。
 
-```mermaid title="addNum 的跨堆迁移与平衡流程" description="每次插入新元素 x 时，先压入大顶堆，再把大顶堆堆顶迁入小顶堆以维持左 ≤ 右的有序边界；若小顶堆元素反超，则把小顶堆堆顶回迁，恢复两堆数量平衡。"
+```mermaid title="按插入前的堆大小选择转运方向" description="两堆等长时，新数先入右堆，再把右堆最小值移到左堆。左堆已经多一个时，新数先入左堆，再把左堆最大值移到右堆。"
 sequenceDiagram
- participant Caller as addNum(x)
- participant Small as 大顶堆（较小一半）
- participant Large as 小顶堆（较大一半）
- Caller->>Small: 1. 压入新元素 x
- Small->>Large: 2. 弹出堆顶最大值，迁入小顶堆（维持左 ≤ 右）
- alt 小顶堆数量 > 大顶堆数量
-  Large->>Small: 3. 弹出堆顶最小值，回迁大顶堆（恢复数量平衡）
+ participant S as 左堆 small
+ participant A as addNum(x)
+ participant L as 右堆 large
+ alt 两堆等长
+  A->>L: 放入 x
+  L->>S: 移交最小值
+ else 左堆多一个
+  A->>S: 放入 x
+  S->>L: 移交最大值
  end
 ```
 
-### 为什么“先入对方堆再转运”能免去所有大小分支？
+### 为什么只需比较两堆的元素个数？
 
-新数 `num` 到达时，如果直接比较 `num` 与当前堆顶再决定塞进哪个堆、然后再做平衡，需要写好几条 `if/else`。用两步固定的**中继过滤**就能统一所有分支：
+新数 `num` 到达时，如果直接比较 `num` 与当前堆顶再决定塞进哪个堆、然后再做平衡，需要写好几条 `if/else`。先按两堆的元素个数决定转运方向，再由堆顶选出要移动的元素：
 
-- **情况 A（当前 `len(small) == len(large)`，需要让 `small` 多 1 个元素）**：先把 `num` 放入右半小顶堆 `large` 筛选一次，再把 `large` 弹出的**最小值**放入 `small`。这样即使 `num` 原本很大，也会留在 `large`，而被挤到 `small` 的一定是右半原来的最小者，有序不变式自动成立！
-- **情况 B（当前 `len(small) == len(large) + 1`，需要让 `large` 多 1 个元素）**：对称地，先把 `num` 放入左半大顶堆 `small` 筛选一次，再把 `small` 弹出的**最大值**放入 `large`。
+- **情况 A**（当前 `len(small) == len(large)`，需要让 `small` 多 1 个元素）：先把 `num` 放入右半小顶堆 `large` 筛选一次，再把 `large` 弹出的**最小值**放入 `small`。这样即使 `num` 原本很大，也会留在 `large`。移入左堆的是新数与原右堆元素中的最小值；右堆原本为空时，移入的就是新数。
+- **情况 B**（当前 `len(small) == len(large) + 1`，需要让 `large` 多 1 个元素）：对称地，先把 `num` 放入左半大顶堆 `small` 筛选一次，再把 `small` 弹出的**最大值**放入 `large`。
 
 ## Python：取反模拟大顶堆与 `heappushpop`
 
-Python 标准库 `heapq` 只提供小顶堆[^py-heapq]。将存入 `small` 的数值取负（`-x`），即可等价实现大顶堆；配合 `heapq.heappushpop(heap, val)` 在单次堆调整内完成“先压入后弹出极值”：
+这里使用 Python 标准库 `heapq` 的小顶堆接口。将存入 `small` 的数值取负（`-x`），即可等价实现大顶堆；配合 `heapq.heappushpop(heap, val)` 在单次堆调整内完成“先压入后弹出极值”[^py-heapq]：
 
 ```python
 import heapq

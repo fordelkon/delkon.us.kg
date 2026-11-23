@@ -95,6 +95,7 @@ private:
         ListNode dummy(0);
         ListNode* tail = &dummy;
 
+        // The merged prefix ends at tail; both remaining suffixes are still sorted.
         while (left != nullptr && right != nullptr) {
             if (left->val <= right->val) {
                 tail->next = left;

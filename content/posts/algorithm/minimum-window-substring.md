@@ -9,7 +9,7 @@ tags: ["algorithm", "sliding-window", "python", "cpp"]
 
 ## 为什么必须用 `formed` / `missing` 计数器而不是每步比对字典
 
-在[《无重复字符的最长子串：用末次下标移动窗口左端》](/posts/algorithm/longest-substring-without-repeating-characters/)中，我们扩张右指针寻找冲突、求**最长**合法窗口；本题则相反，先扩张右指针让窗口**合法（覆盖 `t`）**，再不断右移左指针压缩长度，求**最短**合法窗口。
+在[《无重复字符的最长子串：用末次下标移动窗口左端》](/posts/algorithm/longest-substring-without-repeating-characters/)中，我们扩张右指针寻找冲突、求**最长**合法窗口；本题则相反，先扩张右指针让窗口**合法**（覆盖 `t`），再不断右移左指针压缩长度，求**最短**合法窗口。
 
 如果每次移动指针后都遍历整张频次表检查“窗口是否覆盖了 `t` 的所有字符”，单次检查耗时 $O(\lvert\Sigma\rvert)$，总时间退化为 $O(m \cdot \lvert\Sigma\rvert)$。借助[《找到所有字母异位词：定长滑窗与频次差分维护》](/posts/algorithm/find-all-anagrams-in-a-string/)中的差分计数思想，只需维护一个标量 `formed`（达标字符种数）或 `missing`（尚缺字符总数）：
 

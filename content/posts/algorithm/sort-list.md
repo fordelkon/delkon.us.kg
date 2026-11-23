@@ -95,6 +95,7 @@ public:
             ListNode* tail = &dummy;
             ListNode* current = dummy.next;
 
+            // Each pass merges adjacent sorted runs of the current width.
             while (current != nullptr) {
                 ListNode* left = current;
                 ListNode* right = split(left, width);

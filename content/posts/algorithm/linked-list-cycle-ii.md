@@ -80,6 +80,7 @@ public:
             }
 
             ListNode* entry = head;
+            // Both pointers are equally far from the entry modulo the cycle length.
             while (entry != slow) {
                 entry = entry->next;
                 slow = slow->next;

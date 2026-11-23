@@ -9,7 +9,7 @@ tags: ["algorithm", "binary-tree", "python", "cpp"]
 
 ## 拐点结算与单侧向上贡献的解耦
 
-在无环连通的树结构中，任意一条简单路径都有且仅有一个深度最小的节点，称为这条路径的**最高拐点**（highest turning point）[^clrs-trees]——正如[《二叉树的最近公共祖先：自底向上状态汇聚与分治判定》](/posts/algorithm/lowest-common-ancestor-of-a-binary-tree/)所分析的，该拐点正是路径两端点的最近公共祖先（LCA）：路径从左子树某个节点向上爬升至该拐点，再折向进入右子树向下延伸（或者仅包含其中一侧）。
+在无环连通的树结构中，任意一条简单路径都有且仅有一个深度最小的节点，称为这条路径的**最高拐点**（highest turning point）[^clrs-trees]。正如[《二叉树的最近公共祖先：自底向上状态汇聚与分治判定》](/posts/algorithm/lowest-common-ancestor-of-a-binary-tree/)所分析的，该拐点正是路径两端点的最近公共祖先（LCA）：路径从左子树某个节点向上爬升至该拐点，再折向进入右子树向下延伸（或者仅包含其中一侧）。
 
 因此，“整棵树的最长简单路径”可以转化为：枚举树中每一个节点 $u$ 作为路径的最高拐点，计算以 $u$ 为最高点的最长路径边数 $d(u)$，并在所有节点上取全局最大值。
 
@@ -66,7 +66,7 @@ class Solution:
 
 ## C++：引用参数透传与零动态分配
 
-在 C++ 中，将 `int& max_diameter` 作为引用参数沿调用栈透传，每次入口调用都重新初始化答案，避免类成员状态残留；后序回退时通过 `std::max`[^cpp-max] 更新直径。这里不需要 `std::function`，也不为树节点分配动态内存：
+在 C++ 中，将 `int& max_diameter` 作为引用参数沿调用栈透传，每次入口调用都重新初始化答案，避免类成员状态残留；后序回退时通过 `std::max` 更新直径[^cpp-max]。这里不需要 `std::function`，也不为树节点分配动态内存：
 
 ```cpp
 #include <algorithm>

@@ -79,6 +79,13 @@ public:
 
 这与[《二叉树展开为链表：逆先序递归与前驱节点就地嫁接》](/posts/algorithm/flatten-binary-tree-to-linked-list/)形成了清晰的对照：后者同样在左子树中寻找最右侧节点，但目的是将原右子树永久嫁接过去并清空 `left` 指针以完成先序原地展开；而 Morris 中序遍历借用 `pred->right` 建立临时环路，并在第二次经过 `curr` 时拆桥复原，在正常完成遍历后保持原树结构不变。若直接提前返回或中途异常退出，尚未拆除的线索可能残留，因此不能照搬显式栈的提前终止方式。
 
+```mermaid mobile-direction="TB" title="Morris 遍历的临时返回路径" description="当前节点为 4，左子树根为 2，其中最右节点为 3。首次遇到 4 时借用 3 的空右指针指回 4；沿线索返回后先清空 3.right，再访问 4。"
+flowchart LR
+ C["4"] -->|left| L["2"]
+ L -->|right| P["3"]
+ P -.->|临时 right| C
+```
+
 ```cpp
 #include <vector>
 
