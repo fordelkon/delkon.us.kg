@@ -9,6 +9,8 @@ tags: ["networking"]
 
 ## 路由表与最长前缀匹配
 
+### 单表选路与最长前缀匹配
+
 应用要发出一个 IP 包时，内核需要根据包的目的地址，决定从哪个接口发出、下一跳交给谁。路由表按“目的网络前缀 → 下一跳 / 出接口 / 其他属性”组织条目，一条前缀可以匹配一组目的地址，不必为每一个可能的 IP 单独建表。
 
 先设定一个简化场景，只讨论 IPv4，并固定查询同一张路由表：
@@ -38,18 +40,69 @@ tags: ["networking"]
 
 查表得到下一跳，并不会把包的目的 IP 改成网关 IP。在这个例子中，IP 包的目的地址仍为 `198.51.100.20`；若出口是以太网，内核通过上一篇的 [ARP](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv4-的地址解析arp) 找到下一跳 `192.168.1.1` 的 MAC，把它填进当前链路的帧头。目的 IP 与下一跳 MAC 分别服务于跨网寻址和本跳交付。
 
-以上例子先固定了一张表。同一前缀的候选路由可再按平台的度量值（Metric）或多路径规则处理，例如**等价多路径路由**（Equal-Cost Multi-Path，ECMP）。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（firewall mark，`fwmark`）等匹配规则，决定查询哪张路由表[^policy]。
+### 用路由条目实现单表查找
+
+在这个 C 模型中，每个 `Route` 保存一个 IPv4 前缀、可选网关和出接口。`Ipv4` 沿用上一篇的[主机字节序整数](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)，例如 `192.168.1.99` 写作 `0xc0a80163`。前缀等长时，示例保留表中第一条匹配；内核的度量值、多路径与策略路由由下一小节解释。
+
+```c
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef uint32_t Ipv4;  // Host-byte-order IPv4 address.
+
+struct Route {
+    Ipv4 network;
+    unsigned prefix_length;  // Valid range: 0..32.
+    bool has_gateway;        // True for indirect via gateway; false for on-link.
+    Ipv4 gateway;            // Valid only when has_gateway is true.
+    const char *interface_name;
+};
+
+const struct Route *longest_match(const struct Route *routes, size_t count,
+                                  Ipv4 destination) {
+    if (routes == NULL) {
+        return NULL;
+    }
+
+    const struct Route *best = NULL;
+    for (size_t i = 0; i < count; ++i) {
+        const struct Route *route = &routes[i];
+        if (route->prefix_length > 32) {
+            continue;
+        }
+
+        // Shifting a 32-bit unsigned integer by 32 bits is UB in C17.
+        Ipv4 mask = route->prefix_length == 0
+            ? 0
+            : UINT32_MAX << (32 - route->prefix_length);
+        // Mask both sides in case a route entry carries non-zero host bits.
+        // Strict > keeps the first matching entry on equal prefix lengths.
+        if ((destination & mask) == (route->network & mask) &&
+            (best == NULL || route->prefix_length > best->prefix_length)) {
+            best = route;
+        }
+    }
+    return best;
+}
+```
+
+把前几节的 `/0`、`/24`、`/32` 条目放进数组，查 `192.168.1.99` 得到 `/32`，查 `198.51.100.20` 得到 `/0`。空表或没有匹配项时返回空指针；成功时返回的指针借用原表。对本例的单播转发条目，`has_gateway` 为真时解析 `gateway` 的链路地址，否则解析目标。回环等本地交付另有路由类型。
+
+### Linux 策略路由、RPDB 与 /1 接管
+
+以上例子先固定了一张表。同一前缀的候选路由先比较平台的度量值（Metric），度量值更小者优先；开销相等的多条路径，则可按**等价多路径路由**（Equal-Cost Multi-Path，ECMP）按流分摊。更一般地，Linux 的**策略路由**（Policy-Based Routing）可先按源地址、入口接口或防火墙标记（firewall mark，`fwmark`）等匹配规则，决定查询哪张路由表[^policy]。
 
 在 Linux 上，**路由策略数据库**（Routing Policy Database，RPDB）按优先级数字从小到大检查规则。每条规则先匹配选择条件，匹配后才执行动作。默认 IPv4 规则依次查询 `local`（`0`）、`main`（`32766`）和 `default`（`32767`）；这里的数字是规则优先级，`default` 是表名，不是 `/0` 路由[^policy]。
 
-```mermaid title="Linux IPv4 的 RPDB 选路决策" description="从最小优先级数字开始。规则不匹配、本次查表无路由或命中 throw、查表成功但结果被抑制，都会继续扫描。goto 跳到目标规则重新匹配。查到可用路由或得到拒绝结果时停止；规则用尽且未得到结果则选路失败。图展示常见的本地与单播交付，不展开广播等特殊路由。"
+```mermaid title="Linux IPv4 的 RPDB 选路决策" description="从最小优先级数字开始。规则不匹配、本次查表无路由或命中 throw、查表成功但结果被抑制，都会继续扫描。goto 只能跳向优先级数字更大的后续规则以防止环路。查到可用路由或得到拒绝结果时停止；规则用尽且未得到结果则选路失败。图展示常见的本地与单播交付，不展开广播等特殊路由。"
 flowchart TB
  rules["按优先级取下一条规则<br/>小数字在前"]
  rules -->|规则用尽| miss["选路失败：无路由结果"]
  rules -->|有规则| selector{"规则匹配？"}
  selector -->|否| next["回到起点<br/>检查下一条规则"]
  selector -->|是| action["执行规则动作"]
- action -->|goto| jump["跳到目标规则<br/>重新匹配"]
+ action -->|goto| jump["跳到后续更高优先级<br/>数字的目标规则重新匹配"]
  action -->|lookup| lookup["只查指定表<br/>表内做最长前缀匹配"]
  action -->|直接拒绝| negative["终止：丢弃或报错"]
  lookup -->|无路由或 throw| next
@@ -57,14 +110,18 @@ flowchart TB
  lookup -->|查表成功| suppress{"结果被抑制？"}
  suppress -->|是| next
  suppress -->|否| usable["终止：采用结果<br/>local：本机交付<br/>unicast：选定出接口与下一跳"]
+ class rules,selector,suppress state
+ class action,lookup,jump,next actor
+ class usable result
+ class miss,negative risk
 ```
 
-图中 `goto` 假定目标规则存在；目标未解析时继续下一条。`throw` 结束的是本次查表，不会再退回同一张表找更短前缀。**抑制**（suppression）则发生在查表成功之后，例如 `suppress_prefixlength 0` 会拒用匹配到的 `/0` 路由，但不会拒用匹配到的 `/24`；`suppress_ifgroup` 可以按出接口所属的接口组抑制结果。`blackhole` 则表示静默丢弃：不论是规则动作还是命中的路由类型，它都终止整个决策。`unreachable` 和 `prohibit` 同样终止，而差错含义不同[^policy][^iproute][^rpdb-kernel]。
+为避免策略表之间出现死循环，Linux 内核要求 `goto` 的目标规则优先级数字必须严格大于当前规则（只允许向后跳），若目标未命中也会继续扫描下一条。`throw` 结束的是本次查表，不会再退回同一张表找更短前缀。**抑制**（suppression）则发生在查表成功之后，例如 `suppress_prefixlength 0` 会拒用匹配到的 `/0` 路由，但不会拒用匹配到的 `/24`；`suppress_ifgroup` 可以按出接口所属的接口组抑制结果。`blackhole` 则表示静默丢弃：不论是规则动作还是命中的路由类型，它都终止整个决策。`unreachable` 和 `prohibit` 同样终止，而差错含义不同[^policy][^iproute][^rpdb-kernel]。
 
 因此，若优先级较高的规则查到一条未被抑制的 `/0` 单播路由，后面规则所查表里的 `/32` 不会参与竞争。要验证实际选择，应按[路由查询实验](#实验一查看完整路由表与特定目标的选路结果)检查规则、对应的表和具体目标。
 
-:::note[两条 /1 路由能覆盖什么]
-`0.0.0.0/1` 与 `128.0.0.0/1` 共同覆盖 IPv4 地址空间，并优先于原有 `/0` 默认路由。因此，把它们指向虚拟接口，可以接管原本依赖默认路由的 IPv4 流量；`/24`、`/32` 等更具体路由仍可能优先命中，策略规则也可能选择其他表。IPv6 的选路独立于这两条 IPv4 路由。删除这两条路由后的行为取决于剩余配置。
+:::note[两条 /1 路由与环路预防]
+`0.0.0.0/1` 与 `128.0.0.0/1` 共同覆盖 IPv4 地址空间，并优先于原有 `/0` 默认路由。因此，把它们指向虚拟接口，可以接管原本依赖默认路由的 IPv4 流量；`/24`、`/32` 等更具体路由仍可能优先命中，策略规则也可能选择其他表。但全量 `/1` 接管也会把 VPN 对端或远端代理节点的 IP 吸进隧道从而形成转发环路，因此实际部署必须用更具体的 `/32` 旁路路由、Linux `fwmark` 配合 RPDB 独立路由表、`suppress_prefixlength 0` 或按出接口绑定套接字（如 `SO_BINDTODEVICE` / `IP_BOUND_IF`）让外层出站流量绕开虚拟接口。IPv6 的选路独立于这两条 IPv4 路由。
 :::
 
 沿用刚才的网段外目标 `198.51.100.20`，下面比较保留原配置与额外添加两条指向 TUN 的 `/1` 路由后的查询结果。仍固定同一张 IPv4 路由表，且没有针对该目标的更具体路由：
@@ -126,17 +183,19 @@ MAC 只列末字节，完整地址见上表。R1 和 R2 各更新一遍 IPv4 头
 | IPv4 头 | 源 / 目的 IP 保留；TTL 递减，头部校验和随之更新 |
 | TCP 头与载荷 | 本例中保持不变；IPv4 TTL 不参与 TCP 伪头部校验和计算 |
 
-所以“IP 地址不变”并不等于“整个 IP 头不变”。路由器转发的是去掉旧链路封装后的 IP 包；TCP 确认与重传由两端的 TCP 处理，见[第四篇的序号与确认示例](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的序号确认与重传)[^forward-packet]。
+所以“IP 地址不变”并不等于“整个 IP 头不变”。路由器转发的是去掉旧链路封装后的 IP 包；TCP 确认与重传由两端的 TCP 处理，见第四篇的[序号与确认示例](/posts/networking/transport-tcp-udp-socket-quic/#tcp-的序号确认与重传)[^forward-packet]。
 
 ## ICMP 差错与探测反馈
 
-**互联网控制报文协议**（Internet Control Message Protocol，ICMP）用来报告 IP 层状态与差错。下表列出 IPv4 的常见 ICMP 报文。**IPv6 互联网控制报文协议**（Internet Control Message Protocol for IPv6，ICMPv6）使用独立的类型编号[^2][^3]。
+**互联网控制报文协议**（Internet Control Message Protocol，ICMP）用来报告 IP 层状态与差错。**IPv6 互联网控制报文协议**（Internet Control Message Protocol for IPv6，ICMPv6）不仅使用独立的类型编号，还同时承担第二篇的 [NDP 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)和路径 MTU 反馈；因为 IPv6 路由器不再沿途分片，IPv4 里的分片提示就独立为 ICMPv6 Packet Too Big[^2][^3]。
 
-| IPv4 ICMP 报文 | 典型用途 |
-| --- | --- |
-| 回显请求／回显应答（Echo Request／Echo Reply，类型 8／0） | `ping` 测试这类探测是否得到回应，并测量往返时间 |
-| 超时（Time Exceeded，类型 11） | 报告 TTL 等超时；传统 `traceroute` 借助递增 TTL 观察响应者 |
-| 目的不可达（Destination Unreachable，类型 3） | 报告目标或端口不可达，以及设置**不分片标志**（Don't Fragment，DF）后仍需分片等情况 |
+| 语义 | IPv4 ICMP 类型 | IPv6 ICMPv6 类型 | 说明 |
+| --- | --- | --- | --- |
+| 回显请求 / 应答 | `8` / `0` | `128` / `129` | `ping` 探测与往返延迟测量 |
+| 目的不可达 | `3` | `1` | 报告网络、主机、端口不可达等；IPv4 中需要分片但置 DF 时对应 `Type 3 Code 4` |
+| 数据包过大（Packet Too Big） | 归入 `Type 3 Code 4` | `2` | IPv6 路由器遇超长包时返回携带下一跳 MTU 的独立类型[^3] |
+| 超时（Time Exceeded） | `11` | `3` | TTL / Hop Limit 耗尽或分片重组超时，`traceroute` 借此收集逐跳响应 |
+| 邻居发现（NDP） | 由独立 ARP 协议负责 | `133`–`137` | RS、RA、NS、NA 与重定向；全盘封禁 ICMPv6 会直接中断本地交付 |
 
 ### ICMP Echo Request 的报文布局
 
@@ -165,11 +224,15 @@ flowchart TB
 
 IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过出接口允许的大小时会返回**数据包过大**（Packet Too Big）报文[^3]。**路径最大传输单元**（Path Maximum Transmission Unit，PMTU）取路径上各链路 MTU 的最小值。源端可用这类报文调整对 PMTU 的估计，参见第八篇的[路径 MTU 诊断](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)[^pmtu]。
 
+ICMP 差错报文之所以能被发送端关联到具体连接或 `traceroute` 探测，是因为它在自身头部后面**内嵌了触发差错的原 IP 包片段**：RFC 1812 要求 IPv4 路由器尽量附带原包内容，但差错报文总长不超过 576 字节（至少含原 IP 头与传输层前 8 字节，即包含端口或 ICMP 标识符）；ICMPv6 则附带尽可能多的原包字节以使总长不超过 1280 字节[^icmp-payload][^3]。这也意味着经过 NAT 的连接收到外网发回的 ICMP 差错时，网关同样需要改写内嵌原包头里的地址与端口。为防止差错雪崩，规范禁止对 ICMP 差错报文自身回发差错，通常也不对链路广播或组播包生成差错（ICMPv6 Packet Too Big 等少数例外），且路由器会对差错发送限速[^icmp-payload][^icmpv6-rules]。
+
 :::tip[怎样解读 traceroute 的星号]
 `*` 表示对应探测在等待窗口内没有获得预期回应，可能涉及控制报文限速、过滤、回程丢失或路径变化。它不能单独证明业务包在该处丢弃；后续跳或目标有响应时，尤其不能把中间星号当作转发故障。响应包的源地址也未必就是探测包经过的入口接口。
 :::
 
 ## NAT：多台内网设备如何共用一个公网 IP
+
+普通路由转发保持包内的源与目的 IP 不变；但家庭或办公网络里的主机往往使用私网 IPv4 地址，离开局域网时必须先把源地址转换成公网地址。
 
 ### NAT 类型与改写字段
 
@@ -212,9 +275,64 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 
 动态映射有自己的生命周期，即使两端的 Socket 仍打开，映射也可能过期：
 
-1. 建立或复用：内网流量出站时，设备分配外部地址端口，或按映射规则复用已有的分配；本例第一条映射使用 `203.0.113.5:61001`[^4][^5]。
+1. 建立或复用：内网流量出站时，设备分配外部地址端口，或按映射规则复用已有的分配；若外网端口尚未被其他会话占用，RFC 4787 建议尽量保持原源端口，即**端口保留**（Port Preservation）[^nat-preserve]。本例第一条映射因并发冲突或策略分配了 `203.0.113.5:61001`[^4][^5]。
 2. 转换与刷新：映射仍有效且过滤允许时，发往 `203.0.113.5:61001` 的回包会被还原为发往 `192.168.1.10:50001`。对 UDP，RFC 4787 要求出站流量刷新计时，入站流量不一定刷新。对 TCP，设备可以按观察到的连接阶段采用不同的空闲计时；只看到单向 FIN 不代表两个方向都已结束[^nat-lifetime]。
 3. 过期后移除：旧映射不再提供回包的还原路径。之后的出站流量若建立新映射，外部地址或端口可能不同；分配新映射不等于恢复 TCP 连接。实际超时由协议、设备实现和配置决定[^nat-lifetime]。
+
+用一个 C 内存模型追踪表中第一条 TCP 转换：除保存转换前后的源端点与本例对端外，分别提供出站与入站改写函数，端口与 IPv4 整数均采用主机字节序。
+
+```c
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+struct Ipv4Endpoint {
+    uint32_t address;  // Host byte order.
+    uint16_t port;     // Host byte order.
+};
+
+struct TcpNatMapping {
+    struct Ipv4Endpoint inside;   // 192.168.1.10:50001
+    struct Ipv4Endpoint outside;  // 203.0.113.5:61001
+    struct Ipv4Endpoint peer;     // 198.51.100.20:443
+};
+
+static bool endpoint_equal(struct Ipv4Endpoint a, struct Ipv4Endpoint b) {
+    return a.address == b.address && a.port == b.port;
+}
+
+// Rewrites outbound source endpoint if both inside and peer match this entry.
+bool nat_rewrite_outbound(const struct TcpNatMapping *mapping,
+                          struct Ipv4Endpoint *src,
+                          struct Ipv4Endpoint dst) {
+    if (mapping == NULL || src == NULL) {
+        return false;
+    }
+    if (!endpoint_equal(*src, mapping->inside) ||
+        !endpoint_equal(dst, mapping->peer)) {
+        return false;
+    }
+    *src = mapping->outside;
+    return true;
+}
+
+// Restores inbound destination endpoint when traffic returns from the same peer.
+bool nat_rewrite_inbound(const struct TcpNatMapping *mapping,
+                         struct Ipv4Endpoint src,
+                         struct Ipv4Endpoint *dst) {
+    if (mapping == NULL || dst == NULL) {
+        return false;
+    }
+    if (!endpoint_equal(src, mapping->peer) ||
+        !endpoint_equal(*dst, mapping->outside)) {
+        return false;
+    }
+    *dst = mapping->inside;
+    return true;
+}
+```
+
+出站方向把匹配记录的源端点从 `inside` 改为 `outside`；入站回包则把目的端点从 `outside` 改回 `inside`。真实网关的 NAT 表远不止单条记录：一是要为内网索引和公网回包索引建立双向查找表，二是单个公网 IP 对同一目标的并发连接数受限于 16 位临时端口空间（约六万余端口，耗尽时只能依赖多公网 IP 地址池或结合远端地址端口复用），三是要维护单调时钟到期淘汰，四是改写包头后需按 RFC 3022 / RFC 1624 对 IPv4 首部及 TCP/UDP 校验和做一补码增量更新（IPv4 中原本禁用、值为 `0` 的 UDP 校验和不得改写为非零，计算结果为 `0x0000` 时须编码为 `0xFFFF`）[^4][^checksum-inc]。
 
 ### 映射、过滤与连接跟踪
 
@@ -224,9 +342,11 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 - **入向过滤**（inbound filtering）：已存在映射时，允许哪些远端发来的包进入。
 - **连接跟踪**（connection tracking）：设备为会话维护什么状态；常见模型使用源/目的地址、源/目的端口和协议组成的五元组，但不能把所有 NAT 映射的键都定义为五元组。
 
-没有动态映射或静态转发安排时，外部主机通常不能主动访问内部服务。**对等通信**（Peer-to-Peer，P2P）还需考虑地址发现与中继，不能凭一个“NAT 类型”判断能否直连。RFC 4787 分别描述 UDP 的映射与过滤，指出**完全锥形 NAT**（Full Cone NAT）、**受限锥形 NAT**（Restricted Cone NAT）和**对称型 NAT**（Symmetric NAT）等旧分类不足以描述实际行为。这份文档的行为要求针对 UDP[^5]。
+另一项常见要求是**发卡环回**（Hairpinning，又称 NAT 回流）：两台位于同一 NAT 后的内网主机通过彼此映射出的公网地址端口互访时，NAT 设备需要把包转换后再转发回内网，而不是要求它离开公网接口[^nat-hairpin]。
 
-在 Linux Netfilter 中，连接跟踪可关联原方向与应答方向。状态防火墙可拿这些状态作放行条件，NAT 可据此沿用映射，二者分别受规则控制。**透明代理**（transparent proxy）还需要在本地接收流量并处理出站。例如 Linux 的 `TPROXY` 机制可以保留包的原目的信息，并把包交给透明套接字（transparent socket），通常需配合标记与策略路由。相关入口对照见[第七篇](/posts/networking/proxies-tunnels-transparent-interception/#透明接管tun-提供-ip-包域名需要额外关联)[^netfilter]。
+没有动态映射或静态转发安排时，外部主机通常不能主动访问内部服务。**对等通信**（Peer-to-Peer，P2P）还需考虑地址发现与中继，不能凭一个“NAT 类型”判断能否直连。RFC 4787 分别描述 UDP 的映射与过滤，指出**完全锥形 NAT**（Full Cone NAT）、**地址受限锥形 NAT**（Restricted Cone NAT）、**端口受限锥形 NAT**（Port-Restricted Cone NAT）和**对称型 NAT**（Symmetric NAT）等旧分类不足以描述实际行为。这份文档的行为要求针对 UDP[^5]。
+
+在 Linux Netfilter 中，连接跟踪可关联原方向与应答方向。状态防火墙可拿这些状态作放行条件，NAT 可据此沿用映射，二者分别受规则控制。**透明代理**（transparent proxy）还需要在本地接收流量并处理出站。例如 Linux 的 `TPROXY` 机制可以保留包的原目的信息，并把包交给透明套接字（transparent socket），通常需配合标记与策略路由。相关入口对照见第七篇的[透明接管与域名关联](/posts/networking/proxies-tunnels-transparent-interception/#透明接管tun-提供-ip-包域名需要额外关联)[^netfilter]。
 
 一个常见例子是 Linux 上 Docker 的**桥接网络**（bridge network）。一对**虚拟以太网设备**（Virtual Ethernet Device，`veth`）分别位于容器的网络命名空间与宿主机，宿主端连到网桥，同一网桥内可以二层交付。访问外部网络时由宿主机路由转发，默认桥接配置常用**地址伪装**（masquerade），把出站包的源地址转换为宿主机的出口地址。发布端口则是另外的入站配置。具体规则还取决于网关模式与防火墙后端[^bridge]。
 
@@ -240,11 +360,15 @@ IPv6 路由器遇到 Hop Limit 耗尽时可返回超时报文，遇到包超过�
 | 普通 NAPT | 转发时按映射改写 IP 地址、端口和相关校验和 | 仍是客户端 ↔ 服务端；设备不代发 TCP ACK |
 | 应用代理（如 HTTP `CONNECT` 或 SOCKS5 的 TCP 转接） | 接收客户端连接，将载荷转到独立的出站连接[^proxy-protocols] | 客户端 ↔ 代理、代理 ↔ 服务端；各有序号、确认与关闭状态 |
 
-`CONNECT` 转接 TCP 字节不要求代理同时终结里面的 TLS。不同连接如何分别确认与缓冲，见[第四篇的 Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)；[第七篇的出站与回包示例](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)再沿两段连接追踪回包。
+`CONNECT` 转接 TCP 字节不要求代理同时终结里面的 TLS。不同连接如何分别确认与缓冲，见第四篇的 [Socket 读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)；第七篇的[出站与回包示例](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)再沿两段连接追踪回包。
+
+:::note[IPv6 为什么通常不用 NAPT]
+普通 IPv6 网络为每台主机分配全局单播地址，经普通路由转发与邻居发现即可直连公网，不需要靠 NAPT 挤占端口来共享单一地址。之所以外网主机仍不能随意直连家用 IPv6 设备，靠的是路由器上的**状态防火墙**阻止未请求的入站流量，而不是地址转换本身。仅在多出口无状态前缀映射（NPTv6）[^nptv6]或 IPv6 与 IPv4 互通（NAT64）等过渡场景下，才会引入前缀或协议转换。
+:::
 
 ## 虚拟网络接口：TUN 与 TAP 如何接入协议栈
 
-路由选择得到的出口可以是软件接口。TUN 与**二层虚拟以太网接口**（Ethernet Tunnel Interface，TAP）都能把内核网络栈连接到用户态程序，但交付的数据单元不同[^tun-name][^6]。
+前面讨论的出口主要是物理网卡；除此之外，选路得到的出口也可以是软件虚拟出的网络接口。第一篇介绍过的**三层虚拟隧道接口**（Network Tunnel，TUN）与**二层虚拟以太网接口**（Ethernet Tunnel Interface，TAP）都能把内核网络栈连接到用户态程序，但交付的数据单元不同[^tun-name][^6]。
 
 ### TUN 与 TAP：用户态读写哪些数据
 
@@ -258,7 +382,7 @@ TUN 的“三层”指接口在网络层交付 IP 包。读、写方向以操作
 
 表中描述的是网络数据单元，接口还可单独或随包提供元数据。Linux 通过 `/dev/net/tun` 创建 TUN/TAP；未设置 `IFF_NO_PI` 时，每包前带 4 字节信息（标志和协议）[^6]。macOS 原生 `utun` 控制套接字的包以 4 字节网络字节序的协议族字段开头；Apple 的 Network Extension `packetFlow` 则可通过 `readPackets` 和 `writePackets` 分别传递包数据与协议族[^apple-tunnel]。
 
-IPv4/IPv6 路由、策略规则和排除项决定哪些包进入 TUN。接入 TUN 后，程序再决定如何处理 IP 包，包括是否终结应用侧 TCP、是否采用加密隧道。普通 TCP Socket 的应用接口见[第四篇的读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)。
+IPv4/IPv6 路由、策略规则和排除项决定哪些包进入 TUN。接入 TUN 后，程序再决定如何处理 IP 包，包括是否终结应用侧 TCP、是否采用加密隧道。普通 TCP Socket 的应用接口见第四篇的[读写契约](/posts/networking/transport-tcp-udp-socket-quic/#socket-接口与内核缓冲区契约)。
 
 ### TUN、代理与 IP 隧道的处理区别
 
@@ -270,7 +394,7 @@ IPv4/IPv6 路由、策略规则和排除项决定哪些包进入 TUN。接入 TU
 | 通过 TUN 接管的代理 | 可终结应用侧传输连接，取出载荷，再建立独立的直连或代理出站 | 把出站结果交回应用侧协议栈，构造相应包写回 TUN |
 | 三层 VPN 隧道 | 将内层 IP 包封装后传给远端隧道端点 | 收到外层流量后解封装，把内层回包写回接口 |
 
-这几行可以组合，但不能混为同一机制。代理重建连接时，不一定把原始 IP 包逐个套上外层头；因此，第八篇讨论 MTU 时不能仅凭“启用了 TUN”推导固定的隧道头开销。应用自身的 HTTPS、代理链路加密与 VPN 封装也分别由相应协议决定。
+这几行可以组合，但不能混为同一机制。代理重建连接时，不一定把原始 IP 包逐个套上外层头；因此，第八篇讨论 [MTU 与包长预算](/posts/networking/network-diagnostics-performance-troubleshooting/#包长预算与-tcp-载荷)时不能仅凭“启用了 TUN”推导固定的隧道头开销。应用自身的 HTTPS、代理链路加密与 VPN 封装也分别由相应协议决定。
 
 ```mermaid title="同一个 TUN 入口之后的两种处理" description="比较两种实现，不是同一条连接依次经过两种模式。左支限定终结应用侧 TCP 的用户态代理，创建独立出站连接；右支限定把完整内层 IP 包加密封装到 UDP/IP 的一种三层 VPN，远端解封装后继续转发原包。两种程序的外层出站都需要可用的绕行路由；标记、策略或接口绑定的效果必须按平台验证。图只展示出站，回程分别重建应用侧包或解封装内层回包。"
 flowchart TB
@@ -278,14 +402,18 @@ flowchart TB
  proxy --> socket["取得载荷，新建出站套接字<br/>拥有独立确认、重传与关闭"]
  socket --> bypass["按策略与实际选路绕过 TUN<br/>直连或交给远端代理"]
  tun --> vpn["三层 IP VPN<br/>保留完整内层 IP 包"]
- vpn --> outer["加密封装为外层 UDP/IP<br/>路由到远端隧道端点"]
+ vpn --> outer["加密封装为外层 UDP/IP<br/>路由到远端隧道端点<br/>（外层流量需绕过 TUN）"]
  outer --> peer["远端解密并去掉外层头<br/>继续转发内层 IP 包"]
+ class tun state
+ class proxy,vpn actor
+ class socket,outer resource
+ class bypass,peer result
 ```
 
 再把右支的封装展开。应用建立连接时选用本机隧道地址 `10.0.0.2` 访问 `198.51.100.20`；VPN 程序通过物理接口地址 `192.168.1.10` 向对端 `203.0.113.9` 发送流量。这里观察的是靠近本机的两个位置：TUN 读出的内层包，以及上游 NAT 之前的物理出口。
 
 ```mermaid title="VPN 密文包住完整的 TUN 原包" description="TUN 原包包含内层 IPv4 头、TCP 头和原始载荷。加密箭头指向 UDP 数据报内的 VPN 密文区。外层 IPv4、UDP 和 VPN 元数据各有自己的位置；省略外部链路帧与认证标签的具体格式。"
-flowchart TB
+flowchart LR
  original["TUN 原包<br/>内层 IPv4：10.0.0.2 → 198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
  subgraph outer[物理出口的 IPv4 包]
   ip["外层 IPv4 头 · Protocol=17<br/>192.168.1.10 → 203.0.113.9"]
@@ -294,19 +422,17 @@ flowchart TB
    subgraph vpn[UDP 载荷 · VPN 数据]
     metadata["VPN 元数据"]
     cipher["密文 · 完整内层包"]
-    metadata --- cipher
    end
-   udp_header --- metadata
   end
-  ip --- udp_header
  end
  original -->|加密完整原包| cipher
- linkStyle 0,1,2 stroke:none
+ class original actor
+ class cipher state
 ```
 
 外层目的 IP 让普通路由把包送到 VPN 对端；对端解密、去掉外层封装后，才按内层目的 IP 继续转发。这里的内层地址没有被外层地址简单替换，外层也有自己的 TTL 与路由。反过来，左支的代理若终结应用侧 TCP，物理出口通常出现的是独立出站连接的包，不能套用这张“完整内层包在里面”的结构。
 
-读到 TUN 时，先核对哪条路由把包交给接口，以及程序写回后内核如何处理。代理如何终结应用侧 TCP、建立独立出站并处理回程，见[第七篇的 TUN 连接与返回路径](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)。
+读到 TUN 时，先核对哪条路由把包交给接口，以及程序写回后内核如何处理。代理如何终结应用侧 TCP、建立独立出站并处理回程，见第七篇的 [TUN 连接与返回路径](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)。
 
 ## 观察路由与转发路径：实验与边界
 
@@ -337,29 +463,29 @@ macOS 的 `route -n get` 常见字段包括：
 
 ### 实验二：观察逐跳路径与 TTL 触发的 ICMP 响应
 
-下面限制最多探测 5 跳，每跳一次探测，单次等待最多 1 秒；数字输出可跳过反向 DNS 查询，避免因把 IP 地址查成名称而引入额外等待。
+下面限制最多探测 5 跳，每跳一次探测，单次等待最多 1 秒；`-n` 只跳过对中间跳 IP 的反向 DNS 查询（命令对 `example.com` 仍会先做正向解析）：
 
 ```bash frame="code"
 traceroute -n -m 5 -q 1 -w 1 example.com
 ```
 
-左侧数字对应探测包的初始 TTL，右侧若有响应则显示响应者地址与测得的往返耗时。最多 5 跳未到目标是这个实验主动设置的范围限制，不能据此判断目标不可达。实际目标可换成已经确认解析出的 IPv4 地址。
+左侧数字对应探测包的初始 TTL，右侧若有响应则显示响应者地址与测得的往返耗时。最多 5 跳未到目标是这个实验主动设置的范围限制，不能据此判断目标不可达。若本机已开启 Fake-IP 或 DNS 接管，域名可能先解析到虚接口保留地址并在第 1 跳结束，此时应直接探测已知的真实公网 IPv4 地址；未预装 `traceroute` 的 Linux 环境可用 `tracepath -n` 替代（无 `-q`/`-w` 选项）。
 
 `route get` 观察本地决策，不知道后续路由器会怎样转发；`traceroute` 记录这轮探测的响应，不保证不同探测经过同一条路径。去程与回程也可能不对称，单侧结果不能证明响应沿原路返回。要诊断业务连接，可按[本次请求实际发生的阶段选择观测点](/posts/networking/network-diagnostics-performance-troubleshooting/#按请求阶段选择观测点)。
 
 ## 总结
 
 - 固定路由表内优先匹配更具体的前缀；策略规则还可能先选择不同的表。下一跳地址与包头目的地址承担不同职责。
-- 路由转发逐跳递减 TTL/Hop Limit，并重新封装出口链路；ICMP 回应的有无不能直接等同于业务转发是否成功。
-- NAPT 改写地址端口，映射、过滤和会话状态需要分别理解；它不会因为转换地址而终结两端 TCP。
+- 路由转发逐跳递减 TTL/Hop Limit，并重新封装出口链路；ICMP 差错携带原包截断头以便关联流，回应的有无不能直接等同于业务转发是否成功。
+- NAPT 改写地址端口并同步增量更新校验和，映射、过滤、端口保留、发卡环回和会话状态需要分别理解；它不会因为转换地址而终结两端 TCP。
 - TUN 提供 IP 包入口，代理与 VPN 决定后续处理。接管范围、出站绕行和回包交付共同决定通信能否成立。
 
 下一篇沿协议栈向上，讨论[《计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口》](/posts/networking/transport-tcp-udp-socket-quic/)：不可靠的逐跳 IP 交付，怎样支撑有序字节流，应用读写连接时又能依赖哪些保证？
 
 ## 延伸阅读
 
-- [RFC 4787 §3—5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——分别理解 UDP NAT 的映射与入向过滤，以及旧 Cone/Symmetric 分类的局限
-- [Linux Kernel: Universal TUN/TAP device driver](https://docs.kernel.org/networking/tuntap.html)——Linux 设备创建、多队列与文件描述符交互细节
+- [RFC 5382: NAT Behavioral Requirements for TCP](https://www.rfc-editor.org/rfc/rfc5382.html)——完整查阅 TCP NAT 的状态超时、端点独立映射与发卡环回要求
+- [WireGuard 白皮书（PDF）](https://www.wireguard.com/papers/wireguard.pdf)与 [Linux Advanced Routing & Traffic Control (LARTC)](https://lartc.org/howto/)——深入理解三层轻量级 VPN 隧道与 Linux 多表策略路由、流量控制实践
 
 [^1]: 〔RFC〕[RFC 4632 §5.1](https://www.rfc-editor.org/rfc/rfc4632.html#section-5.1)——转发时选择最具体的匹配前缀。
 
@@ -367,15 +493,27 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^policy]: 〔平台与实现〕[Linux ip-rule(8)](https://man7.org/linux/man-pages/man8/ip-rule.8.html)——规则优先级、匹配条件、默认规则、按规则查表与结果抑制。
 
-[^rpdb-kernel]: 〔平台与实现〕Linux 内核的 [RPDB 扫描](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c)、[IPv4 规则动作与结果抑制](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c)及[单表查询](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_trie.c)——`goto` 与规则回退、成功结果的抑制，以及 `throw` 结束本次查表。
+[^rpdb-kernel]: 〔平台与实现〕Linux 内核的 [RPDB 扫描](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c)、[IPv4 规则动作与结果抑制](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c)及[单表查询](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_trie.c)——`goto` 的向后跳转约束与规则回退、成功结果的抑制，以及 `throw` 结束本次查表。
 
 [^2]: 〔RFC〕[RFC 792: Internet Control Message Protocol](https://www.rfc-editor.org/rfc/rfc792.html)——IPv4 Echo、Destination Unreachable 和 Time Exceeded 报文。
 
 [^3]: 〔RFC〕[RFC 4443 §3](https://www.rfc-editor.org/rfc/rfc4443.html#section-3)——ICMPv6 差错报文，包括 Packet Too Big 与 Time Exceeded。
 
+[^icmp-payload]: 〔RFC〕[RFC 1812 §4.3.2.3](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.3.2.3)与 [§4.3.2.7–4.3.2.8](https://www.rfc-editor.org/rfc/rfc1812.html#section-4.3.2.7)——IPv4 ICMP 差错报文携带尽量多的原数据报（总长不超过 576 字节），以及不回复差错与速率限制规则。
+
+[^icmpv6-rules]: 〔RFC〕[RFC 4443 §2.4](https://www.rfc-editor.org/rfc/rfc4443.html#section-2.4)——ICMPv6 差错生成限制与尽量附带原包至不超过 IPv6 最小 MTU（1280 字节）的规定。
+
 [^4]: 〔RFC〕[RFC 3022 §2.1–2.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.1)区分 Basic NAT 与 NAPT，[§4.1–4.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-4.1)说明双向包头改写与校验和调整。
 
+[^checksum-inc]: 〔RFC〕[RFC 1624 §3](https://www.rfc-editor.org/rfc/rfc1624.html#section-3)与 [RFC 3022 §4.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-4.2)——增量更新一补码校验和与 `0x0000` / `0xFFFF` 处理，以及 IPv4 UDP 禁用校验和（`0`）的保留规则。
+
 [^5]: 〔RFC〕[RFC 4787 §3、§4.1、§5](https://www.rfc-editor.org/rfc/rfc4787.html#section-3)——旧 NAT 分类的不足，以及 UDP 地址/端口映射和入向过滤的独立描述。
+
+[^nat-preserve]: 〔RFC〕[RFC 4787 §4.2.1](https://www.rfc-editor.org/rfc/rfc4787.html#section-4.2.1)——UDP NAT 的端口保留要求与冲突时的分配规则。
+
+[^nat-hairpin]: 〔RFC〕[RFC 4787 §6](https://www.rfc-editor.org/rfc/rfc4787.html#section-6)与 [RFC 5382 §7.2](https://www.rfc-editor.org/rfc/rfc5382.html#section-7.2)——UDP 与 TCP NAT 的发卡环回（Hairpinning）行为要求。
+
+[^nptv6]: 〔RFC〕[RFC 6296 §1、§2](https://www.rfc-editor.org/rfc/rfc6296.html#section-1)与 [RFC 6146 §1](https://www.rfc-editor.org/rfc/rfc6146.html#section-1)——IPv6 无状态前缀转换 NPTv6 及有状态 IPv6-IPv4 转换 NAT64 的适用场景。
 
 [^nat-lifetime]: 〔RFC〕[RFC 4787 §4.3](https://www.rfc-editor.org/rfc/rfc4787.html#section-4.3)定义 UDP 映射超时与刷新方向；[RFC 5382 §5](https://www.rfc-editor.org/rfc/rfc5382.html#section-5)说明 TCP 的空闲状态与半关闭；[RFC 7857 §2、§7](https://www.rfc-editor.org/rfc/rfc7857.html#section-2)更新 TCP 过渡状态计时及 UDP 入向刷新的条件。
 
@@ -383,7 +521,7 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^tun-name]: 〔平台与实现〕[OpenBSD tun(4)](https://man.openbsd.org/tun.4)——手册将 `tun` 称为三层隧道接口，将 `tap` 称为以太网隧道接口。
 
-[^pat]: 〔平台与实现〕[Cisco IOS XE: Port Address Translation](https://www.cisco.com/c/en/us/td/docs/switches/lan/c9000/lyr3-fwd/nat/nat-configuration-guide/nat.html)——PAT 的英文名称及端口区分方式。
+[^pat]: 〔RFC〕[RFC 2663 §4.1.2](https://www.rfc-editor.org/rfc/rfc2663.html#section-4.1.2)与 [RFC 3022 §2.2](https://www.rfc-editor.org/rfc/rfc3022.html#section-2.2)——NAPT / PAT 的术语定义与端口区分方式。
 
 [^pmtu]: 〔RFC〕[RFC 8201 §2、§3](https://www.rfc-editor.org/rfc/rfc8201.html#section-2)——链路 MTU、路径 MTU，以及如何根据 Packet Too Big 报文更新路径 MTU。
 
@@ -397,8 +535,8 @@ traceroute -n -m 5 -q 1 -w 1 example.com
 
 [^apple-tunnel]: 〔平台与实现〕[Apple XNU：`if_utun.c`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_utun.c)说明原生控制套接字的协议族字段。[NEPacketTunnelFlow](https://developer.apple.com/documentation/networkextension/nepackettunnelflow)提供分开读取或写入包数据和协议族的方法，[NEIPv4Settings](https://developer.apple.com/documentation/networkextension/neipv4settings)定义包含、排除路由配置。
 
-[^netfilter]: 〔平台与实现〕[nftables 官方手册：Connection tracking](https://netfilter.org/projects/nftables/manpage.html)与[Linux 内核文档：透明代理](https://docs.kernel.org/networking/tproxy.html)——连接状态匹配、状态 NAT 与 TPROXY 的路由和套接字要求。
+[^netfilter]: 〔平台与实现〕[nftables(8) 手册（CT / NAT 语句）](https://netfilter.org/projects/nftables/manpage.html)与[Linux 内核文档：透明代理](https://docs.kernel.org/networking/tproxy.html)——连接状态匹配、状态 NAT 与 TPROXY 的路由和套接字要求。
 
-[^bridge]: 〔软件与平台实现〕[Docker Engine：Bridge network driver](https://docs.docker.com/engine/network/drivers/bridge/)与 [Linux veth(4)](https://man7.org/linux/man-pages/man4/veth.4.html)——bridge 驱动的连通、转换与端口发布，以及 veth 对在命名空间之间的连接方式。
+[^bridge]: 〔平台与实现〕[Docker Engine：Bridge network driver](https://docs.docker.com/engine/network/drivers/bridge/)与 [Linux veth(4)](https://man7.org/linux/man-pages/man4/veth.4.html)——bridge 驱动的连通、转换与端口发布，以及 veth 对在命名空间之间的连接方式。
 
 [^iproute]: 〔平台与实现〕[Linux ip-route(8)](https://man7.org/linux/man-pages/man8/ip-route.8.html)——路由类型、`show table all` 的显示范围与 `get` 的按条件选路查询。

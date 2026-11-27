@@ -1,13 +1,13 @@
 ---
 title: "计算机网络（四）：TCP、UDP、QUIC 与 Socket 接口"
-description: "对比 TCP 字节流与 UDP 数据报，解释连接状态、重传、窗口控制与 Socket 读写契约，用可运行的 Rust 程序演示分次读取、EOF 和半关闭，并界定 QUIC 多流与连接迁移的保证。"
+description: "对比 TCP 字节流与 UDP 数据报，解释连接状态、重传、窗口控制与 Socket 读写契约，用可运行的 C 程序演示分次读取、EOF 和半关闭，并界定 QUIC 多流与连接迁移的保证。"
 publishDate: "21 Nov 2026"
-tags: ["networking", "rust"]
+tags: ["networking"]
 ---
 
 上一篇[《计算机网络（三）：路由转发、NAT 与虚拟网络接口》](/posts/networking/routing-forwarding-nat-virtual-interfaces/)追踪了 [IP 包的逐跳交付](/posts/networking/routing-forwarding-nat-virtual-interfaces/#逐跳转发时哪些字段会变)。IP 尽力把包送到目标主机：包可能丢失、乱序或重复；目的 IP 也不说明该把载荷交给哪个应用。本篇从传输层端点接着看。
 
-本篇先比较 TCP 字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。示例用 Rust 标准库演示 `TcpStream` 的分次读取、**文件结束**（End of File，EOF）与半关闭，连接状态观察以 macOS 与 Linux 为例。
+本篇先比较 TCP 字节流与**用户数据报协议**（User Datagram Protocol，UDP）数据报，接着看 TCP 如何管理连接、确认、重传与窗口，以及这些机制如何反映在 Socket 的读写结果里。QUIC 一节再对照这些机制怎样用于 UDP 之上的可靠传输。示例用 POSIX Socket 演示 C 程序的分次读取、**文件结束**（End of File，EOF）与半关闭，连接状态观察以 macOS 与 Linux 为例。
 
 ## 传输层端点：端口、TCP 字节流与 UDP 数据报
 
@@ -23,9 +23,9 @@ TCP 和 UDP 直接由 IP 承载；[QUIC](#quic为什么在-udp-之上重建可�
 | 流量与拥塞控制 | 接收窗口与拥塞控制共同约束发送 | 协议本身不提供，由应用或上层协议负责 | 流级与连接级流量控制，拥塞控制由 QUIC 实现提供 |
 | 典型应用 | HTTP/1.1、HTTP/2、SSH、数据库连接 | [传统 DNS 查询](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-查询的报文与传输)、实时媒体 | HTTP/3、DNS over QUIC |
 
-UDP 的“保留边界”不表示每次都能取得完整消息。Rust `UdpSocket::recv_from` 明确说明：消息超过调用方提供的缓冲区时，超出的字节可能被丢弃；具体返回和截断指示依接口与平台而定。一次成功发送也不保证对端收到该数据报[^2][^udp-api]。
+UDP 的“保留边界”不表示每次都能取得完整消息。使用 POSIX Socket 在 UDP 上接收时，如果数据报超过缓冲区大小，超出部分会被丢弃。需要检测截断时可使用 `recvmsg`，检查返回的 `msg_flags` 中是否有 `MSG_TRUNC`。一次成功发送也不保证对端收到该数据报[^2][^udp-api]。另外，对 UDP Socket 调用 `connect()` 不会发送握手包，而是在内核绑定默认对端四元组：之后既可直接用 `send`/`recv` 并过滤无关来源的包，也能让内核把 ICMP 端口不可达等异步差错以 `ECONNREFUSED` 投递给后续读写调用。
 
-TCP 中，发送方分别写入 `"hello "` 和 `"world"`，接收方可能一次读到两者，也可能多次才读完。TCP 提供可靠、有序的字节流，连接仍可能报错或中断。应用需要**帧定界**（framing）才能从字节流识别出一条完整消息，常见做法是使用固定长度、长度前缀或分隔符。HTTP/1.1 的实例见[请求与响应的头部及正文边界](/posts/networking/http-evolution-tls-handshake-https/#一组-http-请求与响应)。
+TCP 中，发送方分别写入 `"hello "` 和 `"world"`，接收方可能一次读到两者，也可能多次才读完。TCP 提供可靠、有序的字节流，连接仍可能报错或中断。默认启用的 **Nagle 算法**（在途尚有未确认数据时暂缓发送小于 MSS 的零碎小段，RFC 9293 §3.7.4）与接收端**延迟 ACK** 叠加时，连续小写入再等待读取甚至可能出现数十到上百毫秒的额外卡顿；延迟敏感的交互协议可通过禁用 Nagle（`TCP_NODELAY`）或合并写入来避免[^nagle]。应用需要**帧定界**（framing）才能从字节流识别出一条完整消息，常见做法是使用固定长度、长度前缀或分隔符。HTTP/1.1 的实例见[请求与响应的头部及正文边界](/posts/networking/http-evolution-tls-handshake-https/#一组-http-请求与响应)。
 
 ## TCP 连接的建立与关闭
 
@@ -33,16 +33,14 @@ TCP 在两端为每条连接维护状态：本地与对端的地址和端口、�
 
 ### 连接建立：三次握手
 
-通常的主动建连过程是：客户端发送带**同步序号标志**（Synchronize，`SYN`）的报文段，**初始序列号**（Initial Sequence Number，ISN）为 $x$；服务端回复同时置位 `SYN` 和**确认标志**（Acknowledgment，`ACK`）的报文段，携带自身初始序号 $y$ 并确认 $x+1$；客户端再以 ACK 确认 $y+1$。这个交换使双方同步初始序号，并确认对方能够接收自己的序号信息；连接状态机还必须处理旧报文与重复报文，避免把滞留的连接请求误认为新的有效连接[^1]。
+通常的主动建连过程是：客户端发送带**同步序号标志**（Synchronize，`SYN`）的报文段，**初始序号**（Initial Sequence Number，ISN）为 $x$；服务端回复同时置位 `SYN` 和**确认标志**（Acknowledgment，`ACK`）的报文段，携带自身初始序号 $y$ 并确认 $x+1$；客户端再以 ACK 确认 $y+1$。这个交换使双方同步初始序号，并确认对方能够接收自己的序号信息；连接状态机还必须处理旧报文与重复报文，避免把滞留的连接请求误认为新的有效连接[^1]。
 
 图中的被动端状态跟随本次连接，监听套接字仍可继续接收其他连接[^tcp-lifecycle]。
 
-```mermaid title="TCP 三次握手：报文方向与两端状态" description="客户端主动打开，服务端被动打开。自上而下读三段报文，注记标记各端在相关发送或接收后进入的状态。本例三段的 TCP 载荷均为空，省略同时打开、重传与超时。"
+```mermaid title="TCP 三次握手：报文方向与两端状态" description="客户端主动打开，服务端被动打开。初始状态标在参与者名下，自上而下读三段报文，注记标记各端在相关发送或接收后进入的状态。本例三段的 TCP 载荷均为空，省略同时打开、重传与超时。"
 sequenceDiagram
- participant C as 客户端
- participant S as 服务端
- Note over C: CLOSED
- Note over S: LISTEN
+ participant C as 客户端<br/>CLOSED
+ participant S as 服务端<br/>LISTEN
  C->>S: SYN · Seq=x
  Note over C: SYN-SENT
  Note over S: SYN-RECEIVED
@@ -54,13 +52,13 @@ sequenceDiagram
 
 这里的确认号都在 TCP 头里。SYN 即使没有载荷也占用一个序号，纯 ACK 则不消耗序号。第三段 ACK 可以带数据，本例取纯 ACK。三个 TCP 控制段都能单独交给 IP，再由当前链路成帧，参见[封装路径对照](/posts/networking/layered-architecture-packet-journey/#同一条链路上的不同封装路径)[^1]。
 
-#### 初始 SYN 的报文布局
+### 初始 SYN 的报文布局
 
 把时序图里的第一支箭头展开。例中客户端从 `192.168.1.10:50001` 连接 `198.51.100.20:443`，初始序号仍记为 `x`。TCP 头里的数据偏移字段以 32 位字为单位。无选项时它的值为 `5`，表示 TCP 头占 20 字节[^tcp-header]。
 
 在[同一次 HTTPS 访问的阶段对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)中，DNS 答案提供目的 IPv4 地址，TCP 用自己的头部发出 SYN。建连后，TLS 才把 `ClientHello` 编码成记录字节写入 TCP 流。对照这两个发送动作，SYN 的控制信息位于 TCP 头部，TLS 记录的字节则位于后续段的 TCP 载荷。
 
-```mermaid title="初始 SYN 装在 IPv4 包里" description="未加 VLAN 标签的 Ethernet II 帧。IPv4 和 TCP 都无选项，IPv4 总长度 40 字节。TCP 段只含 TCP 头，SYN 标志与初始序号就在头中。帧填充和 FCS位于 IPv4 包之外。图只列关键字段。"
+```mermaid title="初始 SYN 装在 IPv4 包里" description="未加 VLAN 标签的 Ethernet II 帧。IPv4 和 TCP 都无选项，IPv4 总长度 40 字节。TCP 段只含 TCP 头，SYN 标志与初始序号就在头中。帧填充和 FCS 位于 IPv4 包之外。图只列关键字段。"
 flowchart TB
  subgraph frame[Ethernet II 帧]
   eth["帧头 · EtherType=0x0800"]
@@ -78,19 +76,18 @@ flowchart TB
  linkStyle default stroke:none
 ```
 
-这里的 `ACK=0` 指 ACK 标志未置位，确认号字段因此无效。SYN 可以携带**最大报文段长度**（Maximum Segment Size，MSS）选项，用来通告本端可接收的单个 TCP 报文段的数据长度上限。MSS 只计 TCP 数据，带此选项的 SYN 仍可以没有载荷，增加的是 TCP 头的长度[^mss]。时序图中的纯 ACK 也有自己的 TCP 头[^tcp-header]。
+这里的 `ACK=0` 指 ACK 标志未置位，确认号字段因此无效。SYN 可以携带**最大报文段长度**（Maximum Segment Size，MSS）选项，用来通告本端可接收的单个 TCP 报文段的数据长度上限。MSS 只计 TCP 数据，带此选项的 SYN 仍可以没有载荷，增加的是 TCP 头的长度[^mss]；路径上的 [MTU 与 MSS 预算](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)在第八篇继续展开。时序图中的纯 ACK 也有自己的 TCP 头[^tcp-header]。
 
 ### 连接关闭：FIN、半关闭与 TIME-WAIT
 
-TCP 的两个方向可以分别结束。调用 `shutdown(Shutdown::Write)` 会关闭写方向。**结束标志**（Finish，`FIN`）在该方向先前排队的字节之后占据一个序号，表示发送方已无后续数据。对端应用先读完此前的字节，再用非空缓冲区读取时会读到 EOF[^shutdown][^1]。本端仍可以接收对方的响应，这称为**半关闭**（Half-Close）。正常关闭常画成四段报文，但 ACK 与 FIN 可以合并，也存在同时关闭，不能要求每次抓包都恰好出现四个包。
+TCP 的两个方向可以分别结束。调用 `shutdown(fd, SHUT_WR)` 会关闭写方向。**结束标志**（Finish，`FIN`）在该方向先前排队的字节之后占据一个序号，表示发送方已无后续数据。对端应用先读完此前的字节，再用非空缓冲区读取时会读到 EOF[^shutdown][^1]。本端仍可以接收对方的响应，这称为**半关闭**（Half-Close）。正常关闭常画成四段报文，但 ACK 与 FIN 可以合并，也存在同时关闭，不能要求每次抓包都恰好出现四个包。
 
-在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 `TIME-WAIT`。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待为**最大报文段生存时间**（Maximum Segment Lifetime，MSL）的两倍，用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。
+在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 `TIME-WAIT`。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待为**最大报文段生存时间**（Maximum Segment Lifetime，MSL）的两倍，用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。工程上，服务端重启监听原端口常因仍有旧连接处于 `TIME-WAIT` 而遇到 `EADDRINUSE`：为此监听前常配置 `SO_REUSEADDR` 允许重新绑定仍被 `TIME-WAIT` 占用的端口；而 `SO_REUSEPORT` 则是另一种允许多个套接字同时绑定相同地址和端口以分担接入负载的选项，两者作用不同。
 
-```mermaid title="TCP 四段关闭：两个方向分别结束" description="A 先关闭写方向，B 先单独确认，稍后才关闭自己的写方向。自上而下读四段控制报文，间距不表示耗时。半关闭期间 B 仍可向 A 发送数据。图中假设这期间无额外数据。"
+```mermaid title="TCP 四段关闭：两个方向分别结束" description="A 先关闭写方向，B 先单独确认，稍后才关闭自己的写方向。初始状态标在参与者名下，自上而下读四段控制报文，间距不表示耗时。半关闭期间 B 仍可向 A 发送数据。图中假设这期间无额外数据。"
 sequenceDiagram
- participant A as 端点 A
- participant B as 端点 B
- Note over A,B: ESTABLISHED
+ participant A as 端点 A<br/>初始：ESTABLISHED
+ participant B as 端点 B<br/>初始：ESTABLISHED
  A->>B: FIN+ACK · Seq=m · Ack=n
  Note over A: FIN-WAIT-1
  Note over B: CLOSE-WAIT
@@ -113,6 +110,8 @@ sequenceDiagram
 
 ## TCP 的序号、确认与重传
 
+### 序号、累计确认与重传机制
+
 TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
 - **累计确认**（Cumulative ACK）：ACK 序号表示下一个期望的字节序号，其前面的字节已经连续收到。确认由 TCP 接收端产生，不代表接收应用已经处理数据[^1]。
@@ -120,7 +119,7 @@ TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 - **重传超时**（Retransmission Timeout，RTO）：发送端根据**往返时延**（Round-Trip Time，RTT）测量估算超时阈值，超时后重传并按规范退避；并不是每个报文段都有一个彼此独立的简单闹钟[^rto]。
 - **快速重传**（Fast Retransmit）：RFC 5681 描述的经典算法在收到三个重复 ACK 后重传疑似丢失的段。重复 ACK 是推断线索，并非丢包的绝对证明，现代实现也可能采用其他丢失检测机制[^3]。
 
-把这些字段放进具体报文。沿用[第三篇无 NAT 的路由实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：A 为 `192.168.1.10:50001`，B 为 `198.51.100.20:443`，两端 TCP 已建立。假设 A 下一个发送序号为 `1001`，B 下一个发送序号为 `7001`，接下来只有 A 向 B 发送数据。
+把这些字段放进具体报文。沿用第三篇中[无 NAT 的路由实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：A 为 `192.168.1.10:50001`，B 为 `198.51.100.20:443`，两端 TCP 已建立。假设 A 下一个发送序号为 `1001`，B 下一个发送序号为 `7001`，接下来只有 A 向 B 发送数据。
 
 ```mermaid title="TCP 数据、累计确认与超时重传" description="已建立的连接，使用绝对示例序号。虚线标记途中丢失的报文，B 未收到。超时前没有后续数据，本例由 RTO 触发重传。各段均置 ACK 标志，Len 只计 TCP 载荷，间距不代表耗时。"
 sequenceDiagram
@@ -128,7 +127,7 @@ sequenceDiagram
  participant B as B · 端口 443
  A->>B: Seq=1001 · Ack=7001 · Len=100
  B->>A: Seq=7001 · Ack=1101 · Len=0
- A-->>B: 途中丢失 · Seq=1101 · Len=60
+ A-->>B: 途中丢失 · Seq=1101<br/>Ack=7001 · Len=60
  Note over A: 未收到确认，RTO 到期
  A->>B: 重传 Seq=1101 · Ack=7001 · Len=60
  B->>A: Seq=7001 · Ack=1161 · Len=0
@@ -138,16 +137,38 @@ sequenceDiagram
 
 每个 A → B 包的 IP 头仍为 `192.168.1.10 → 198.51.100.20`，B → A 则相反；当前链路的 MAC 地址随路由转发而变化。中间路由器不因为转发数据就替 B 产生 TCP ACK。这个确认说明 B 的 TCP 已连续收到对应字节，不说明 B 的应用已经读取或处理；重传也不要求重新使用原来的 IP 标识、TTL或以太网帧。
 
+### 用 TCB 的字段追踪发送进度
+
+下例截取 RFC 9293 定义的三个 TCB 变量。假设 A 已收到对首段的 `Ack=1101`，随后发出的 60 字节段在途中丢失。这个时刻的发送状态可以写成[^tcb]：
+
+```c
+#include <stdint.h>
+
+struct TcpSequenceState {
+    uint32_t snd_una;  // Oldest unacknowledged sequence number.
+    uint32_t snd_nxt;  // Next sequence number for new data.
+    uint32_t rcv_nxt;  // Next expected sequence number from the peer.
+};
+
+const struct TcpSequenceState sender_after_loss = {
+    .snd_una = 1101,  // The first byte not yet acknowledged.
+    .snd_nxt = 1161,  // The next new byte follows the 60 already sent.
+    .rcv_nxt = 7001,  // The peer has sent only ACKs since the handshake.
+};
+```
+
+重传从 `1101` 开始，沿用原序号；收到 `Ack=1161` 才把 `snd_una` 推进到 `1161`。两端各有一份 TCB，连接状态、窗口和重传队列还要另行保存。示例取值未跨越序号回绕点；实际 32 位模 $2^{32}$ 空间采用半空间比较（即有符号差 `(int32_t)(b - a) > 0` 或无符号距离小于 $2^{31}$）判断先后，并在高速链路下借助 RFC 7323 时间戳与 **PAWS**（Protection Against Wrapped Sequences）防止旧回绕报文被误认[^1][^window]。
+
 ## TCP 的流量控制与拥塞控制
 
-**流量控制**（flow control）保护接收端。接收端通告**接收窗口**（receive window，`rwnd`），告知发送端当前可接受的序号范围；应用迟迟不读，窗口可能收缩至零。窗口和接收缓冲区相关，但不宜把每次通告值机械地等同于某个工具显示的空闲缓冲字节数[^1]。
+**流量控制**（flow control）保护接收端。接收端通告**接收窗口**（receive window，`rwnd`），告知发送端当前可接受的序号范围；应用迟迟不读，窗口可能收缩至零。窗口和接收缓冲区相关，但不宜把每次通告值机械地等同于某个工具显示的空闲缓冲字节数[^1]。此外，TCP 首部的窗口字段只有 16 位（最大 65,535 字节），现代长肥管道要在建连 SYN 阶段协商 RFC 7323 **窗口缩放**（Window Scale）选项才能突破这一上限[^window]。
 
-**拥塞控制**（congestion control）约束发送端给网络施加的负载。发送端维护**拥塞窗口**（congestion window，`cwnd`），根据 ACK 和检测到的丢包等反馈调整发送空间。若双方协商了经典**显式拥塞通知**（Explicit Congestion Notification，ECN），支持 ECN 的路由器可以标记 IP 包来通知拥塞，而不必丢掉这一个包；接收方再通过 TCP ACK 把标记反馈给发送方[^ecn]。RFC 5681 描述慢启动、拥塞避免、快速重传与快速恢复；它是经典机制的依据，不代表所有实现都只运行这一套算法[^3]。
+**拥塞控制**（congestion control）约束发送端给网络施加的负载。发送端维护**拥塞窗口**（congestion window，`cwnd`），根据 ACK 和检测到的丢包等反馈调整发送空间。经典机制包含两个基本阶段：初始或超时后的**慢启动**以近似指数速率扩窗（每收到一个有效新 ACK 约增加 1 个 SMSS，直到触及慢启动阈值 `ssthresh` 或发生丢包）；随后的**拥塞避免**采用 **AIMD**（和式增加、乘式减小：约每 RTT 增加 1 个 SMSS，检测到丢包后把窗口按比例折减）[^3]。若双方协商了经典**显式拥塞通知**（Explicit Congestion Notification，ECN），支持 ECN 的路由器可以标记 IP 包来通知拥塞，而不必丢掉这一个包；接收方再通过 TCP ACK 把标记反馈给发送方[^ecn]。RFC 5681 描述慢启动、拥塞避免、快速重传与快速恢复；它是经典机制的依据，不代表所有实现都只运行这一套算法[^3]。
 
-在简化的窗口模型中，允许存在的未确认在途数据量受 $\min(\text{cwnd}, \text{rwnd})$ 约束；已有在途数据会占用额度，并不是每收到一个 ACK 都能重新发送一个完整窗口。这里限制的是传输中的序号范围，不规定应用每次 `read` 的缓冲区大小或返回多少字节。应用供数、发送缓冲与发送节奏还会进一步影响吞吐。[第八篇的带宽时延积](/posts/networking/network-diagnostics-performance-troubleshooting/#bdp-与单条-tcp-连接的吞吐边界)会用这条关系解释“带宽充足但单连接跑不满”。
+在简化的窗口模型中，允许存在的未确认在途数据量受 $\min(\text{cwnd}, \text{rwnd})$ 约束；已有在途数据会占用额度，并不是每收到一个 ACK 都能重新发送一个完整窗口。这里限制的是传输中的序号范围，不规定应用每次 `read` 的缓冲区大小或返回多少字节。应用供数、发送缓冲与发送节奏还会进一步影响吞吐。第八篇的[带宽时延积](/posts/networking/network-diagnostics-performance-troubleshooting/#bdp-与单条-tcp-连接的吞吐边界)会用这条关系解释“带宽充足但单连接跑不满”。
 
 :::note[BBR 改变拥塞估计，不取消其他限制]
-丢包型算法在某些大缓冲路径上可能形成较长排队。**BBR**（Bottleneck Bandwidth and Round-trip propagation time）估计瓶颈带宽和往返传播时延来指导发送，具体效果取决于算法版本、竞争流量与路径条件，不能据此承诺开启后必然更快。即使拥塞控制更适合当前路径，也不能突破接收窗口不足或应用供数过慢的限制[^bbr]。
+丢包型算法在某些大缓冲路径上可能形成较长排队。**BBR 算法**（Bottleneck Bandwidth and Round-trip propagation time，BBR）估计瓶颈带宽和往返传播时延来指导发送，具体效果取决于算法版本、竞争流量与路径条件，不能据此承诺开启后必然更快。即使拥塞控制更适合当前路径，也不能突破接收窗口不足或应用供数过慢的限制[^bbr]。
 :::
 
 常见拥塞控制的区别在于怎样估计和使用网络容量，而不是改变 TCP 的字节流服务：
@@ -160,113 +181,240 @@ sequenceDiagram
 
 ## Socket 接口与内核缓冲区契约
 
-第一篇的[Socket 边界](/posts/networking/layered-architecture-packet-journey/#操作系统边界socket-与网络接口)说明了应用怎样把字节交给操作系统。通过普通 TCP Socket，应用读写的是内核 TCP 处理过的连接字节流。通过[第三篇的 TUN 虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)，用户态程序读写的是带 IP 头的包。下图沿一条 TCP 连接追踪发送应用与接收应用之间的字节交付。
+第一篇的 [Socket 边界](/posts/networking/layered-architecture-packet-journey/#操作系统边界socket-与网络接口)说明了应用怎样把字节交给操作系统。通过普通 TCP Socket，应用读写的是内核 TCP 处理过的连接字节流。通过第三篇的 [TUN 虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)，用户态程序读写的是带 IP 头的包。下图沿一条 TCP 连接追踪发送应用与接收应用之间的字节交付。
 
 ```mermaid mobile-direction="TB" title="TCP 字节从发送应用到接收应用" description="实线表示单向字节流的交付路径，虚线表示反向的 TCP 累计确认。write 成功只表示本地接受了字节；接收端 TCP 不必等应用 read 才能确认。图不规定 ACK 和 read 的先后，也不表示一次写入对应一次读取。"
 flowchart LR
  subgraph local[发送端]
-  direction TB
   sender["发送应用"] -->|write / send| send_buffer["本端 TCP<br/>发送缓冲"]
  end
  subgraph remote[接收端]
-  direction TB
   receive_buffer["对端 TCP<br/>接收缓冲"] -->|read / recv| receiver["接收应用"]
  end
  send_buffer -->|TCP 数据经 IP 交付| receive_buffer
- receive_buffer -.->|TCP 累计 ACK| send_buffer
+ send_buffer <-.-|TCP 累计 ACK| receive_buffer
+ class sender,receiver actor
+ class send_buffer,receive_buffer resource
 ```
 
 `write`/`send` 成功返回 `n`，只说明本次调用接受了前 `n` 个字节；在普通缓冲式 TCP 实现中，这通常对应本机发送缓冲区的接纳，并不证明这些字节已经发出[^send-man]。[累计 ACK](#tcp-的序号确认与重传)确认的是对端 TCP 已连续收到相应的字节，不说明对端应用是否调用了 `read`。就算 `read` 已经把字节交给应用，也无法据此判断请求是否已处理或已提交。这个区别与并发系列中[消息入队和处理完成](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)相同：如果发送方需要知道处理结果，要等应用协议定义的响应。
 
-### 短读、短写、EOF 与 WouldBlock
+### POSIX C 怎样保存套接字地址
 
-Rust 标准库的 `Read`、`Write` 和 `TcpStream` 文档给出几项必须单独处理的结果[^read][^write][^5]：
+Beej 的 Socket 指南把三个角色分开：`getaddrinfo` 通过 `struct addrinfo` 返回候选地址链表，`sockaddr_in` 和 `sockaddr_in6` 存各自地址族的字段，`sockaddr_storage` 提供容纳不同地址族的通用空间[^beej-socket]。`struct sockaddr *` 是部分 Socket API 接收地址的通用指针类型，仍要配合长度使用。
 
-| 操作结果 | 应怎样解释 |
-| --- | --- |
-| `read` 返回 `0 < n < buf.len()` | 合法的短读；只处理 `buf[..n]`，不能据此判断消息结束 |
-| `write` 返回 `n < data.len()` | 合法的短写；后续需要继续写剩余部分 |
-| 对 TCP 使用非空缓冲区，`read` 返回 `0` | 接收方向到达 EOF；仍可能可以向对方发送 |
-| 非阻塞读写返回 `WouldBlock` | 暂时不能推进，应等待相应就绪事件；不是 EOF |
-| 读写返回错误 | 按错误处理连接状态，不能当作成功或消息边界 |
+```c
+#define _POSIX_C_SOURCE 200809L
 
-`write_all` 会循环写入，直到全部接受或报错；`read_exact` 会尝试填满指定缓冲区。它们方便实现已知长度的协议字段，但错误不会撤销此前已完成的部分读写，`read_exact` 也不负责判断一个任意业务消息究竟有多长。
+#include <netdb.h>
+#include <netinet/in.h>
+#include <string.h>
+#include <sys/socket.h>
 
-**背压**会沿缓冲传导：对端应用不读，接收窗口可能变为零；本端发送缓冲随后可能耗尽，阻塞写入会等待，非阻塞写入则可能短写或返回 `WouldBlock`。TCP 必须支持**零窗口探测**（Zero-Window Probing）：即使窗口为零，发送端仍可用一个新字节（若有）或重传来探测，接收端用 ACK 报告当前窗口。这样，即使窗口重新开放的通知丢失，发送方也能发现窗口再次可用[^zero-window]。
+struct SocketEndpoint {
+    struct sockaddr_storage address;
+    socklen_t length;
+};
 
-### 运行一次半关闭：发送结束后继续接收
+// Select the first IPv4/IPv6 TCP candidate. Returns 0 or a getaddrinfo error code.
+int first_tcp_endpoint(const char *host, const char *service,
+                       struct SocketEndpoint *endpoint) {
+    if (endpoint == NULL) {
+        return EAI_FAIL;
+    }
 
-下面的完整程序在本机终端运行，只连接回环地址，不访问外网。客户端连续写两段字节后关闭发送方向。服务端每次调用 `read` 时传入一个 5 字节的用户态缓冲区，循环累积读到的字节，直到 EOF，再发送响应。这个缓冲区的大小只限制单次读取的上限，内核的 TCP 接收缓冲区另有配置。
+    // Query both IPv4 and IPv6 stream endpoints while avoiding duplicate socktypes.
+    struct addrinfo hints = {
+        .ai_family = AF_UNSPEC,
+        .ai_socktype = SOCK_STREAM,
+        .ai_protocol = IPPROTO_TCP,
+    };
+    struct addrinfo *results = NULL;
+    int status = getaddrinfo(host, service, &hints, &results);
+    if (status != 0) {
+        return status;
+    }
 
-```rust frame="code"
-use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::thread;
-use std::time::Duration;
-
-fn main() -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let addr = listener.local_addr()?;
-    println!("server listening on {addr}");
-
-    let server = thread::spawn(move || -> io::Result<()> {
-        let (mut stream, _) = listener.accept()?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        let mut received = Vec::new();
-        let mut buf = [0_u8; 5];
-        loop {
-            match stream.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => received.extend_from_slice(&buf[..n]),
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
-            }
+    status = EAI_FAMILY;
+    for (const struct addrinfo *entry = results; entry; entry = entry->ai_next) {
+        if ((entry->ai_family == AF_INET || entry->ai_family == AF_INET6) &&
+            entry->ai_addr != NULL &&
+            entry->ai_addrlen <= sizeof endpoint->address) {
+            // Zero padding bytes and copy out so the endpoint outlives freeaddrinfo().
+            *endpoint = (struct SocketEndpoint){0};
+            memcpy(&endpoint->address, entry->ai_addr, entry->ai_addrlen);
+            endpoint->length = entry->ai_addrlen;
+            status = 0;
+            break;
         }
-        assert_eq!(received, b"first-frame|second-frame");
-        println!("server received {} bytes, then EOF", received.len());
-        stream.write_all(b"response after EOF")?;
-        stream.shutdown(Shutdown::Write)?;
-        Ok(())
-    });
-
-    let mut client = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
-    client.set_read_timeout(Some(Duration::from_secs(5)))?;
-    client.set_write_timeout(Some(Duration::from_secs(5)))?;
-    client.write_all(b"first-frame|")?;
-    client.write_all(b"second-frame")?;
-    client.shutdown(Shutdown::Write)?;
-
-    let mut response = String::new();
-    client.read_to_string(&mut response)?;
-    assert_eq!(response, "response after EOF");
-    println!("client received: {response}");
-    server.join().expect("server thread panicked")?;
-    Ok(())
+    }
+    freeaddrinfo(results);
+    return status;
 }
 ```
 
-将上面的程序保存为 `tcp_half_close.rs`，在该文件所在目录打开本机终端，编译后运行：
+例如传入 `"127.0.0.1", "443"` 得到 IPv4 地址，传入 `"::1", "443"` 得到 IPv6 地址。这里复制地址和实际长度，使结果能在释放候选链表之后继续使用。地址结构内的端口已经是网络字节序。此函数只选一个候选供检查；实际连接应按候选的地址族、套接字类型和协议创建 Socket，并在连接失败时尝试合适的其他候选[^beej-socket]。
+
+### 短读、短写、EOF 与暂不可用
+
+在 POSIX Socket 上，`recv` 和 `send` 返回实际推进的字节数，失败时返回 `-1`，再检查 `errno`[^udp-api][^send-man]。
+
+| 操作结果 | 应怎样解释 |
+| --- | --- |
+| `recv(fd, buf, capacity, 0)` 返回 `0 < n < capacity` | 短读，只处理缓冲区的前 `n` 字节 |
+| `send(fd, data, length, 0)` 返回 `0 < n < length` | 短写，下次从 `data + n` 继续 |
+| TCP 上使用非空缓冲区，`recv` 返回 `0` | 接收方向到达 EOF，仍可能可以发送 |
+| 非阻塞读写失败，`errno` 为 `EAGAIN` 或 `EWOULDBLOCK` | 暂时不能推进，等待对应的读或写就绪（可移植代码两者均须判断） |
+| 读写失败，`errno` 为 `EINTR` | 在尚未推进任何字节前被信号中断，可安全重试（`connect` 遇 `EINTR` 须改由 `poll`/`select` 检查 `SO_ERROR`） |
+
+应用需要按协议判断消息是否收齐。累积读取固定长度字段时，短读继续补齐，提前遇到 EOF 则表示字段不完整。通过 `fcntl` 为套接字开启 `O_NONBLOCK` 进入非阻塞模式后，遇到 `EAGAIN` / `EWOULDBLOCK` 不能空转忙等，而应借助 `poll`、`epoll`（Linux）或 `kqueue`（macOS/BSD）等 I/O 多路复用等待可读或可写事件就绪。
+
+向对端已关闭或复位（`RST`）的 TCP Socket 继续写入时，内核默认发送 `SIGPIPE` 信号终止进程。除了进程级 `signal(SIGPIPE, SIG_IGN)` 把错误转为返回 `-1` 且 `errno == EPIPE`，工程上更细粒度的隔离方式包括：Linux 在单次调用传 `send(..., MSG_NOSIGNAL)`，macOS/BSD 对套接字设置 `setsockopt(..., SOL_SOCKET, SO_NOSIGPIPE, ...)`[^send-man]。
+
+**背压**（backpressure）会沿缓冲传导：对端应用不读，接收窗口可能变为零；本端发送缓冲随后可能耗尽，阻塞写入会等待，非阻塞写入则可能短写或返回 `EAGAIN` / `EWOULDBLOCK`。TCP 必须支持**零窗口探测**（Zero-Window Probing）：即使窗口为零，发送端仍可用一个新字节（若有）或重传来探测，接收端用 ACK 报告当前窗口。这样，即使窗口重新开放的通知丢失，发送方也能发现窗口再次可用[^zero-window]。
+
+### 运行一次半关闭：发送结束后继续接收
+
+下面的 C 程序连接本机 IPv4 回环地址。客户端和服务端在同一进程中各有一个 Socket，轮流读写。`listen(listener, 1)` 让内核维护等待三次握手完成的**半连接队列**（SYN queue）与已完成握手的**全连接队列**（accept queue，上限受 `min(backlog, somaxconn)` 约束），因此 `connect()` 在 `accept()` 之前即可在队列中完成三次握手而不死锁；两个方向的消息都很短，远小于内核套接字缓冲，因而可以先写入缓冲区再从另一端读取。接收端每次只传 5 字节的缓冲区故意触发多次短读，读到 EOF 后才结束校验；客户端用 `shutdown(fd, SHUT_WR)` 发送 FIN 并保留接收方向[^shutdown]。
+
+```c frame="code"
+#define _POSIX_C_SOURCE 200809L
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+static void require_success(int result, const char *operation) {
+    if (result < 0) {
+        perror(operation);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void send_all(int fd, const char *data, size_t length) {
+    while (length > 0) {
+        ssize_t written = send(fd, data, length, 0);
+        // EINTR occurs only before any byte is copied into the kernel buffer.
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        if (written < 0) {
+            perror("send");
+            exit(EXIT_FAILURE);
+        }
+        if (written == 0) {
+            fputs("send made no progress\n", stderr);
+            exit(EXIT_FAILURE);
+        }
+        data += written;
+        length -= (size_t)written;
+    }
+}
+
+static void receive_until_eof(int fd, const char *expected) {
+    size_t remaining = strlen(expected);
+    // Deliberately tiny buffer to force multiple short reads across the byte stream.
+    char buffer[5];
+    for (;;) {
+        ssize_t received = recv(fd, buffer, sizeof buffer, 0);
+        if (received < 0 && errno == EINTR) {
+            continue;
+        }
+        if (received < 0) {
+            perror("recv");
+            exit(EXIT_FAILURE);
+        }
+        if (received == 0 && remaining == 0) {
+            return;
+        }
+        if (received == 0 || (size_t)received > remaining ||
+            memcmp(buffer, expected, (size_t)received) != 0) {
+            fputs("unexpected message or early EOF\n", stderr);
+            exit(EXIT_FAILURE);
+        }
+        expected += received;
+        remaining -= (size_t)received;
+    }
+}
+
+int main(void) {
+    // Bound the single-process demo so a blocking bug cannot hang indefinitely.
+    alarm(5);
+    // Convert writes to a closed/reset peer into EPIPE instead of killing the process.
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+        perror("signal");
+        return EXIT_FAILURE;
+    }
+
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    require_success(listener, "socket");
+    // Leaving sin_port as 0 lets bind() assign an available ephemeral loopback port.
+    struct sockaddr_in address = {.sin_family = AF_INET};
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) != 1) {
+        fputs("invalid loopback address\n", stderr);
+        close(listener);
+        return EXIT_FAILURE;
+    }
+    require_success(bind(listener, (struct sockaddr *)&address, sizeof address), "bind");
+    require_success(listen(listener, 1), "listen");
+
+    socklen_t address_length = sizeof address;
+    require_success(getsockname(listener, (struct sockaddr *)&address, &address_length),
+                    "getsockname");
+    printf("server listening on 127.0.0.1:%u\n", (unsigned)ntohs(address.sin_port));
+
+    int client = socket(AF_INET, SOCK_STREAM, 0);
+    require_success(client, "socket");
+    // Completes handshake inside the kernel accept queue before accept() runs.
+    require_success(connect(client, (struct sockaddr *)&address, address_length), "connect");
+    int server = accept(listener, NULL, NULL);
+    require_success(server, "accept");
+    close(listener);
+
+    // Small payloads fit inside kernel socket buffers; large streams require concurrent I/O.
+    const char first[] = "first-frame|";
+    const char second[] = "second-frame";
+    send_all(client, first, sizeof first - 1);
+    send_all(client, second, sizeof second - 1);
+    // Emit FIN while keeping the read half open to receive the server's reply.
+    require_success(shutdown(client, SHUT_WR), "client shutdown");
+    const char request[] = "first-frame|second-frame";
+    receive_until_eof(server, request);
+    printf("server received %zu bytes, then EOF\n", sizeof request - 1);
+
+    const char reply[] = "response after EOF";
+    send_all(server, reply, sizeof reply - 1);
+    require_success(shutdown(server, SHUT_WR), "server shutdown");
+    receive_until_eof(client, reply);
+    printf("client received: %s\n", reply);
+
+    close(server);
+    close(client);
+    return EXIT_SUCCESS;
+}
+```
+
+在 macOS 或 Linux 上把代码保存为 `tcp_half_close.c`，编译后运行：
 
 ```bash frame="code"
-rustc tcp_half_close.rs -o tcp_half_close
+cc -std=c17 -Wall -Wextra tcp_half_close.c -o tcp_half_close
 ./tcp_half_close
 ```
 
-程序先打印监听地址，便于关联连接表，随后输出：
+程序先打印系统分配的回环监听端口（端口随每次运行变化），随后输出完整结果：
 
 ```text
+server listening on 127.0.0.1:54321
 server received 24 bytes, then EOF
 client received: response after EOF
 ```
 
-读取 24 字节至少需要五次返回数据的 `read`，其中至少一次是短读。每次读到的字节数与网络上的 TCP 分段没有固定对应关系。服务端在 EOF 后发回响应，客户端关闭发送方向后仍能收到它。两端都用 `write_all` 处理写入进度，程序只演示分次读取、EOF 与半关闭。
-
-### 超时与异步取消是另一层契约
-
-示例的读写超时限制阻塞操作的等待，连接超时限制建连。它们不是整个业务请求共享的一份总期限。标准库还说明，读写超时在不同系统可能表现为 `WouldBlock` 或 `TimedOut`；错误分类要结合接口文档，不能只按名称推断[^5]。
-
-Tokio 的 `AsyncReadExt::read_exact`、`AsyncWriteExt::write_all` 则是异步扩展接口。若在 `select!` 中取消它们，可能已有部分字节被读走或写出；重新创建操作不代表从原位置重新开始。对应保证应查 Tokio 文档，不能用同步 `std::net::TcpStream` 的文档代替[^tokio]。并发系列的[取消安全](/posts/concurrency/async-concurrency-task-lifecycle/#取消安全中断后能否重来)与[多阶段期限](/posts/concurrency/async-concurrency-task-lifecycle/#多阶段期限与关停责任)分别讨论如何保留进度及期限归属。
+服务端每次最多收 5 字节，读完 24 字节至少需要五次成功读取。它在读到 EOF 后仍能发送响应，客户端关闭发送方向后也仍能接收。单次读取的长度由当前可读数据和缓冲区容量决定，与应用写入次数或 TCP 分段没有固定对应关系。程序用 5 秒进程级闹钟限制整个实验的等待；第八篇的 [Wireshark 实验](/posts/networking/network-diagnostics-performance-troubleshooting/#wireshark-实验从一条连接验证阶段边界)会直接复用这段回环程序对照抓包报文。
 
 ## QUIC：为什么在 UDP 之上重建可靠传输
 
@@ -276,7 +424,7 @@ UDP 提供端口和数据报承载，一个 UDP 数据报可以包含一个或�
 
 ### 按流交付与队头阻塞
 
-HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后续字节按序交付，即使后续字节属于别的请求，这就是传输层的**队头阻塞**（Head-of-Line Blocking，HOL）。QUIC 为每条流维护偏移量，某条流等重传时，其他数据已经连续的流仍可交付。多条流共享的拥塞控制和连接级资源仍会影响彼此[^4]。
+HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后续字节按序交付，即使后续字节属于别的请求，这就是传输层的**队头阻塞**（Head-of-Line Blocking，HOL）。QUIC 为每条流维护偏移量，某条流等重传时，其他数据已经连续的流仍可交付；不过若同一个丢失的 QUIC 包同时承载了流 1 和流 2 的帧，两条流仍要各自等在新包号中重发，而且多条流共享的拥塞控制与连接级资源仍会彼此影响[^4][^quic-recovery]。RFC 9002 通过包号阈值、时间阈值与**探测超时**（Probe Timeout，PTO）检测丢包，包号永不复用也消除了原包与重传包之间的 RTT 采样二义性[^quic-recovery]。
 
 | 接收端的字节视图 | 首段 | 中段 | 后段 |
 | --- | --- | --- | --- |
@@ -294,11 +442,13 @@ HTTP/2 的多条应用流共享 TCP 字节流。缺失的 TCP 字节会阻止后
 
 ### TLS 握手、应用数据与 0-RTT
 
-QUIC 使用 TLS 1.3 协商密钥并认证对端。TLS 握手消息经 QUIC 的 `CRYPTO` 帧可靠送达，而应用字节流走 `STREAM` 帧，由 QUIC 保护包，不使用[第一篇介绍的 TLS 记录层](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。通常不经 Retry 的完整握手中，客户端可在一次往返后开始发送受 1-RTT 密钥保护的应用数据。满足会话恢复条件时，客户端可以在本次握手的第一次往返完成前尝试发送**早期数据**（early data），这就是 0-RTT 发送。完整握手和身份认证仍需后续交换。早期数据可能被拒绝，还存在重放风险，应用必须限制适用操作[^quic-tls]。
+QUIC 使用 TLS 1.3 协商密钥并认证对端。TLS 握手消息经 QUIC 的 `CRYPTO` 帧可靠送达，而应用字节流走 `STREAM` 帧，由 QUIC 保护包，不使用第一篇介绍的 [TLS 记录层](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。通常不经 Retry 的完整握手中，客户端可在一次往返后开始发送受 1-RTT 密钥保护的应用数据。满足会话恢复条件时，客户端可以在本次握手的第一次往返完成前尝试发送**早期数据**（early data），这就是 0-RTT 发送。即便使用 PSK 会话恢复时不必重发证书，服务端对本次连接的确认、具备前向保密的 1-RTT 密钥协商，以及拒绝或回退条件下的完整握手认证仍依赖后续交换；早期数据还存在重放风险，应用必须限制适用操作，具体安全边界见第六篇的 [TLS 会话恢复与早期数据](/posts/networking/http-evolution-tls-handshake-https/#tls-会话恢复与早期数据)[^quic-tls]。
 
 QUIC 也有部署代价：UDP 可能受路径策略影响，高吞吐实现需要控制用户态处理和系统调用开销。浏览器能否回退到 TCP，还取决于是否存在可用的 HTTP/2 或 HTTP/1.1 服务以及客户端策略。应用如何利用底层流来复用请求，见[HTTP/2 与 HTTP/3 的连接和复用对照](/posts/networking/http-evolution-tls-handshake-https/#http11-到-http3-的连接与复用)。
 
 ## TCP 状态与队列观测实验
+
+前面用程序演示了半关闭；下面通过系统的连接表与统计输出对照正在运行或刚关闭的套接字队列与状态。
 
 ### 实验一：分清队列与累计统计
 
@@ -308,10 +458,10 @@ macOS 可以运行：
 netstat -anv -p tcp
 ```
 
-Linux 对应的基本观察命令是 `ss -tn`；需要扩展 TCP 信息时可使用 `ss -tin`，按该工具的版本解释输出。macOS 上述命令中应区分：
+Linux 对应的基本观察命令是 `ss -tn`（含 `LISTEN` 状态则用 `ss -tln`）；需要扩展 TCP 信息时可使用 `ss -tin`，按该工具的版本解释输出。macOS 上述命令中应区分：
 
 - `Local Address`、`Foreign Address`、`state`：地址、端口与本机连接状态。
-- `Recv-Q`、`Send-Q`：当前接收、发送队列相关数量，具体统计口径依系统及连接状态而定。
+- `Recv-Q`、`Send-Q`：当前接收、发送队列相关数量，具体统计口径依系统及连接状态而定（例如 Linux `ss -tln` 在 `LISTEN` 状态下分别表示当前全连接队列积压与最大 `backlog` 上限；macOS 可对照 `netstat -L` 查看监听队列）。
 - `rxbytes`、`txbytes`：独立的收发字节统计，不能当作未消费或未确认的字节数；连接空闲时也不要求归零[^apple-netstat]。
 
 一个 `ESTABLISHED` 连接可以同时出现队列为 `0`、`rxbytes` 与 `txbytes` 非零：当前没有队列积压，不代表此前没有收发数据。单次队列快照也不能确定拥塞或应用处理过慢，应在同一连接上重复观察，并结合窗口、重传与应用日志。上述 macOS 命令不展示 `cwnd`。
@@ -332,19 +482,24 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 
 ## 总结
 
-- TCP 提供可靠、有序且无消息边界的字节流；UDP 保留数据报边界，接收缓冲不足仍可能截断。
+- TCP 提供可靠、有序且无消息边界的字节流；UDP 保留数据报边界，接收缓冲不足仍可能截断，且可通过 `connect()` 绑定默认四元组接收异步 ICMP 错误。
+- TCP 连接状态机控制建连与关闭，主动关闭方经历 `TIME-WAIT` 保护旧段与末次确认；本机状态与队列仅反映本地视角，不能取代应用确认。
 - 接收窗口保护接收端，拥塞控制约束网络负载；ACK、Socket 写入成功和业务处理完成是不同事件。
-- Socket 程序需要分别处理短读、短写、EOF、暂不可用和错误；半关闭允许发送结束后继续接收。
+- Socket 程序需要分别处理短读、短写、EOF、`EINTR`、非阻塞就绪和 `SIGPIPE`；半关闭允许发送结束后继续接收。
 - QUIC 在 UDP 之上提供独立流与连接迁移机制，路径验证、CID 规则和早期数据的重放边界仍需明确。
 
 端口区分主机上的端点，但应用最初往往只有一个域名。[《计算机网络（五）：DNS 解析、缓存层级与加密查询》](/posts/networking/dns-resolution-caching-encrypted-queries/)先解释域名怎样得到连接所用的地址，再对照 [DNS 的 UDP 查询与 TCP 回退](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，以及加密 DNS 如何选择传输通道。
 
 ## 延伸阅读
 
-- [RFC 9293: Transmission Control Protocol (TCP)](https://www.rfc-editor.org/rfc/rfc9293.html)——系统查阅 TCP 状态机与传输服务
-- [RFC 9000: QUIC](https://www.rfc-editor.org/rfc/rfc9000.html)——查阅 QUIC 流、帧与连接状态
+- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)——系统阅读非阻塞 I/O、`poll`/`select`、UDP `connect` 与服务端并发处理模型
+- [Linux Programmer's Manual: tcp(7)](https://man7.org/linux/man-pages/man7/tcp.7.html)与 [socket(7)](https://man7.org/linux/man-pages/man7/socket.7.html)——查阅 `SO_REUSEADDR`、`SO_REUSEPORT`、`TCP_NODELAY` 与内核队列配置细节
 
-[^1]: 〔RFC〕[RFC 9293 §2.2、§3.3–§3.6、§3.8](https://www.rfc-editor.org/rfc/rfc9293.html#section-2.2)——TCP 字节流、序号、连接状态、建立、复位、关闭与接收窗口。
+[^1]: 〔RFC〕[RFC 9293 §2.2、§3.3–§3.6、§3.8](https://www.rfc-editor.org/rfc/rfc9293.html#section-2.2)——TCP 字节流、模 32 位序号空间比较、连接状态、建立、复位、关闭与接收窗口。
+
+[^nagle]: 〔RFC〕[RFC 9293 §3.7.4](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.7.4)——Nagle 算法合并小报文段的发送条件及对交互延迟的影响。
+
+[^window]: 〔RFC〕[RFC 7323 §2–§5](https://www.rfc-editor.org/rfc/rfc7323.html#section-2)——Window Scale 突破 16 位窗口限制，以及 Timestamps 与 PAWS 防止高速链路上的序号回绕冲突。
 
 [^mss]: 〔RFC〕[RFC 9293 §3.7.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.7.1)——MSS 的通告及其与报文段数据长度的关系。
 
@@ -354,9 +509,9 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 
 [^2]: 〔RFC〕[RFC 768: User Datagram Protocol](https://www.rfc-editor.org/rfc/rfc768.html)——UDP 头部与不保证交付、重复保护或顺序的服务。
 
-[^udp-api]: 〔软件实现〕[Rust `UdpSocket::recv_from`](https://doc.rust-lang.org/std/net/struct.UdpSocket.html#method.recv_from)——单次接收一个数据报，缓冲区不足时超出字节可能被丢弃。
+[^udp-api]: 〔平台与实现〕[Linux `recv(2)`](https://man7.org/linux/man-pages/man2/recv.2.html)与 [POSIX `recv(3p)`](https://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html)——短读、EOF、非阻塞错误、`EINTR`、数据报截断与 `recvmsg` 的 `MSG_TRUNC` 标志（macOS BSD 接口行为一致）。
 
-[^3]: 〔RFC〕[RFC 5681 §3](https://www.rfc-editor.org/rfc/rfc5681.html#section-3)——经典 TCP 拥塞控制与快速重传算法。
+[^3]: 〔RFC〕[RFC 5681 §3](https://www.rfc-editor.org/rfc/rfc5681.html#section-3)——慢启动、拥塞避免（AIMD）、快速重传与快速恢复算法。
 
 [^ecn]: 〔RFC〕[RFC 3168 §5、§6.1](https://www.rfc-editor.org/rfc/rfc3168.html#section-6.1)——经典 ECN 的 IP 层拥塞标记、TCP 两端的协商与反馈。
 
@@ -376,20 +531,14 @@ Linux 可用 `ss -tan state time-wait`。程序中的客户端先关闭写方向
 
 [^cubic]: 〔RFC〕[RFC 9438 §4](https://www.rfc-editor.org/rfc/rfc9438.html#section-4)——CUBIC 的窗口增长函数、拥塞响应及与经典 TCP 算法的关系。
 
-[^5]: 〔软件实现〕[Rust `TcpStream`](https://doc.rust-lang.org/std/net/struct.TcpStream.html)——半关闭、建连与读写超时、非阻塞操作及平台错误差异。
-
-[^read]: 〔软件实现〕[Rust `Read`](https://doc.rust-lang.org/std/io/trait.Read.html)——短读、非空缓冲的零返回值与 `read_exact` 的部分进度。
-
-[^write]: 〔软件实现〕[Rust `Write`](https://doc.rust-lang.org/std/io/trait.Write.html)——短写、`write_all` 的循环与错误边界。
-
-[^tokio]: 〔软件实现〕[Tokio `AsyncReadExt::read_exact`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.read_exact)与[`AsyncWriteExt::write_all`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWriteExt.html#method.write_all)——这两个异步组合操作在 `select!` 中的取消安全限制。
-
 [^apple-netstat]: 〔平台与实现〕Apple `netstat` 的[连接表 `inet.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/inet.c)与[统计输出 `main.c`](https://github.com/apple-oss-distributions/network_cmds/blob/main/netstat.tproj/main.c)——队列使用 socket 缓冲的 `sb_cc`，`rxbytes` / `txbytes` 来自独立的收发统计字段。
 
-[^send-man]: 〔平台与实现〕[Linux Programmer's Manual: send(2)](https://man7.org/linux/man-pages/man2/send.2.html)——`send`/`write` 成功返回仅表示数据已写入内核发送缓冲区，不代表对端已接收或处理。
+[^send-man]: 〔平台与实现〕[Linux `send(2)`](https://man7.org/linux/man-pages/man2/send.2.html)与 [POSIX `send(3p)`](https://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html)——`send`/`write` 成功返回仅表示数据已写入内核发送缓冲区，并说明 `MSG_NOSIGNAL`；macOS 使用 `SO_NOSIGPIPE` 套接字选项。
 
-[^shutdown]: 〔平台与实现〕[Linux Programmer's Manual: shutdown(2)](https://man7.org/linux/man-pages/man2/shutdown.2.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。
+[^shutdown]: 〔平台与实现〕[Linux `shutdown(2)`](https://man7.org/linux/man-pages/man2/shutdown.2.html)与 [POSIX `shutdown(3p)`](https://pubs.opengroup.org/onlinepubs/9699919799/functions/shutdown.html)——`SHUT_WR` 触发 FIN 发送以关闭写方向同时保留读方向（半关闭），与 `close(2)` 递减描述符引用计数的区别。
 
 [^tcp-lifecycle]: 〔RFC〕[RFC 9293 图 5](https://www.rfc-editor.org/rfc/rfc9293.html#figure-5)给出状态机，[图 6](https://www.rfc-editor.org/rfc/rfc9293.html#figure-6)和[图 12–13](https://www.rfc-editor.org/rfc/rfc9293.html#figure-12)分别展示建连、正常关闭与同时关闭的报文交换。
 
 [^tcp-header]: 〔RFC〕[RFC 9293 §3.1](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.1)——TCP 头字段、数据偏移、控制标志与选项。
+
+[^beej-socket]: 〔编程指南〕[Beej’s Guide to Network Programming §3.3、§5.1](https://beej.us/guide/bgnet/html/split/ip-addresses-structs-and-data-munging.html#structs)与[系统调用章节](https://beej.us/guide/bgnet/html/split/system-calls-or-bust.html#getaddrinfo)——地址族、通用存储、候选链表及释放方式。

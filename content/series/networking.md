@@ -26,7 +26,7 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 
 八篇按知识依赖排列。第二至第六篇展开直连示例中的机制，第七篇引入[应用侧连接与代理出站](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)，第八篇把各个通信环节落实到[诊断时可以取得的证据](/posts/networking/network-diagnostics-performance-troubleshooting/#按请求阶段选择观测点)。
 
-需要具备基本命令行经验；Rust 和 Go 程序分别展示 TCP 半关闭与 HTTP CONNECT 转发，Python 标准库用于回环验证和响应计时对照。命令以 macOS 为主，同时给出 Linux（`iproute2` / `ss`）对应写法。实验说明会交代环境前提、观察重点与判断边界，本机输出不必与示例逐字一致。
+示例使用 C17。Socket 实验使用 POSIX 接口，可在 macOS 或 Linux 上用 `cc` 编译。命令以 macOS 为主，并给出 Linux 的对应写法。
 
 ## 覆盖范围与延伸学习
 
@@ -38,7 +38,7 @@ description: "从分层封装、局域网寻址、路由转发与传输控制，
 
 ## 本地实验与平台命令
 
-第二篇的[子网计算](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)、第四篇的[半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)、第七篇的[CONNECT 回环验证](/posts/networking/proxies-tunnels-transparent-interception/#回环验证预读载荷与半关闭)和第八篇的[响应等待对照](/posts/networking/network-diagnostics-performance-troubleshooting/#控制变量实验只改变服务端响应前的等待)均不依赖外网，适合先在本机运行。抓包实验另需捕获权限，并注意接口、过滤器和捕获时机。
+先在本机运行第二篇的[子网计算](/posts/networking/ip-addressing-subnet-lan-delivery/#算清一个-27-子网)和第四篇的[回环半关闭程序](/posts/networking/transport-tcp-udp-socket-quic/#运行一次半关闭发送结束后继续接收)。第八篇的 [Wireshark 实验](/posts/networking/network-diagnostics-performance-troubleshooting/#wireshark-实验从一条连接验证阶段边界)复用同一程序，对照应用输出与 TCP 报文，需要回环捕获权限。第七篇的 [curl 代理对照](/posts/networking/proxies-tunnels-transparent-interception/#命令行验证先确认入站再对照解析位置)依赖已配置的本机代理和可达的目标网站。
 
 Windows 读者可先查第八篇的[平台命令对照](/posts/networking/network-diagnostics-performance-troubleshooting/#平台命令对照)，再回到对应机制。平台命令是功能上的近似对应；Linux 的策略路由、TPROXY 与 Apple Network Extension 有各自的系统边界。
 

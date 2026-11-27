@@ -7,11 +7,11 @@ tags: ["networking"]
 
 上一篇[《计算机网络（一）：协议分层、封装与一次请求的路径》](/posts/networking/layered-architecture-packet-journey/)建立了四层模型，并区分了[主机、交换机与路由器的分工](/posts/networking/layered-architecture-packet-journey/#端到端与逐跳主机交换机与路由器的分工)。本篇把请求离开本机之前的准备补齐。先看接口需要哪些配置，再用这些参数决定要把帧交给谁。
 
-普通业务发包时，主机先按目的 IP 选出下一跳，再在以太网上找到该下一跳的 MAC。本篇按这个顺序从三层的地址与前缀讲到二层的帧交付，再回到 DHCP 和 IPv6 自动配置。二层、三层沿用[第一篇说明的 OSI 层号](/posts/networking/layered-architecture-packet-journey/#为什么需要分层模型)。
+普通业务发包时，主机先按目的 IP 选出下一跳，再在以太网上找到该下一跳的 MAC。本篇按这个顺序从三层的地址与前缀讲到二层的帧交付，再回到 DHCP 和 IPv6 自动配置。二层、三层沿用第一篇说明的 [OSI 层号](/posts/networking/layered-architecture-packet-journey/#为什么需要分层模型)。
 
 ## 接入网络：先认清配置清单
 
-在[第一篇的冷启动场景](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)中，主机在发出第一个帧之前已经有以下配置。
+在第一篇的[冷启动场景](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)中，主机在发出第一个帧之前已经有以下配置。
 
 | 配置项                          | 回答的问题                               | 示例                      |
 | ------------------------------- | ---------------------------------------- | ------------------------- |
@@ -20,13 +20,13 @@ tags: ["networking"]
 | **默认网关**（Default Gateway） | 没有更具体路由时，把包交给哪个下一跳？   | `192.168.1.1`             |
 | DNS 服务器地址                  | 需要查询域名时，把查询交给哪个解析服务？ | `192.168.1.53`            |
 
-**域名系统**（Domain Name System，DNS）提供名字到地址等信息的查询。这里的“DNS 参数”主要指主机配置的解析服务地址：应用要访问 `example.com` 时，可由系统向该服务查询目标 IP；查询返回后，仍需按路由和链路规则发送请求[^dns-config]。DNS 服务器与默认网关可以是不同设备，也可以由同一设备同时提供服务。解析器角色、缓存和浏览器自身的解析选择，见[第五篇的递归与迭代](/posts/networking/dns-resolution-caching-encrypted-queries/#递归与迭代一次查询如何穿越层级)。
+**域名系统**（Domain Name System，DNS）提供名字到地址等信息的查询。这里的“DNS 参数”主要指主机配置的解析服务地址：应用要访问 `example.com` 时，可由系统向该服务查询目标 IP；查询返回后，仍需按路由和链路规则发送请求[^dns-config]。DNS 服务器与默认网关可以是不同设备，也可以由同一设备同时提供服务。解析器角色、本地[缓存层级与解析路径选择](/posts/networking/dns-resolution-caching-encrypted-queries/#缓存层级与-ttl)，见第五篇的[递归与迭代](/posts/networking/dns-resolution-caching-encrypted-queries/#递归与迭代一次查询如何穿越层级)与缓存说明。
 
 下面先假定这些配置已经可用，追踪普通业务数据怎样交付；它们来自手工设置还是自动分配，在[配置获取一节](#主机怎样自动获得网络配置)再解释。
 
 ## IP 地址的作用范围：公网、私网与共享地址
 
-IP 单播地址通常标识网络中的通信接口，而不是设备永久不变的身份。一台主机可以有多张接口，一张接口也可以同时拥有多个地址。IPv4 使用 32 位地址，通常写作 `192.168.1.10`；IPv6 使用 128 位地址，例如文档示例地址 `2001:db8::1`。两者有各自的头部格式、路由和邻居发现机制，排查双栈故障时应分别检查[^delivery][^documentation-addresses]。
+IP 单播地址通常标识网络中的通信接口，而不是设备永久不变的身份。一台主机可以有多个接口，一个接口也可以同时拥有多个地址。IPv4 使用 32 位地址，通常写作点分十进制 `192.168.1.10`；IPv6 使用 128 位地址，例如文档示例地址 `2001:db8::1`。两者有各自的头部格式、路由和邻居发现机制，排查双栈故障时应分别检查[^delivery][^documentation-addresses][^ipv6-basics]。
 
 | 地址类型 | IPv4 示例或范围 | IPv6 对应概念 | 作用范围 |
 | --- | --- | --- | --- |
@@ -44,8 +44,8 @@ IP 单播地址通常标识网络中的通信接口，而不是设备永久不�
 
 | 写法 | 含义 |
 | --- | --- |
-| `0.0.0.0` | 可表示未指定的 IPv4 地址，例如 DHCP 客户端尚未取得地址时的源 IP。在监听套接字配置中，它通常表示绑定所有本地 IPv4 地址 |
-| `0.0.0.0/0` | 默认路由的目的前缀，能匹配任意 IPv4 目的地址，更具体的匹配优先 |
+| `0.0.0.0` / `::` | 分别表示未指定的 IPv4 地址（如 DHCPv4 获取前）与 IPv6 **未指定地址**（`::/128`，如 DAD 探测源地址）；监听套接字中常表示通配绑定本地地址 |
+| `0.0.0.0/0` / `::/0` | 默认路由的目的前缀，分别匹配任意 IPv4 或 IPv6 目的地址，更具体的匹配优先 |
 | `224.0.0.0/4` | IPv4 组播地址范围，目的地址标识接收组 |
 | `255.255.255.255` | IPv4 有限广播地址，限于本地链路，不由路由器转发 |
 
@@ -59,7 +59,7 @@ IP 单播地址通常标识网络中的通信接口，而不是设备永久不�
 
 **子网划分**（Subnetting）就是把一个地址范围按更长的网络前缀分成多个较小范围。前缀覆盖的部分称为**网络位**（Network Bits），用来标识所属子网；剩余部分称为**主机位**（Host Bits），用来区分子网内的地址。**子网掩码**（Subnet Mask）把网络位写成 `1`、主机位写成 `0`。对地址与掩码做**按位与**（Bitwise AND，记作 `&`）时，只有对应的两位都是 `1`，结果才为 `1`，因此网络位被保留，主机位被清零[^subnet]。
 
-主机用**路由表**（Routing Table）选择出接口与**下一跳**（Next Hop，即本次直接交付的同链路目标或网关）。本篇只用到两种结果：**直连路由**（Connected Route）指示在本链路上交付，**默认路由**（Default Route）在没有更具体匹配时指向网关。完整的条目结构与选择规则见[第三篇的路由表与最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由表与最长前缀匹配)。
+主机用**路由表**（Routing Table）选择出接口与**下一跳**（Next Hop，即本次直接交付的同链路目标或网关）。本篇只用到两种结果：**直连路由**（Connected Route）指示在本链路上交付，**默认路由**（Default Route）在没有更具体匹配时指向网关。完整的条目结构与选择规则见第三篇的[路由表与最长前缀匹配](/posts/networking/routing-forwarding-nat-virtual-interfaces/#路由表与最长前缀匹配)。
 
 以下先讨论一张普通局域网接口、直连路由和默认路由的配置：本机是 `192.168.1.10/24`，默认网关是 `192.168.1.1`，没有更具体的路由或策略规则。在这个模型里，由于发送方并不知道目标主机配置了什么掩码，发送方只能用**自己的子网掩码**分别对本机 IP 和目标 IP 做按位与，借此解释目标是否匹配直连路由：
 
@@ -72,7 +72,7 @@ IP 单播地址通常标识网络中的通信接口，而不是设备永久不�
 | 打印机 `192.168.1.50` | `192.168.1.0` | 匹配直连路由，直接交给打印机 |
 | 假想远端 `198.51.100.20` | `198.51.100.0` | 不匹配直连路由，经默认网关转发 |
 
-**实际出接口与下一跳以路由选择结果为准。** 配置地址通常会建立相应的直连路由，因而上面的掩码模型能解释最常见的结果；如果另有 `192.168.1.50/32` 主机路由，目标即使属于这个 `/24`，也可能经另一个网关转发。
+**实际出接口与下一跳以路由选择结果为准**。配置地址通常会建立相应的直连路由，因而上面的掩码模型能解释最常见的结果；如果另有 `192.168.1.50/32` 主机路由，目标即使属于这个 `/24`，也可能经另一个网关转发。
 
 ### 家庭局域网的地址怎样分配
 
@@ -87,7 +87,7 @@ IP 单播地址通常标识网络中的通信接口，而不是设备永久不�
 | `192.168.1.100` 至 `192.168.1.200` | 管理员为 DHCP 动态租约划定的地址池 |
 | `192.168.1.255` | 本子网的定向广播地址，实际收发受设备和防火墙配置影响 |
 
-网关、DHCP 服务器、DNS 服务器和地址池都由网络配置决定。普通以太网局域网的默认网关通常使用本子网内可直达的一个主机地址，例如尚未被占用的 `192.168.1.254` 也可以配置给能转发的路由器。路由器如果同时提供 DNS 转发，主机也可以把 DNS 指向 `192.168.1.1`。DNS 还可以配置为能经路由访问的外部地址。静态地址应避开动态地址池和其他设备已占用的地址[^dns-config][^6]。
+网关、DHCP 服务器、DNS 服务器和地址池都由网络配置决定。普通以太网局域网的默认网关通常使用本子网内可直达的一个主机地址，例如尚未被占用的 `192.168.1.254` 也可以配置给能转发的路由器。路由器如果同时提供 DNS 转发，主机也可以把 DNS 指向 `192.168.1.1`。DNS 还可以配置为能经路由访问的外部地址[^dns-config]。静态地址应避开动态地址池和其他设备已占用的地址[^6]。
 
 访问同网段的打印机时，电脑通过 [ARP](#ipv4-的地址解析arp) 查询 `192.168.1.50` 的 MAC。访问前面的假想远端时，电脑查询的是网关 `192.168.1.1` 的 MAC，并把它填进以太网帧的目的 MAC 字段，帧内数据报的目的 IP 仍是远端地址。广播也分两层，`192.168.1.255` 和 `255.255.255.255` 是目的 IPv4 地址，`ff:ff:ff:ff:ff:ff` 是[目的 MAC 地址](#先区分地址层次再看接收范围)[^delivery]。
 
@@ -132,7 +132,7 @@ flowchart TB
 
 下面这张图把全文的两次判断连起来。先对 `.62` 和 `.64` 分别应用本机的 `/27` 掩码选出下一跳，再查询这一跳的 MAC。下图假设默认网关为本子网内可用的 `192.168.10.33`，邻居缓存尚无可用映射；图中的 [ARP 地址解析](#ipv4-的地址解析arp)用于查询下一跳 IP 对应的 MAC，具体流程在局域网交付一节展开：
 
-```mermaid title="目标 .62 和 .64 怎样选择下一跳" description="本机为 192.168.10.37/27，只有直连路由和经 .33 的默认路由，无策略路由或更具体的路由。箭头表示计算与交付步骤；ARP 用于解析选出的下一跳，IP 目的地址保持为最终目标。.64 不在本机子网内，但能否访问仍取决于网关及后续网络。"
+```mermaid title="目标 .62 和 .64 怎样选择下一跳" description="本机为 192.168.10.37/27，只有直连路由和经 .33 的默认路由，无策略路由或更具体的路由，且邻居缓存尚无映射。箭头表示计算与交付步骤；ARP 用于解析选出的下一跳，IP 目的地址保持为最终目标。.64 不在本机子网内，但能否访问仍取决于网关及后续网络。"
 flowchart TB
  local["本机 .37/27<br/>网络地址 .32"]
  local --> near["目标 .62<br/>62 AND 224 = 32"]
@@ -141,8 +141,9 @@ flowchart TB
  far --> gateway["不同前缀：使用默认路由<br/>ARP 解析网关 .33 的 MAC"]
  direct --> frame1["帧交给目标<br/>目的 IP = .62<br/>目的 MAC = .62 的 MAC"]
  gateway --> frame2["帧交给网关转发<br/>目的 IP = .64<br/>目的 MAC = .33 的 MAC"]
- class direct,frame1 result
- class gateway,frame2 actor
+ class local actor
+ class near,far state
+ class direct,frame1,gateway,frame2 result
 ```
 
 `.64` 不在本机直连子网内，不等于它必然不可达；应由网关及后续路由继续决定交付。不过在把 `192.168.10.64/27` 配成另一个常规子网的网络中，`.64` 本身是网络地址，不能当作普通主机地址；下一子网的常规主机范围是 `.65` 至 `.94`。同一交换机上的设备也可能配置在不同 IP 子网，物理上接在一起并不等于会直接解析对方 MAC。
@@ -158,31 +159,70 @@ flowchart TB
 
 两个 IP 的数字相近并不能说明它们属于同一子网，必须结合前缀长度；前缀越长，固定的网络位越多，包含的地址越少。
 
-下面的 Rust 程序计算子网掩码、网络地址和广播地址，并检查目标是否属于同一前缀。
+下面的 POSIX C 程序把接口配置抽象成 `Ipv4Prefix`：一个 IPv4 地址和一个前缀长度。地址和掩码采用无符号 32 位整数 `uint32_t`，以保证按位与、取反和左移不涉及有符号符号位溢出。用 `inet_pton` 把文本读入 `struct in_addr`，再用 `ntohl` 转为主机字节序的整数做掩码运算。打印时走相反方向，用 `htonl` 和 `inet_ntop` 转回文本[^beej-ip]。
 
-```rust
-use std::net::Ipv4Addr;
+```c
+#define _POSIX_C_SOURCE 200809L
 
-fn main() {
-    let local = Ipv4Addr::new(192, 168, 10, 37);
-    let prefix = 27_u32;
-    assert!(prefix <= 32);
-    let mask = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
-    let network = u32::from(local) & mask;
-    let broadcast = network | !mask;
-    println!("mask={}", Ipv4Addr::from(mask));
-    println!("network={}/{}", Ipv4Addr::from(network), prefix);
-    println!("broadcast={}", Ipv4Addr::from(broadcast));
+#include <arpa/inet.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-    for target in [
-        Ipv4Addr::new(192, 168, 10, 62),
-        Ipv4Addr::new(192, 168, 10, 64),
-    ] {
-        let same_prefix = u32::from(target) & mask == network;
-        println!("target={target} same_prefix={same_prefix}");
+struct Ipv4Prefix {
+    uint32_t address;
+    unsigned length;
+};
+
+static void print_ipv4(uint32_t address) {
+    // Convert host-order integer back to network byte order for inet_ntop.
+    struct in_addr wire = {.s_addr = htonl(address)};
+    char text[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &wire, text, sizeof text) == NULL) {
+        exit(EXIT_FAILURE);
     }
+    fputs(text, stdout);
+}
+
+int main(void) {
+    struct in_addr local;
+    // inet_pton returns 1 on success, 0 on invalid input, -1 on unsupported family.
+    if (inet_pton(AF_INET, "192.168.10.37", &local) != 1) {
+        return EXIT_FAILURE;
+    }
+    struct Ipv4Prefix prefix = {.address = ntohl(local.s_addr), .length = 27};
+    if (prefix.length > 32) {
+        return EXIT_FAILURE;
+    }
+
+    // Guard length == 0 because shifting a 32-bit uint32_t by 32 bits is UB in C17.
+    uint32_t mask = prefix.length == 0 ? 0 : UINT32_MAX << (32 - prefix.length);
+    uint32_t network = prefix.address & mask;
+
+    fputs("mask=", stdout);
+    print_ipv4(mask);
+    fputs("\nnetwork=", stdout);
+    print_ipv4(network);
+    printf("/%u\nbroadcast=", prefix.length);
+    // Upper bound serves as a subnet broadcast address only on conventional <= /30 subnets.
+    print_ipv4(network | ~mask);
+    putchar('\n');
+
+    const char *targets[] = {"192.168.10.62", "192.168.10.64"};
+    for (size_t i = 0; i < sizeof targets / sizeof targets[0]; ++i) {
+        struct in_addr target;
+        if (inet_pton(AF_INET, targets[i], &target) != 1) {
+            return EXIT_FAILURE;
+        }
+        uint32_t target_network = ntohl(target.s_addr) & mask;
+        printf("target=%s same_prefix=%s\n", targets[i],
+               target_network == network ? "true" : "false");
+    }
+    return EXIT_SUCCESS;
 }
 ```
+
+把代码保存为 `ipv4_prefix.c`，在 macOS 或 Linux 用 `cc -std=c17 ipv4_prefix.c -o ipv4_prefix` 编译，再运行 `./ipv4_prefix`。`/0` 单独返回零掩码，避免把 32 位整数左移 32 位。`broadcast` 一行解释本例的 `/27`，`/31` 与 `/32` 的地址用途见下一节。
 
 预期输出如下。
 
@@ -211,9 +251,15 @@ IPv4 前缀长度为 $n$ 时，剩余的 $32-n$ 位给出 $2^{32-n}$ 个地址�
 
 在 `/31` 点对点链路上，两个地址都可分配给端点[^31]。例如 `192.0.2.10/31` 的端点可以是 `.10` 和 `.11`。上面程序仍能计算 `/31` 的位范围，但打印为 `broadcast` 的范围上界在这种链路中不具有子网广播语义。`/32` 则固定全部 32 位，主机路由用它精确匹配一个目的地址[^3]。IPv6 没有 IPv4 式的子网广播地址[^delivery]。
 
+### IPv6 地址表示法与 /64 前缀原则
+
+IPv6 地址共 128 位，写成 8 组 16 位十六进制数（以冒号分隔）。每组可省略前导零；整串中连续全零的若干组可用一个 `::` 压缩（一个地址里至多出现一次 `::`，否则无法唯一还原）。例如后文示例 `2001:db8::12:3456` 展开后是 `2001:0db8:0000:0000:0000:0000:0012:3456`[^ipv6-basics]。
+
+普通以太网局域网的 IPv6 前缀通常固定划分为 `/64`（高 64 位为网络前缀，低 64 位为**接口标识符**，Interface Identifier，IID），而不是像 IPv4 那样按设备数量切出 `/26`、`/27` 来节省地址。原因有三点：一是无状态自动配置（SLAAC）要求 64 位 IID 空间；二是 IPv6 没有子网广播地址，也不必扣除广播地址，而全零 IID 保留给子网路由器任播地址（Subnet-Router Anycast）；三是点对点路由器互联链路在现代部署中常采用 `/127`，以避免 `/64` 上巨大空间带来的邻居表耗尽风险[^ipv6-basics][^ipv6-p2p]。
+
 ## 局域网交付：MAC 地址、交换机与 ARP / NDP
 
-上一节用三层 IP 前缀判断下一跳是目标自身还是网关；现在进入二层，解决“怎样在当前链路把帧送给这个下一跳”。[以太网帧的封装图](/posts/networking/layered-architecture-packet-journey/#以太网帧的封装与结构)展示了帧头、内部的 IP 数据报和帧尾校验。这里的以太网帧头使用 48 位 MAC 地址，因此主机需要把“下一跳 IP”关联到链路层地址。这里讨论以太网式局域网；点对点或 TUN 接口不一定需要后文的 ARP 地址解析。
+上一节用三层 IP 前缀判断下一跳是目标自身还是网关；现在进入二层，解决“怎样在当前链路把帧送给这个下一跳”。[以太网帧的封装图](/posts/networking/layered-architecture-packet-journey/#以太网帧的封装与结构)展示了帧头、内部的 IP 数据报和帧尾校验。这里的以太网帧头使用 48 位 MAC 地址，因此主机需要把“下一跳 IP”关联到链路层地址。这里讨论以太网式局域网；点对点或 [TUN 接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#tun-与-tap用户态读写哪些数据)不一定需要后文的 ARP 地址解析。
 
 IP 地址服务于跨网寻址，MAC 地址服务于当前二层链路的帧交付。MAC 可以由硬件提供，也可以由系统配置或为隐私而随机生成。经过路由器时，旧链路头被移除，下一段链路重新封装，原主机的 MAC 不会作为端到端地址一路保留。
 
@@ -242,7 +288,7 @@ IP 广播与组播的范围由相应协议规定，不能一概解释为“当�
 | 广播 MAC                   | 在该广播域内向除入端口外的其他可转发端口复制转发         |
 | 组播 MAC                   | 按组播转发表及配置决定出口；缺少相应状态时也可能泛洪     |
 
-因此，“单播”不保证交换机只向一个端口发送，“组播”也不保证其他端口绝不会看到帧。目的地址说明预期接收范围，实际复制到哪些端口还取决于交换机的表项和配置[^flooding]。
+因此，“单播”不保证交换机只向一个端口发送，“组播”也不保证其他端口绝不会看到帧。目的地址说明预期接收范围，实际复制到哪些端口还取决于交换机的表项和配置[^flooding]。交换机的 MAC 表项还会按计时器老化；设备更换端口或重启长时间未通信后表项失效，都会重新触发学习或未知单播泛洪。
 
 ### IPv4 的地址解析：ARP
 
@@ -317,7 +363,7 @@ sequenceDiagram
 | IPv4 目的地址 | `192.168.1.11` | `198.51.100.20` |
 | IPv4 源地址 | `192.168.1.10` | `192.168.1.10` |
 
-发往远端的帧先交给网关，是因为目的 MAC 填了网关的地址；网关取出里面的 IPv4 包后，仍按 `198.51.100.20` 继续选路。A 无需取得远端服务器的 MAC。交换机只在当前 VLAN 内交付这个帧，经过路由器之后的下一份帧见[第三篇的三跳包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)。
+发往远端的帧先交给网关，是因为目的 MAC 填了网关的地址；网关取出里面的 IPv4 包后，仍按 `198.51.100.20` 继续选路。A 无需取得远端服务器的 MAC。交换机只在当前 VLAN 内交付这个帧，经过路由器之后的下一份帧见第三篇的[三跳包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)。
 
 [一次冷启动 HTTPS 访问](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)会先后用到这两种交付方式。若两个映射都未缓存，发 DNS 查询前先对直连解析器 `192.168.1.53` 发 ARP，向远端网站发 SYN 前再对网关 `192.168.1.1` 发 ARP。两次 ARP 都由以太网单独承载，得到的 MAC 分别填入后续 DNS 帧和 SYN 帧的目的 MAC 字段。
 
@@ -327,7 +373,7 @@ sequenceDiagram
 
 | 报文 | 发送方 IP | 目标 IP | 主要用途 |
 | --- | --- | --- | --- |
-| ARP Probe | `0.0.0.0` | 待使用地址 | 使用前检查是否与其他主机冲突 |
+| ARP Probe | `0.0.0.0` | 待使用地址 | 使用前检查是否与其他主机冲突；发送方填 `0.0.0.0` 以免在确认无冲突前污染局域网其他主机的 ARP 缓存 |
 | ARP Announcement | 本机地址 | 同一个本机地址 | 公告地址使用，更新邻居的地址映射 |
 
 两者都使用广播 ARP Request，但字段与阶段不同。公告还可用于使用期间的地址防御；探测成功也不能保证以后不会出现地址冲突。高可用切换时，公告可以帮助邻居更新 IP 到 MAC 的映射，交换机则通过帧的源 MAC 学习所在端口，两种更新不是同一张表。
@@ -344,6 +390,18 @@ IPv6 使用基于 ICMPv6 的**邻居发现协议**（Neighbor Discovery Protocol
 
 NDP 也定义路由器发现和前缀发现。地址自动配置使用其中的 RA 等信息，但 SLAAC 地址生成与重复地址检测的具体规则由另一份规范定义，下面会继续区分。
 
+无论 IPv4 的 ARP 还是 IPv6 的 NDP，邻居缓存项都不是简单的“有或无”，而是有自己的状态生命周期。按照 RFC 4861 的**邻居不可达检测**（Neighbor Unreachability Detection，NUD）模型（Linux `ip neigh` 与 macOS `ndp -an` 也采用类似状态划分）[^5][^neighbor-tools]：
+
+| 状态（macOS `ndp` / Linux） | 含义 | 发送业务包时的行为 |
+| --- | --- | --- |
+| `INCOMPLETE`（`I` / `(incomplete)`） | 已发出请求，尚未收到解析应答 | 缓存待发报文并等待解析结果 |
+| `REACHABLE`（`R`） | 近期收到前向可达性确认 | 直接封装并发送，不额外探测 |
+| `STALE`（`S`） | 已超过 `ReachableTime`，但仍保留旧 MAC | 仍先按旧 MAC 发送，并转入 `DELAY` |
+| `DELAY`（`D`） | 短暂等待上层或对端带来被动确认 | 超时未获确认则进入主动探测 |
+| `PROBE`（`P`） | 正在周期性发送单播 NS 主动确认 | 多次失败后表项失效或删除（Linux 常见 `FAILED`） |
+
+手工配置的静态映射或本机接口自身在工具输出中常标为 `PERMANENT`（`permanent`）。看清这些状态，后面实验里才能分清“有表项”和“当前真的可达”是两回事。
+
 ## 主机怎样自动获得网络配置
 
 现在回到开头的[配置清单](#接入网络先认清配置清单)：这些参数如何到达主机？普通家庭或办公网络往往通过**动态主机配置协议**（Dynamic Host Configuration Protocol，DHCPv4）自动下发 IPv4 地址、子网掩码、网关和 DNS 服务器地址；手工静态配置是另一种来源[^dns-config]。
@@ -357,11 +415,11 @@ NDP 也定义路由器发现和前缀发现。地址自动配置使用其中的 
 | 阶段 | 作用 | 常见交付方式 |
 | --- | --- | --- |
 | Discover | 寻找可用服务器 | 客户端通常广播 |
-| Offer | 提供地址与配置报价 | 服务器按客户端状态、广播标志及中继情况单播或广播 |
+| Offer | 提供地址与配置报价 | 尚未配置可用 IP 的客户端可置位请求中的广播标志（Broadcast Flag），提示服务器或中继按广播或单播返回 |
 | Request | 选择某一服务器的报价 | 选择阶段通常广播，让其他服务器也知道选择结果 |
 | ACK | 确认配置与租约 | 服务器按交付条件单播或广播 |
 
-这是一套消息流程，不能总结为“四步广播”。存在 DHCP 中继时，服务器还可能先把回复发给中继，再由它向客户端交付；续租等状态下的 DHCPREQUEST 也不必广播[^6]。
+这是一套消息流程，不能总结为“四步广播”。存在 DHCP 中继时，服务器还可能先把回复发给中继，再由它向客户端交付；续租等状态下的 DHCPREQUEST 也不必广播。若收到 `DHCPACK` 后的冲突检测发现地址已被占用，客户端可回复 `DHCPDECLINE` 放弃该租约；若服务器拒绝续租请求并返回 `DHCPNAK`，客户端则须停止用址并重新发起 Discover[^6]。
 
 租约带有期限。默认 T1 为租期的 50%，客户端向原服务器单播续租；默认 T2 为 87.5%，仍未成功时进入重新绑定阶段，广播尝试联系其他服务器。服务器可以指定不同的 T1、T2，且须早于租期结束。到期仍未获得 ACK，客户端必须停止使用该地址并重新获取配置[^6]。
 
@@ -401,34 +459,38 @@ RA 还可通过**递归 DNS 服务器选项**（Recursive DNS Server，RDNSS）�
 | 需要的配置 | 主要机制 | 排障时分别检查 |
 | --- | --- | --- |
 | 默认路由 | RA 的路由器信息与 Router Lifetime | 有全局地址不代表存在有效默认路由；RA 源地址是路由器的链路本地地址 |
-| 链路上前缀 | RA 前缀选项的 L 标志 | 判断前缀是否 on-link，与能否生成地址分开 |
-| SLAAC 地址 | RA 前缀选项的 A 标志、地址生成及 DAD | 普通以太网 SLAAC 通常使用 `/64`；A 与 L 不是同一个开关 |
-| DHCPv6 地址或参数 | 有状态地址分配，或 Information-request 等交互 | M/O 标志提供配置线索，客户端支持与策略仍影响行为；不能套用 DHCPv4 DORA |
+| 链路上前缀 | RA 前缀选项的 `L`（On-Link）标志 | 判断前缀是否 on-link，与能否生成地址分开 |
+| SLAAC 地址 | RA 前缀选项的 `A`（Autonomous Address-Configuration）标志、地址生成及 DAD | 普通以太网 SLAAC 通常使用 `/64`；`A` 与 `L` 不是同一个开关 |
+| DHCPv6 地址或参数 | 有状态四步交互（Solicit / Advertise / Request / Reply）或无状态 `Information-request` / `Reply` | RA 中的 `M`（Managed Address Configuration，有状态地址分配）与 `O`（Other Configuration，获取 DNS 等其他参数）标志提供配置线索，客户端使用 UDP 546 端口、服务器使用 UDP 547 端口；不能套用 DHCPv4 DORA |
 | DNS 服务 | RA RDNSS、DHCPv6 或本机配置 | 取得地址、路由和 DNS 是不同的成功条件 |
 
-主机可以先发送路由器请求 RS（Router Solicitation）促使路由器回复 RA，也可以接收周期性 RA。DHCPv6 的地址分配不能代替 RA 的默认路由发现；因此“一律屏蔽 ICMPv6”可能同时破坏邻居解析、路由发现和路径 MTU 反馈[^ra][^dhcpv6]。
+主机可以先向所有路由器组播地址 `ff02::2` 发送**路由器请求**（Router Solicitation，RS）促使路由器回复 RA，也可以接收路由器发往所有节点组播地址 `ff02::1` 的周期性 RA[^ra]。DHCPv6 的地址分配不能代替 RA 的默认路由发现；因此“一律屏蔽 ICMPv6”可能同时破坏邻居解析、路由发现和第八篇说明的[路径 MTU 反馈](/posts/networking/network-diagnostics-performance-troubleshooting/#ipv4-与-ipv6-的路径-mtu-反馈)[^ra][^dhcpv6][^pmtu6]。
 
-一张接口还可同时持有稳定地址与定期更换的**临时地址**（temporary address）。RFC 8981 的临时地址扩展减少长期使用同一接口标识符造成的关联，但不会隐藏网络前缀，也不等于匿名；具体是否生成、优先选择哪个源地址，要看系统策略。不要假定每个 IPv6 地址都由网卡 MAC 推导，也不要把地址变化直接认作另一台设备上线[^privacy]。
+一个接口还可同时持有稳定地址与定期更换的**临时地址**（Temporary Address）。RFC 8981 的临时地址扩展减少长期使用同一接口标识符造成的关联，但不会隐藏网络前缀，也不等于匿名；具体是否生成、优先选择哪个源地址，要看系统策略。不要假定每个 IPv6 地址都由网卡 MAC 推导，也不要把地址变化直接认作另一台设备上线[^privacy]。
 
 地址、前缀、默认网关与 DNS 服务应分别核对。下图只整理配置来源，获得地址之后，主机仍需根据实际选路完成邻居解析或下一跳交付。
 
-```mermaid title="IPv4 与 IPv6 的配置职责" description="独立的 IPv4 和 IPv6 配置路径。DHCPv4 可同时提供地址、前缀、网关和 DNS 参数；IPv6 的 NDP 提供路由器发现和邻居解析，SLAAC 与 DHCPv6 可共同存在，DHCPv6 不通告默认路由。"
+```mermaid title="IPv4 与 IPv6 的配置职责" description="独立的 IPv4 和 IPv6 配置路径。实线表示基础请求或路由器发现主路径，虚线表示依赖通告选项或标志的条件触发。DHCPv4 可同时提供地址、前缀、网关和 DNS 参数；IPv6 的 NDP 提供路由器发现和邻居解析，SLAAC 与 DHCPv6 可共同存在，DHCPv6 不通告默认路由。"
 flowchart TB
- v4["IPv4 主机"] -.->|请求租约| dhcp4["DHCPv4<br/>地址、掩码、网关、DNS"]
- v6["IPv6 主机"] -.->|接收 RA| ndp["NDP 路由器发现<br/>默认路由与链路前缀"]
- ndp -.->|前缀允许自主配置| slaac["SLAAC 生成地址<br/>执行适用的 DAD"]
+ v4["IPv4 主机"] -->|请求租约| dhcp4["DHCPv4<br/>地址、掩码、网关、DNS"]
+ v6["IPv6 主机"] -->|接收或请求 RA| ndp["NDP 路由器发现<br/>默认路由与链路前缀"]
+ ndp -.->|前缀允许自主配置（A 标志）| slaac["SLAAC 生成地址<br/>执行适用的 DAD"]
  ndp -.->|含 RDNSS 选项| dns["配置递归 DNS"]
- v6 -.->|依网络和本机策略| dhcp6["DHCPv6<br/>地址或其他参数"]
+ ndp -.->|M / O 标志线索| dhcp6["DHCPv6<br/>地址或其他参数"]
+ v6 -->|依网络和本机策略| dhcp6
  dhcp6 -.->|含 DNS 参数| dns
+ class v4,v6 actor
+ class ndp state
+ class dhcp4,slaac,dhcp6,dns result
 ```
 
 ## 观察本机寻址与邻居表：实验与边界
 
-先查看实际配置，再解释一次业务请求使用了哪张接口。下面的地址与 MAC 仅用于说明字段，请以实际接口配置为准。这些命令观察本机操作系统，抓包还需要接口权限；它们应在本机终端运行，在线 Playground 无法呈现你的邻居表。后面的 `ping` 会向实际网关发送探测，和前面的纯计算示例有不同的运行条件。
+先查看实际配置，再解释一次业务请求使用了哪个接口。下面的地址与 MAC 仅用于说明字段，请以实际接口配置为准。这些命令观察本机操作系统，抓包还需要接口权限；它们应在本机终端运行，在线 Playground 无法呈现你的邻居表。后面的 `ping` 会向实际网关发送探测，和前面的纯计算示例有不同的运行条件。
 
 ### 实验一：查看接口地址、掩码与 MAC
 
-macOS 可先用 `route -n get default` 查看 IPv4 默认路由的接口，再检查对应接口；`en0` 只是常见示例，不能保证是你的出口。Linux 对应使用 `ip route show default` 和 `ip addr show`。
+macOS 可先用 `route -n get default` 查看 IPv4 默认路由的接口，再检查对应接口；`en0` 只是常见示例，不能保证是你的出口。Linux 对应使用 `ip route show default` 和 `ip addr show`，直接以 CIDR 形式（如 `192.168.1.10/24`）和 `link/ether` 列出前缀与 MAC。
 
 ```bash frame="code"
 route -n get default
@@ -441,7 +503,7 @@ ifconfig en0
 - `inet ... netmask 0xffffff00`：IPv4 地址及 `/24` 掩码，可用来计算该直连前缀。
 - `inet6 fe80::...%en0`：链路本地 IPv6 地址，`%en0` 标识该地址所在的作用域区，用于区分不同链路上可能重复的地址[^link-local]。
 
-默认路由只是起点。VPN、TUN 或主机路由存在时，实际目标可能使用其他接口。查看完整路由表、针对具体目标查询下一跳，以及解释输出字段的方法，统一见[第三篇的路由查询实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)。这些查询读取本机选路结果，不证明目标可达。
+默认路由只是起点。VPN、TUN 或主机路由存在时，实际目标可能使用其他接口。查看完整路由表、针对具体目标查询下一跳，以及解释输出字段的方法，统一见第三篇的[路由查询实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)。这些查询读取本机选路结果，不证明目标可达。
 
 用[家庭局域网的示例](#家庭局域网的地址怎样分配)对照这些输出。macOS 的 `route -n get default` 会把 `192.168.1.1` 显示为 `gateway`，Linux 的 `ip route show default` 则会显示 `default via 192.168.1.1`。接口上的 `192.168.1.10/24` 对应直连前缀 `192.168.1.0/24`，按前缀可算出广播地址 `192.168.1.255`。
 
@@ -457,12 +519,12 @@ ndp -an
 在本例经默认网关访问远端目标的配置中，本机解析的是网关 MAC，通常不会为远端地址建立 ARP 条目。是否需要邻居解析取决于实际选出的下一跳与链路类型；不能把“公网地址永远不会出现在 ARP 表里”当作所有配置下的规则。
 
 :::important[邻居表不是在线设备清单]
-这些命令显示本机已知的邻居状态。未曾需要解析的设备可能不在表中；离线设备的记录也可能尚未老化。表项是否存在、当前状态和设备是否可达，需要分别判断。
+这些命令显示本机已知的邻居状态。未曾需要解析的设备可能不在表中；离线设备的记录也可能尚未老化。表项是否存在、当前状态（如前面的 `R`/`S`/`I`）和设备是否可达，需要分别判断。
 :::
 
 ### 实验三：观察一次 ARP 解析
 
-把接口和网关替换为前面查到的值，再针对该链路抓取 ARP 报文。抓包通常需要管理员权限：
+把接口和网关替换为前面查到的值，再针对该链路抓取 ARP 报文。抓包时建议加上 `-n`（禁用地址和端口反向解析，免得输出卡顿）与 `-e`（打印二层以太网头部），否则看不到帧头的目的 MAC；抓包通常需要管理员权限：
 
 ```bash frame="code"
 sudo tcpdump -i en0 -nn -e arp
@@ -485,13 +547,13 @@ sudo tcpdump -i en0 -nn -e arp
 sudo tcpdump -i en0 -nn -e icmp6
 ```
 
-在另一终端用 macOS 的 `ping6 -n -c 1` 探测该设备；指定链路本地目标时，在地址后加实际接口名（如 `%en0`）。若捕获到初次地址解析的 NS，分别核对其完整目标地址、IPv6 组播目的地址与以太网组播目的 MAC，再查看对应 NA 和邻居表的新映射。该过滤器也会捕获其他 ICMPv6 流量；例如，源地址为 `::` 的 NS 可能用于 DAD，不是这次探测的普通邻居解析。已有缓存时可能只有探测流量，或出现用于可达性检测的单播 NS[^5][^slaac][^neighbor-tools]。
+在另一终端用 macOS 的 `ping6 -n -c 1`（现代 Linux 发行版通常使用 `ping -6 -n -c 1`）探测该设备；指定链路本地目标时，在地址后加实际接口名（如 `%en0`）。若捕获到初次地址解析的 NS，分别核对其完整目标地址、IPv6 组播目的地址与以太网组播目的 MAC，再查看对应 NA 和邻居表的新映射。该过滤器也会捕获其他 ICMPv6 流量；例如，源地址为 `::` 的 NS 可能用于 DAD，不是这次探测的普通邻居解析。已有缓存时可能只有探测流量，或出现用于可达性检测的单播 NS[^5][^slaac][^neighbor-tools]。
 
 ## 总结
 
 - 地址作用范围决定它适合出现在哪类网络中，实际可达性仍由路由、策略与服务状态决定。
-- 常规 IPv4 子网的网络地址和广播地址由前缀决定。默认网关占用一个可用主机地址，DHCP 地址池和 DNS 服务地址由网络配置决定。
-- 掩码比较解释普通直连子网，实际下一跳以路由选择结果为准；ARP/NDP 解析的是选中的同链路邻居。
+- 常规 IPv4 子网的网络地址和广播地址由前缀决定。默认网关占用一个可用主机地址，DHCP 地址池和 DNS 服务地址由网络配置决定；IPv6 局域网则以 `/64` 为主，没有子网广播地址。
+- 掩码比较解释普通直连子网，实际下一跳以路由选择结果为准；ARP/NDP 解析的是选中的同链路邻居，表项还受 NUD 状态约束。
 - ARP Probe 与 Announcement 分别负责使用前探测和地址公告，邻居缓存不能代替在线设备发现。
 - DHCPv4 首次租约通常经历 DORA，但四条消息并非全部广播；IPv6 的路由发现、地址生成、DAD 与 DNS 参数各有自己的状态和期限。
 
@@ -499,8 +561,8 @@ sudo tcpdump -i en0 -nn -e icmp6
 
 ## 延伸阅读
 
-- [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml)与[IPv6 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)——检查特殊地址的作用范围和全球可达属性
-- 子网计算示例可在 [Rust Playground](https://play.rust-lang.org/) 运行
+- [IANA IPv6 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml)——系统查阅 IPv6 特殊地址范围的作用域、可转发性与保留用途
+- [RFC 8200: Internet Protocol, Version 6 (IPv6) Specification](https://www.rfc-editor.org/rfc/rfc8200.html)——进一步查阅完整的 IPv6 首部结构、扩展头及协议规范
 
 [^1]: 〔RFC〕[RFC 1918 §3、§5](https://www.rfc-editor.org/rfc/rfc1918.html#section-3)——IPv4 私网范围及公共互联网路由边界；[RFC 4193 §3、§4.1](https://www.rfc-editor.org/rfc/rfc4193.html#section-3)另行定义 IPv6 ULA 的 `fc00::/7` 范围与外部路由过滤要求。
 
@@ -514,11 +576,17 @@ sudo tcpdump -i en0 -nn -e icmp6
 
 [^flooding]: 〔平台与实现〕[Cisco：Unicast Flooding in Switched Campus Networks](https://www.cisco.com/c/en/us/support/docs/switches/catalyst-6000-series-switches/23563-143.html)——未知单播的含义，以及在所属 VLAN 内除入端口外向其他可转发端口复制帧的行为；[RFC 4541 §1、§2.1.2](https://www.rfc-editor.org/rfc/rfc4541.html#section-1)另行说明组播泛洪与按成员端口转发的区别。
 
-[^delivery]: 〔RFC〕[RFC 1122 §3.2.1.3](https://www.rfc-editor.org/rfc/rfc1122.html#section-3.2.1.3)——IPv4 单播、有限广播与定向广播地址；[RFC 1112 §2、§4、§6.4](https://www.rfc-editor.org/rfc/rfc1112.html#section-2)——IPv4 组播地址及以太网映射；[RFC 4291 §2、§2.7](https://www.rfc-editor.org/rfc/rfc4291.html#section-2)——IPv6 单播与组播地址，以及不使用广播的规定。
+[^delivery]: 〔RFC〕[RFC 1122 §3.2.1.3](https://www.rfc-editor.org/rfc/rfc1122.html#section-3.2.1.3)——IPv4 单播、有限广播与定向广播地址；[RFC 1112 §2、§4](https://www.rfc-editor.org/rfc/rfc1112.html#section-2)——IPv4 组播地址范围；[RFC 4291 §2、§2.7](https://www.rfc-editor.org/rfc/rfc4291.html#section-2)——IPv6 单播与组播地址，以及不使用广播的规定。
+
+[^ipv6-basics]: 〔RFC〕[RFC 4291 §2.2、§2.5、§2.6](https://www.rfc-editor.org/rfc/rfc4291.html#section-2.2)及 [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952.html#section-4)——IPv6 地址的冒号十六进制文本表示、`::` 压缩规范、`/64` 接口标识符与子网路由器任播地址。
+
+[^ipv6-p2p]: 〔RFC〕[RFC 6164 §3、§5](https://www.rfc-editor.org/rfc/rfc6164.html#section-3)——在路由器点对点互联链路上采用 `/127` 前缀的原因及安全性边界。
+
+[^pmtu6]: 〔RFC〕[RFC 8201 §3](https://www.rfc-editor.org/rfc/rfc8201.html#section-3)与 [RFC 4443 §3.2](https://www.rfc-editor.org/rfc/rfc4443.html#section-3.2)——ICMPv6 Packet Too Big 报文与 IPv6 路径 MTU 发现机制。
 
 [^4]: 〔RFC〕[RFC 826: An Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)——以太网上的 ARP 请求、回复及地址映射更新流程。
 
-[^5]: 〔RFC〕[RFC 4861 §4.3、§7.2.2、§7.2.4、§7.3](https://www.rfc-editor.org/rfc/rfc4861.html#section-7.2.2)——NS 的目标字段与组播发送、NA 的应答及链路层地址选项、已有映射时的单播可达性探测。
+[^5]: 〔RFC〕[RFC 4861 §4.3、§7.2.2、§7.2.4、§7.3.2](https://www.rfc-editor.org/rfc/rfc4861.html#section-7.2.2)——NS 的目标字段与组播发送、NA 的应答及链路层地址选项、邻居缓存 NUD 五态模型与单播可达性探测。
 
 [^ndp-multicast]: 〔RFC〕[RFC 4291 §2.7.1](https://www.rfc-editor.org/rfc/rfc4291.html#section-2.7.1)定义 IPv6 被请求节点组播地址；[RFC 2464 §7](https://www.rfc-editor.org/rfc/rfc2464.html#section-7)定义 IPv6 组播到以太网组播 MAC 的映射。
 
@@ -553,3 +621,5 @@ sudo tcpdump -i en0 -nn -e icmp6
 [^dhcpv6]: 〔RFC〕[RFC 9915 §1、§5、§18](https://www.rfc-editor.org/rfc/rfc9915.html#section-1)——DHCPv6 的地址及其他参数配置、消息类型与交互；2026 年 1 月取代 RFC 8415，默认路由发现仍由 NDP 负责。
 
 [^privacy]: 〔RFC〕[RFC 8981 §3、§4](https://www.rfc-editor.org/rfc/rfc8981.html#section-3)——临时地址的生成、更换、生命周期和隐私限制。
+
+[^beej-ip]: 〔编程指南〕[Beej’s Guide to Network Programming §3.2–3.4](https://beej.us/guide/bgnet/html/split/ip-addresses-structs-and-data-munging.html)——字节序转换、`in_addr`、`inet_pton` 与 `inet_ntop`。
