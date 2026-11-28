@@ -3,14 +3,11 @@ import { scene as awaitState } from "./await-state.ts";
 import { scene as backtrackingState } from "./backtracking-state.ts";
 import { scene as binarySearchCut } from "./binary-search-cut.ts";
 import { scene as deadlock } from "./deadlock.ts";
-import { scene as diagnosticStages } from "./diagnostic-stages.ts";
-import { scene as dnsCacheDoh } from "./dns-cache-doh.ts";
 import { scene as dualHeapMedian } from "./dual-heap-median.ts";
 import { scene as duplicateIndexCycle } from "./duplicate-index-cycle.ts";
 import { scene as floydCycleEntry } from "./floyd-cycle-entry.ts";
 import { gridExamples } from "./grid-examples.ts";
 import { scene as inplaceIndexSwap } from "./inplace-index-swap.ts";
-import { scene as lanArpDelivery } from "./lan-arp-delivery.ts";
 import { listExamples } from "./list-examples.ts";
 import { scene as lruCacheOps } from "./lru-cache-ops.ts";
 import { scene as monotonicStackWindow } from "./monotonic-stack-window.ts";
@@ -18,9 +15,7 @@ import { scene as multiSourceBfs } from "./multi-source-bfs.ts";
 import { scene as mutexCounter } from "./mutex-counter.ts";
 import { scene as nextPermutationSteps } from "./next-permutation-steps.ts";
 import { scene as packetJourney } from "./packet-journey.ts";
-import { scene as proxyTunFakeip } from "./proxy-tun-fakeip.ts";
 import { scene as recursionStack } from "./recursion-stack.ts";
-import { scene as routingNaptTun } from "./routing-napt-tun.ts";
 import { scene as saddleSearch } from "./saddle-search.ts";
 import { scene as scheduling } from "./scheduling.ts";
 import { searchTreeExamples } from "./search-tree-examples.ts";
@@ -72,20 +67,13 @@ const scenes = {
 	"floyd-cycle-entry": floydCycleEntry,
 	"trapping-water-pointers": trappingWaterPointers,
 	"packet-journey": packetJourney,
-	"lan-arp-delivery": lanArpDelivery,
-	"routing-napt-tun": routingNaptTun,
 	"socket-buffer-eof": socketBufferEof,
-	"dns-cache-doh": dnsCacheDoh,
 	"tls-handshake-visibility": tlsHandshakeVisibility,
-	"proxy-tun-fakeip": proxyTunFakeip,
-	"diagnostic-stages": diagnosticStages,
 };
 
 export type SceneId = keyof typeof scenes;
 
 function validateScene(scene: Scene, id: string) {
-	for (const chapter of scene.chapters ?? []) validateScene(chapter, id);
-
 	if (!scene.frames.length) throw new Error(`Empty scene: ${id}`);
 
 	for (const frame of scene.frames) {

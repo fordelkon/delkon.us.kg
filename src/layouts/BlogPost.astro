@@ -36,9 +36,6 @@ const scene = sceneId ? getScene(sceneId) : undefined;
 
 const stylesheets = contentStyles(contentFrontmatter, {
 	hasExplainer: Boolean(scene),
-	hasMermaid: scene?.chapters
-		? scene.chapters.some((chapter) => Boolean(chapter.diagram))
-		: Boolean(scene?.diagram),
 });
 ---
 

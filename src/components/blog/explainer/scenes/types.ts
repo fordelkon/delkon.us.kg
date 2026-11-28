@@ -27,18 +27,14 @@ export interface Edge {
 
 export interface Frame {
 	note: string;
-	activeNodes?: string[];
-	activeEdges?: number[];
 	boxes: Box[];
 	edges?: Edge[];
 }
 
 export interface Scene {
-	chapters?: Scene[];
 	legend?: string;
 	section?: string | undefined;
 	title: string;
-	diagram?: string;
 	diagramHeight?: number;
 	caption: string;
 	description: string;

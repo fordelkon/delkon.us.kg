@@ -1,58 +1,10 @@
-import { EXECUTION_LEGEND, interaction, node } from "./diagram-layout.ts";
+import { EXECUTION_LEGEND, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
-const invariant: Scene = {
-	title: "安全性与完整操作",
-	section: "线性化点完整操作何时生效",
-	description:
-		"本图假设：余额初值 100，两个请求各扣 80，每次访问都受同一把锁保护。前三帧将检查与扣款拆开；最后一帧重置余额，改用完整临界区。向上箭头表示检查共享余额，向下表示更新；双箭头不表示同时扣款。",
-	caption: "没有数据竞争，不代表业务不变量成立；安全性要求结果合法，活性还要求操作能够完成。",
-	frames: [
-		interaction(
-			"A 在锁内检查 100 足够支付 80，然后解锁，尚未扣款。若把这个检查结果留到另一次加锁后使用，中间状态可能已被其他请求改变。",
-			["请求 A", "检查通过，已解锁"],
-			["请求 B", "尚未检查"],
-			["余额 = 100", "不变量：余额不得小于 0"],
-			["操作被拆开", "检查与扣款不是同一临界区"],
-			"left",
-		),
-		interaction(
-			"B 也在锁内看到余额 100，检查通过后解锁。各次访问本身安全，但两者都保留了可能过时的资格判断。",
-			["请求 A", "保留检查结果"],
-			["请求 B", "检查通过，已解锁"],
-			["余额 = 100", "A、B 都以为可以扣款"],
-			["仍无数据竞争", "锁尚未覆盖完整 withdraw"],
-			"right",
-		),
-		interaction(
-			"A、B 分别再次加锁扣款，余额先变为 20，再变为 -60。两次都报告成功，却不符合“余额足够才扣款”的顺序规格；无法为它们找到合法的线性化解释。",
-			["请求 A", "扣 80 → 20"],
-			["请求 B", "再扣 80 → -60"],
-			["余额 = -60", "安全性失败：发生透支"],
-			["原子性违规", "同步每次访问还不够"],
-		),
-		interaction(
-			"独立运行重置为 100：检查与扣款处于同一临界区。A 成功后余额 20，B 重新检查并失败；可用成功的余额写入和失败的检查作为各自的线性化点。",
-			["请求 A", "检查并扣款：成功"],
-			["请求 B", "余额不足：失败"],
-			["最终余额 = 20", "只有一次扣款成功"],
-			["仍需检查活性", "完整临界区不自动避免死锁"],
-		),
-	].map((frame, index) => ({
-		...frame,
-		edges:
-			index < 2
-				? [edge("check", index === 0 ? "M86 100 V62" : "M274 100 V62", true)]
-				: [
-						edge("update-a", "M86 56 V94", true),
-						edge("update-b", index === 3 ? "M274 100 V62" : "M274 56 V94", true),
-					],
-	})),
-};
-
-const locking: Scene = {
+export const scene: Scene = {
 	title: "等待环与统一锁序",
 	section: "死锁与加锁顺序",
+	legend: EXECUTION_LEGEND,
 	description:
 		"本图假设：两把独占锁。前三帧按相反顺序获取；后三帧从空闲状态开始另一轮运行，两者都先取 L1 再取 L2。箭头表示等待持锁者，不表示时间或恢复动作。",
 	caption: "统一获取顺序可排除这组锁的循环等待；已发生的死锁不会因改变图上的顺序自行恢复。",
@@ -125,10 +77,4 @@ const locking: Scene = {
 				: []),
 		],
 	})),
-};
-
-export const scene: Scene = {
-	...invariant,
-	legend: EXECUTION_LEGEND,
-	chapters: [invariant, locking],
 };

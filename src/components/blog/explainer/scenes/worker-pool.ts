@@ -1,4 +1,4 @@
-import { EXECUTION_LEGEND, node, withRoles } from "./diagram-layout.ts";
+import { EXECUTION_LEGEND, withRoles } from "./diagram-layout.ts";
 import { box, edge, type Frame, type Scene } from "./types.ts";
 
 type Worker = 0 | 1;
@@ -171,78 +171,18 @@ const frames = buildFrames();
 const pool: Scene = {
 	title: "有界队列与背压",
 	section: "背压与队列容量",
+	legend: EXECUTION_LEGEND,
 	caption: "队列满时，发送者等待；worker 领取后腾出空位，压力由此传回上游。",
 	description:
 		"两个固定 worker 处理任务 0 到 5，任务与结果队列容量均为 2。两位 worker 忙碌且任务队列积压 2、3 时，send(4) 等待，4 此时仍在发送者手里；W1 完成并领取 2 后腾出空位，4 才能入队。锁覆盖 recv，空队列等待时也会持锁，计算在锁外；收集者与生产者并发推进，槽内展示任务编号，最终收齐六份。这是一种可能调度，停留时间不表示耗时，不展开关闭和退出。",
 	frames,
 };
 
-const acknowledgement: Scene = {
-	title: "接纳、领取与结果确认",
-	section: "消息交付与处理完成",
-	description:
-		"本图假设：一个有缓冲的进程内通道，消息 M 移动给接收者，处理成功后发送独立 ACK。实线分别表示入队、领取与独立确认，不是 send 直接交给消费者；不承诺外部副作用恰好发生一次。",
-	caption: "任务接纳、领取、处理完成与确认送达各有边界；超时重试还要考虑幂等性。",
-	frames: (
-		[
-			[
-				"send(M) 返回",
-				"尚未接收",
-				"[M]",
-				"Accepted · 已接纳",
-				"有空位时 send 可以在入队后返回。发送成功并不证明消费者已领取，更不证明业务完成；接收端后续断开还可能留下未处理消息。",
-			],
-			[
-				"等待业务确认",
-				"recv(M) 返回",
-				"[]",
-				"Delivered · 已领取",
-				"接收者领走 M 后负责处理。即使是无缓冲会合，发送完成最多提供对应的交接保证，也不包括接收后的业务步骤。",
-			],
-			[
-				"仍在等待确认",
-				"得到处理结果",
-				"[]",
-				"Completed · 已处理",
-				"处理已经结束。消费者还要把结果或 ACK 交给调用方；若结果端已关闭，完成的工作也可能没有确认。",
-			],
-			[
-				"收到 ACK(M)",
-				"确认已送达",
-				"[]",
-				"完成已确认",
-				"消费者完成约定处理后单独返回 ACK，生产者收到它才获得该层级的完成凭证。若确认丢失或超时，仍可能已经产生外部效果，不能盲目重复执行。",
-			],
-		] as const
-	).map(([producer, consumer, queue, state, note], i) => ({
-		note,
-		boxes: [
-			node("producer", 8, 8, 156, ["生产者", producer], "actor", true),
-			node("consumer", 196, 8, 156, ["消费者", consumer], "actor", i > 0),
-			node("queue", 8, 100, 344, ["消息队列", queue], "control", i === 0),
-			node("result", 8, 188, 344, ["业务状态", state], i >= 2 ? "result" : "state", true),
-		],
-		edges: [
-			edge("enqueue", "M86 56 V94", i === 0),
-			edge("receive", "M274 100 V62", i === 1),
-			edge("complete", "M352 32 H358 V212 H352", i === 2),
-			...(i === 3 ? [edge("ack", "M196 32 H170", true)] : []),
-		],
-	})),
-};
-
-export const scene: Scene = {
-	...pool,
-	legend: EXECUTION_LEGEND,
-	chapters: [
-		withRoles(pool, {
-			producer: "actor",
-			jobs: "control",
-			w0: "actor",
-			w1: "actor",
-			results: "state",
-			collected: "result",
-		}),
-		acknowledgement,
-	],
-};
+export const scene: Scene = withRoles(pool, {
+	producer: "actor",
+	jobs: "control",
+	w0: "actor",
+	w1: "actor",
+	results: "state",
+	collected: "result",
+});

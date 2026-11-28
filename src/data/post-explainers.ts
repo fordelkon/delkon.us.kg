@@ -53,20 +53,10 @@ export function getPostExplainer(postId: string): SceneId | undefined {
 			return "await-state";
 		case "networking/layered-architecture-packet-journey":
 			return "packet-journey";
-		case "networking/ip-addressing-subnet-lan-delivery":
-			return "lan-arp-delivery";
-		case "networking/routing-forwarding-nat-virtual-interfaces":
-			return "routing-napt-tun";
 		case "networking/transport-tcp-udp-socket-quic":
 			return "socket-buffer-eof";
-		case "networking/dns-resolution-caching-encrypted-queries":
-			return "dns-cache-doh";
 		case "networking/http-evolution-tls-handshake-https":
 			return "tls-handshake-visibility";
-		case "networking/proxies-tunnels-transparent-interception":
-			return "proxy-tun-fakeip";
-		case "networking/network-diagnostics-performance-troubleshooting":
-			return "diagnostic-stages";
 		default:
 			return getAlgorithmSceneId(postId);
 	}

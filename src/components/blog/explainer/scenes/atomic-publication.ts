@@ -1,55 +1,10 @@
-import { EXECUTION_LEGEND, interaction, node } from "./diagram-layout.ts";
+import { EXECUTION_LEGEND, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
-const atomicity: Scene = {
-	title: "原子访问与完整操作",
-	section: "单次操作与组合操作",
-	description:
-		"本图假设：count 是原子整数，初值 0，无溢出。先展示拆开的 load/store 丢失更新，再重置为 0 对照 fetch_add；全部访问都是原子操作，不模拟未定义行为。箭头从共享值指向线程表示读取，反向表示写入；两条高亮不代表同时写入。",
-	caption: "单次访问原子，不代表一组操作原子；两次加一要用读改写操作或完整的临界区。",
-	frames: [
-		interaction(
-			"A 读到 0，在自己的局部值上计算 1。它尚未把结果提交给原子 count；单次 load 的原子性不会覆盖之后的计算与 store。",
-			["A：load → 0", "局部计算 1"],
-			["B", "尚未读取"],
-			["共享原子 count", "0"],
-			["分开的操作", "load → 本地计算 → store"],
-			"left",
-		),
-		interaction(
-			"B 也在 A 写回之前读到 0，计算出 1。这是两个合法原子读取，不存在这里的非原子数据竞争。",
-			["A：准备写 1", "保留局部值"],
-			["B：load → 0", "局部计算 1"],
-			["共享原子 count", "0"],
-			["逻辑风险", "两份局部快照相同"],
-			"right",
-		),
-		interaction(
-			"A、B 先后各 store(1)，最终 count=1。即使用 SeqCst 把这些独立原子访问排成全序，也不会把两组 load/store 自动合成两个不可分割的加一。",
-			["A：store(1)", "已完成"],
-			["B：store(1)", "覆盖同一个值"],
-			["最终 count", "1 · 丢失一次逻辑更新"],
-			["内存访问合法", "业务要求 count=2 未满足"],
-		),
-		interaction(
-			"独立运行：count 重置为 0，A、B 各执行一次 fetch_add(1, Relaxed)。这两次读改写在该原子对象的修改顺序中不可分割，先后把 0 变成 1、1 变成 2；并不发布其他数据。",
-			["A：fetch_add", "旧值 0 → 新值 1"],
-			["B：fetch_add", "旧值 1 → 新值 2"],
-			["最终 count", "2 · 两次更新均保留"],
-			["读改写边界", "Relaxed 已足够维护这个计数"],
-		),
-	].map((frame, index) => ({
-		...frame,
-		edges:
-			index < 2
-				? [edge("read", index === 0 ? "M86 100 V62" : "M274 100 V62", true)]
-				: [edge("write-a", "M86 56 V94", true), edge("write-b", "M274 56 V94", true)],
-	})),
-};
-
-const publication: Scene = {
+export const scene: Scene = {
 	title: "发布与 happens-before",
 	section: "release--acquire发布与接收的边界",
+	legend: EXECUTION_LEGEND,
 	diagramHeight: 336,
 	description:
 		"本图假设：payload 与 ready 都是原子变量，初值 0 / false，只发布一次，之后不再改写。纵向实线是 sequenced-before；横向虚线仅在读到本次发布时表示 synchronizes-with。沿三条边推导出 happens-before。最后一帧是独立的弱序对照。",
@@ -131,10 +86,4 @@ const publication: Scene = {
 			edge("reader", "M274 144 V178", index >= 3),
 		],
 	})),
-};
-
-export const scene: Scene = {
-	...atomicity,
-	legend: EXECUTION_LEGEND,
-	chapters: [atomicity, publication],
 };

@@ -41,7 +41,7 @@ const steps = [
 
 export const scene: Scene = {
 	title: '字符串 "ABACBA" 覆盖 "ABC" 的滑窗收缩',
-	section: "为什么必须用-formed-计数器而不是每步比对字典",
+	section: "为什么必须用-formed--missing-计数器而不是每步比对字典",
 	legend: EXECUTION_LEGEND,
 	caption: "横排展示 6 个字符格子；左右标记定位当前窗口，达标计数与已知最短解显示在上方。",
 	description:

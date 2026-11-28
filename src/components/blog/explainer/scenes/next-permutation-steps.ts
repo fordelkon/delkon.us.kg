@@ -1,78 +1,67 @@
-import { controlEdge, EXECUTION_LEGEND, node } from "./diagram-layout.ts";
-import { edge, type Scene } from "./types.ts";
+import { controlEdge } from "./diagram-layout.ts";
+import { cells, label, mark } from "./examples.ts";
+import { edge, type Frame, type Scene } from "./types.ts";
 
-// 真实 5 元素数组例子: [1, 3, 5, 4, 2]
-const steps = [
-	{
-		arr: [1, 3, 5, 4, 2],
-		highlight: [1, 2],
-		banner: ["1. 从右向左找拐点", "nums[1]=3 < nums[2]=5"],
-		bottom: ["右侧后缀 [5, 4, 2]", "单调不增，需改动下标 1"],
-		phase: "pivot" as const,
-		note: "从右越过降序后缀 [5, 4, 2]，定位首个相邻升序位置 i = 1（值 3）。",
-	},
-	{
-		arr: [1, 3, 5, 4, 2],
-		highlight: [1, 3],
-		banner: ["2. 在右侧找首个 > 3 的数", "j = 3 (val=4) 为最小更大值"],
-		bottom: ["交换 nums[1] 与 nums[3]", "准备将 3 与 4 互换"],
-		phase: "swap" as const,
-		note: "由于后缀降序，从右往左碰到的第一个大于 3 的数 4 就是增幅最小的选择。",
-	},
-	{
-		arr: [1, 4, 5, 3, 2],
-		highlight: [2, 3, 4],
-		banner: ["3. 交换后后缀仍降序", "[5, 3, 2] 保持单调不增"],
-		bottom: ["双指针反转 [2..4]", "5 <-> 2 互换即可"],
-		phase: "rev" as const,
-		note: "交换完成！右侧 [5, 3, 2] 天然维持降序，只需 O(n) 反转就能变成最小升序。",
-	},
-	{
-		arr: [1, 4, 2, 3, 5],
-		highlight: [0, 1, 2, 3, 4],
-		banner: ["完成下一个排列", "结果为 [1, 4, 2, 3, 5]"],
-		bottom: ["高位增幅最小", "低位后缀升序最小"],
-		phase: "done" as const,
-		note: "三步原地操作全部完成，总时间 O(n)，辅助空间 O(1)。",
-	},
-] as const;
+const indexLabels = [0, 1, 2, 3, 4].map((index) =>
+	label(`idx-${index}`, 84 + index * 48, 128, String(index), 40),
+);
 
-export const scene: Scene = {
-	title: "排列 [1, 3, 5, 4, 2] 的三步原地演进",
-	section: "如何精确找出刚好大一点的排列",
-	legend: EXECUTION_LEGEND,
-	caption: "直接观察 5 个数组元素在找拐点、交换最小更大值、反转降序后缀三步中的就地变化。",
-	description: "展示真实排列 [1, 3, 5, 4, 2] 如何依次高亮拐点与目标元素并变为 [1, 4, 2, 3, 5]。",
-	frames: steps.map((s) => ({
-		note: s.note,
+const frames: Frame[] = [
+	{
+		note: "从右越过降序后缀 [5, 4, 2]：该后缀内部已达字典序最大，只能改动左侧首个相邻升序位置 3 < 5。",
 		boxes: [
-			node("ban", 8, 12, 344, [s.banner[0], s.banner[1]], "actor", true),
-			...s.arr.map((v, i) =>
-				node(
-					`a-${i}`,
-					14 + i * 68,
-					96,
-					60,
-					[`[${i}]`, `val=${v}`],
-					s.phase === "done"
-						? "result"
-						: s.highlight.some((index) => i === index)
-							? s.phase === "swap"
-								? "control"
-								: "state"
-							: "actor",
-					s.highlight.some((index) => i === index),
-				),
-			),
-			node("bot", 8, 184, 344, [s.bottom[0], s.bottom[1]], s.phase === "done" ? "result" : "state"),
+			label("top", 180, 20, "右侧后缀 [5, 4, 2] 降序已到顶", 260),
+			mark("wall", 154, 62, 148, 56, "", "area"),
+			...cells("arr", [1, 3, 5, 4, 2], 66, [1, 2, 3, 4], 48),
+			...indexLabels,
+			label("pivot", 132, 156, "拐点 3 < 5", 96),
+			label("suffix", 228, 156, "降序后缀", 96),
+		],
+	},
+	{
+		note: "在降序后缀 [5, 4, 2] 中从右往左找第一个大于 3 的数，即最小更大值 4。",
+		boxes: [
+			label("top", 180, 20, "在后缀中选出最小大于 3 的数：4", 280),
+			mark("wall", 154, 62, 148, 56, "", "area"),
+			...cells("arr", [1, 3, 5, 4, 2], 66, [1, 3], 48),
+			...indexLabels,
+			label("pivot", 132, 156, "拐点 3", 80),
+			label("cand", 228, 156, "最小更大值 4", 112),
+		],
+		edges: [edge("pick", "M132 62 Q180 34 228 62", true)],
+	},
+	{
+		note: "交换 3 与 4 得到 [1, 4, 5, 3, 2]。由于 4 原先是大于 3 的最小值，换入 3 后右侧 [5, 3, 2] 仍保持降序。",
+		boxes: [
+			label("top", 180, 20, "交换 3 ↔ 4 后，后缀 [5, 3, 2] 仍降序", 300),
+			mark("wall", 154, 62, 148, 56, "", "area"),
+			...cells("arr", [1, 4, 5, 3, 2], 66, [1, 3], 48),
+			...indexLabels,
+			label("rev-lbl", 228, 174, "双指针原地反转 [2..4]", 176),
 		],
 		edges: [
-			...(s.phase === "swap"
-				? [edge("sw", `M${14 + 1 * 68 + 30} 94 Q180 64 ${14 + 3 * 68 + 30} 94`, true)]
-				: []),
-			...(s.phase === "rev"
-				? [controlEdge("rv", `M${14 + 2 * 68 + 30} 148 Q248 178 ${14 + 4 * 68 + 30} 148`, true)]
-				: []),
+			edge("swapped", "M132 62 Q180 34 228 62", true),
+			controlEdge("rev", "M180 140 Q228 164 276 140", true),
 		],
-	})),
+	},
+	{
+		note: "把降序后缀 [5, 3, 2] 原地反转为最小升序 [2, 3, 5]，即得下一个最小排列 [1, 4, 2, 3, 5]。",
+		boxes: [
+			label("top", 180, 20, "反转后缀得 [2, 3, 5]：完成最小增量", 300),
+			...cells("arr", [1, 4, 2, 3, 5], 66, [1, 2, 3, 4], 48),
+			...indexLabels,
+			label("head", 108, 156, "高位增幅最小", 116),
+			label("tail", 240, 156, "后缀升序最小", 116),
+		],
+	},
+];
+
+export const scene: Scene = {
+	title: "排列 [1, 3, 5, 4, 2] 的后缀壁垒与最小重排",
+	section: "如何精确找出刚好大一点的排列",
+	diagramHeight: 192,
+	caption: "越过单调不增的后缀壁垒定位拐点，换入最小更大值后，原后缀仍降序，反转即最小。",
+	description:
+		"用数组 [1, 3, 5, 4, 2] 演示下一个排列的空间不变量：框出降序后缀壁垒、选中拐点 3 与后缀中最小更大值 4、交换后观察后缀仍保持降序、最后原地反转为 [1, 4, 2, 3, 5]。",
+	frames,
 };

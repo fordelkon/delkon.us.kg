@@ -1,97 +1,6 @@
 import { EXECUTION_LEGEND, node } from "./diagram-layout.ts";
 import { edge, type Scene } from "./types.ts";
 
-const pitfalls: Scene = {
-	title: "OrderedDict 两次踩坑：假值与更新时序",
-	section: "值为-0-不代表没有这个键",
-	legend: EXECUTION_LEGEND,
-	caption:
-		"把「键是否存在」与「值是否为真」分开判断，把「更新已有键」与「插入新键」的容量和顺序更新分开处理。",
-	description:
-		"对照 OrderedDict 实现 LRU 时的两个典型错误：值 0 被布尔求值误判为未命中，以及更新已有键时未刷新使用顺序或误触发淘汰。",
-	frames: [
-		{
-			note: "踩坑一（假值陷阱）：put(1, 0) 存入合法值 0。若用 `if not cache.get(1)` 判空，0 会被当成假值，get(1) 误返回 -1。",
-			boxes: [
-				node(
-					"op",
-					8,
-					8,
-					344,
-					["错误写法：if not cache.get(1)", "get(1) 返回 0 → 布尔求值为 False"],
-					"control",
-					true,
-				),
-				node("kv", 8, 96, 164, ["cache 内部条目", "key=1, val=0"], "state", true),
-				node(
-					"fix",
-					188,
-					96,
-					164,
-					["正确写法：key not in cache", "成员检查 → 命中返回 0"],
-					"result",
-					true,
-				),
-				node("rule", 8, 184, 344, ["核心原则", "成员存在性与值真假严格分离"], "actor"),
-			],
-			edges: [edge("e1", "M90 56 V92", true), edge("e2", "M270 56 V92", true)],
-		},
-		{
-			note: "踩坑二前提（容量已满）：容量为 2，依次 put(1, 10) 与 put(2, 20)。OrderedDict 从左到右为最久到最近：[1, 2]。",
-			boxes: [
-				node("op", 8, 8, 344, ["前置状态：容量 = 2", "依次 put(1, 10)、put(2, 20)"], "actor", true),
-				node("old", 8, 96, 164, ["最久未使用（队首）", "key=1, val=10"], "state"),
-				node("new", 188, 96, 164, ["最近使用（队尾）", "key=2, val=20"], "state", true),
-				node("rule", 8, 184, 344, ["顺序约定", "[1, 2]：队首淘汰，队尾最新"], "control"),
-			],
-			edges: [edge("e12", "M172 120 H184", true)],
-		},
-		{
-			note: "踩坑二（更新不扩容、且须刷新位置）：put(1, 100) 更新已有键 1。不会占用新槽位，也不能淘汰键 2；同时必须显式 move_to_end(1)。",
-			boxes: [
-				node(
-					"op",
-					8,
-					8,
-					344,
-					["操作：put(1, 100) 更新已有键", "不触发淘汰，且 move_to_end(1)"],
-					"actor",
-					true,
-				),
-				node("old", 8, 96, 164, ["退居最久（队首）", "key=2, val=20"], "state"),
-				node("new", 188, 96, 164, ["刷新到最新（队尾）", "key=1, val=100"], "result", true),
-				node(
-					"rule",
-					8,
-					184,
-					344,
-					["若漏掉 move_to_end", "顺序仍停在 [1, 2]，下次将误删 1"],
-					"control",
-				),
-			],
-			edges: [edge("e21", "M172 120 H184", true)],
-		},
-		{
-			note: "验证时序结果：接着 put(3, 30) 新增键 3。因前一步已将键 1 移到队尾，popitem(last=False) 正确淘汰最久未用的键 2，留下 [1, 3]。",
-			boxes: [
-				node(
-					"op",
-					8,
-					8,
-					344,
-					["操作：put(3, 30) 插入新键", "超容触发 popitem(last=False)"],
-					"actor",
-					true,
-				),
-				node("old", 8, 96, 164, ["留在缓存（队首）", "key=1, val=100"], "state"),
-				node("new", 188, 96, 164, ["新插入（队尾）", "key=3, val=30"], "result", true),
-				node("rule", 8, 184, 344, ["已淘汰键 2", "顺序变为 [1, 3]，容量维持 2"], "control", true),
-			],
-			edges: [edge("e13", "M172 120 H184", true)],
-		},
-	],
-};
-
 const linkedListFrames = [
 	{
 		op: "容量=2：依次 put(1,10)、put(2,20)",
@@ -131,7 +40,7 @@ const linkedListFrames = [
 	},
 ] as const;
 
-const linkedList: Scene = {
+export const scene: Scene = {
 	title: "双向链表与哈希索引：原地摘插与淘汰",
 	section: "将两条规则落实到实现",
 	legend: EXECUTION_LEGEND,
@@ -158,10 +67,4 @@ const linkedList: Scene = {
 			edge("t1", "M282 126 H274"),
 		],
 	})),
-};
-
-export const scene: Scene = {
-	...pitfalls,
-	legend: EXECUTION_LEGEND,
-	chapters: [pitfalls, linkedList],
 };

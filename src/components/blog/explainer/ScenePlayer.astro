@@ -1,6 +1,5 @@
 ---
 import Diagram from "./Diagram.astro";
-import { renderScene } from "./mermaid";
 import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, type Scene } from "./scenes/types";
 
 interface Props {
@@ -12,23 +11,18 @@ interface Props {
 const { scene, sceneId, study = false } = Astro.props;
 const { caption, description } = scene;
 const animated = scene.frames.length > 1;
-const svgs = scene.diagram ? renderScene(sceneId, scene, study) : undefined;
 const diagramViewBox = `0 0 ${DIAGRAM_WIDTH} ${scene.diagramHeight ?? DIAGRAM_HEIGHT}`;
 const stepDurationMs = 3000;
 const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * stepDurationMs }));
 ---
 
 <figure
-	class:list={[
-		"step-explainer not-prose",
-		{ "study-explainer": study, "has-mermaid": Boolean(svgs) },
-	]}
+	class:list={["step-explainer not-prose", { "study-explainer": study }]}
 	data-scene={sceneId}
 	aria-label={scene.title}
 	data-pagefind-ignore
 >
 	{study && <p class="explainer-assumptions">{description}</p>}
-	{svgs && <p class="explainer-assumptions">图较宽时可横向滚动，键盘聚焦后可用方向键。</p>}
 	<step-explainer
 		class="step-explainer-canvas"
 		style={`--step-frame-duration: ${stepDurationMs}ms`}
@@ -63,57 +57,30 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 				</svg>
 			</button>
 		)}
-		<div
-			class="step-explainer-visual"
-			role="img"
-			aria-label={description}
-			tabindex={svgs ? 0 : undefined}
-		>
+		<div class="step-explainer-visual" role="img" aria-label={description}>
 			{frames.map((frame, index) => (
 				<div
 					class="step-explainer-frame"
 					style={`animation-delay: ${frame.delayMs}ms`}
 					aria-hidden="true"
 				>
-					{svgs ? (
-						<div class="explainer-mermaid mermaid-diagram" set:html={svgs[index]?.svg} />
-					) : (
-						<Diagram
-							frame={frame}
-							id={study ? `${sceneId}-${index}-artwork` : undefined}
-							marker={`${sceneId}-arrow-${index}`}
-							height={scene.diagramHeight}
-						/>
-					)}
-					{!svgs && (
-						<p class="explainer-note">
-							{study && (
-								<span class="explainer-step">
-									{index + 1} / {frames.length} ·{" "}
-								</span>
-							)}
-							{frame.note}
-						</p>
-					)}
+					<Diagram
+						frame={frame}
+						id={study ? `${sceneId}-${index}-artwork` : undefined}
+						marker={`${sceneId}-arrow-${index}`}
+						height={scene.diagramHeight}
+					/>
+					<p class="explainer-note">
+						{study && (
+							<span class="explainer-step">
+								{index + 1} / {frames.length} ·{" "}
+							</span>
+						)}
+						{frame.note}
+					</p>
 				</div>
 			))}
 		</div>
-		{svgs && (
-			<div class="explainer-mermaid-notes" aria-hidden="true">
-				{frames.map((frame, index) => (
-					<div class="step-explainer-frame" style={`animation-delay: ${frame.delayMs}ms`}>
-						<p class="explainer-note">
-							{study && (
-								<span class="explainer-step">
-									{index + 1} / {frames.length} ·{" "}
-								</span>
-							)}
-							{frame.note}
-						</p>
-					</div>
-				))}
-			</div>
-		)}
 	</step-explainer>
 	<figcaption>
 		<p class="step-explainer-caption">{caption}</p>
@@ -128,30 +95,16 @@ const frames = scene.frames.map((frame, index) => ({ ...frame, delayMs: index * 
 				<ol>
 					{frames.map((frame, index) => (
 						<li>
-							{study &&
-								(svgs ? (
-									<div
-										class="explainer-static-viewport"
-										role="region"
-										tabindex="0"
-										aria-label={`${scene.title}，步骤 ${index + 1}，宽图可横向滚动`}
-									>
-										<div
-											class="explainer-mermaid mermaid-diagram"
-											aria-hidden="true"
-											set:html={svgs[index]?.reference}
-										/>
-									</div>
-								) : (
-									<svg
-										class="explainer-diagram"
-										viewBox={diagramViewBox}
-										aria-hidden="true"
-										focusable="false"
-									>
-										<use href={`#${sceneId}-${index}-artwork`} />
-									</svg>
-								))}
+							{study && (
+								<svg
+									class="explainer-diagram"
+									viewBox={diagramViewBox}
+									aria-hidden="true"
+									focusable="false"
+								>
+									<use href={`#${sceneId}-${index}-artwork`} />
+								</svg>
+							)}
 							<p>{frame.note}</p>
 						</li>
 					))}

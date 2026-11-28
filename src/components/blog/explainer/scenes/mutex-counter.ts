@@ -1,138 +1,69 @@
-import { node } from "./diagram-layout.ts";
-import { edge, type Scene } from "./types.ts";
+import { controlEdge, EXECUTION_LEGEND, node } from "./diagram-layout.ts";
+import { edge, type Frame, type Scene } from "./types.ts";
 
-const mutex: Scene = {
-	title: "同一把锁覆盖完整更新",
-	section: "mutex独占访问",
-	description:
-		"A、B 使用同一把 Mutex，各把 count 加一，初值为 0。实线表示持锁访问，虚线表示等待同一把锁；高亮只表示本次示例的持锁者，不承诺公平性。",
-	caption: "互斥的是完整的读、计算与写回；只保护最后一次写入仍会丢失更新。",
-	frames: (
-		[
-			[
-				"A",
-				"0",
-				"持锁，读取 0",
-				"等待同一把锁",
-				"A 先取得 Mutex，读取 count=0；B 的访问路径停在同一把锁上，不能进入临界区。",
-			],
-			[
-				"A",
-				"1",
-				"持锁，写回 1",
-				"仍在等待",
-				"A 在持锁期间完成加一并写回 1。箭头表示访问资格，完整操作结束前不会把锁交给 B。",
-			],
-			[
-				"B",
-				"1",
-				"已解锁",
-				"持锁，读取 1",
-				"A 释放后，B 取得同一把锁，读取到 1。这是一次可能的锁交接，不是公平性保证。",
-			],
-			[
-				"B",
-				"2",
-				"已完成",
-				"持锁，写回 2",
-				"B 从 1 计算并写回 2。两次完整更新没有交错，所以两次加一均被保留。",
-			],
-			[
-				"无",
-				"2",
-				"已完成",
-				"已解锁",
-				"两者完成，count=2。锁只保护遵守同一访问协议的代码；绕过锁的访问仍需另行证明安全。",
-			],
-		] as const
-	).map(([owner, count, a, b, note]) => ({
-		note,
+const frames: Frame[] = [
+	{
+		note: "无锁交错（1）：A 与 B 同时从共享 count 读取到 0，各自在局部变量算出 1。",
 		boxes: [
-			node("a", 8, 8, 156, ["线程 A", a], "actor", owner === "A"),
-			node("b", 196, 8, 156, ["线程 B", b], "actor", owner === "B"),
+			node("a", 8, 8, 156, ["线程 A", "load → 0 · 算得 1"], "actor", true),
+			node("b", 196, 8, 156, ["线程 B", "load → 0 · 算得 1"], "actor", true),
+			node("shared", 70, 96, 220, ["无锁保护 · count = 0", "两线程读到同一旧值"], "control", true),
+			node("rule", 8, 176, 344, ["读-改-写被交错拆开", "A 尚未写回，B 已读取 0"], "state"),
+		],
+		edges: [edge("read-a", "M140 96 L86 60", true), edge("read-b", "M220 96 L274 60", true)],
+	},
+	{
+		note: "无锁交错（2）：A、B 依次把各自算出的 1 写回 count，最终结果是 1，丢失了一次加一更新。",
+		boxes: [
+			node("a", 8, 8, 156, ["线程 A", "store(1) 完成"], "actor", true),
+			node("b", 196, 8, 156, ["线程 B", "store(1) 覆盖写回"], "actor", true),
+			node("shared", 70, 96, 220, ["无锁结果 · count = 1", "丢失一次 +1 更新"], "control", true),
+			node("rule", 8, 176, 344, ["只锁单次写仍不够", "两份局部结果都是 0 + 1"], "control"),
+		],
+		edges: [edge("write-a", "M86 56 L140 92", true), edge("write-b", "M274 56 L220 92", true)],
+	},
+	{
+		note: "改用 Mutex 保护完整临界区：A 取得锁后独自完成 0 → 1，B 只能停在 lock() 门外等待。",
+		boxes: [
+			node("a", 8, 8, 156, ["线程 A（持锁）", "读 0 → 写回 1"], "actor", true),
+			node("b", 196, 8, 156, ["线程 B（等待）", "停在 lock() 门外"], "control"),
+			node("lock", 8, 96, 164, ["Mutex 锁", "归属：线程 A"], "state", true),
+			node("shared", 188, 96, 164, ["受保护 count", "0 → 1"], "state", true),
+			node("rule", 8, 176, 344, ["完整临界区：读 → 改 → 写 → 解锁", "释放前 B 无法进入"], "state"),
+		],
+		edges: [
+			edge("a-lock", "M86 56 V92", true),
+			controlEdge("b-wait", "M274 56 L145 94"),
+			edge("a-count", "M172 120 H184", true),
+		],
+	},
+	{
+		note: "A 解锁后，B 获得同一把锁并从 1 改写为 2。互斥保护了整个读-改-写，两次更新均被保留。",
+		boxes: [
+			node("a", 8, 8, 156, ["线程 A（已解锁）", "已完成本轮 +1"], "actor"),
+			node("b", 196, 8, 156, ["线程 B（持锁）", "读 1 → 写回 2"], "actor", true),
+			node("lock", 8, 96, 164, ["Mutex 锁", "归属：线程 B → 释放"], "state", true),
+			node("shared", 188, 96, 164, ["受保护 count", "1 → 2 · 更新保留"], "result", true),
 			node(
-				"shared",
+				"rule",
 				8,
-				100,
+				176,
 				344,
-				[`Mutex 归属：${owner}`, `受保护的 count = ${count}`],
-				owner === "无" ? "result" : "state",
+				["互斥串行化读-改-写", "两次加一按序落盘，count = 2"],
+				"result",
 				true,
 			),
-			node(
-				"operation",
-				8,
-				188,
-				344,
-				["临界区内的完整操作", "读取 → 计算 → 写回 → 解锁"],
-				"control",
-			),
 		],
-		edges:
-			owner === "无"
-				? []
-				: [
-						edge("access", owner === "A" ? "M86 56 V94" : "M274 56 V94", true),
-						...(owner === "A"
-							? [
-									{
-										...edge("wait", "M274 56 V94"),
-										dashed: true,
-										label: { text: "等待", x: 298, y: 80 },
-									},
-								]
-							: []),
-					],
-	})),
-};
-
-const condition: Scene = {
-	title: "通知之后为什么还要复查",
-	section: "条件变量等待状态满足条件",
-	description:
-		"生产尚未结束时的一次队列等待，队列由同一把 Mutex 保护。实线表示持锁检查或操作，虚线表示等待与通知路径；唤醒后仍要重新竞争锁。",
-	caption: "条件变量等的是谓词成立，通知只提供重新检查的机会。",
-	diagram: `flowchart TB
- check{"持锁检查<br/>队列非空？"}
- check -->|是| take["持锁取出任务<br/>解锁后处理"]
- check -.->|否| wait["wait：原子解锁并等待"]
- wait -.-> producer["生产者可获同一把锁<br/>入队、解锁并通知"]
- producer -.-> retry["等待者重新获锁"]
- retry -->|再次检查，不直接取任务| check
- class check,retry state
- class wait,producer resource
- class take result`,
-	frames: [
-		{
-			boxes: [],
-			activeNodes: ["check", "wait"],
-			activeEdges: [1],
-			note: "队列为空就不能取任务。wait 原子地释放锁并等待，让生产者有机会持同一把锁修改队列。",
-		},
-		{
-			boxes: [],
-			activeNodes: ["wait", "producer"],
-			activeEdges: [2],
-			note: "生产者取得锁、入队，再解锁并通知。通知不是把锁直接交给等待者，也不是为它预留一份任务。",
-		},
-		{
-			boxes: [],
-			activeNodes: ["retry", "check"],
-			activeEdges: [3, 4],
-			note: "醒来后重新获锁并检查：可能是虚假唤醒，也可能已有其他消费者取走任务；谓词仍为假就沿等待分支再走一轮。",
-		},
-		{
-			boxes: [],
-			activeNodes: ["check", "take"],
-			activeEdges: [0],
-			note: "只有持锁确认队列非空，才在该临界区取出任务。生产结束与排空退出需要额外的 done 谓词，正文再展开。",
-		},
-	],
-};
+		edges: [edge("b-lock", "M274 56 L130 94", true), edge("b-count", "M172 120 H184", true)],
+	},
+];
 
 export const scene: Scene = {
-	...mutex,
-	legend:
-		"蓝：线程 · 紫：受保护状态／谓词 · 橙：等待与修改 · 绿：取得结果；箭头区分访问与等待关系。",
-	chapters: [mutex, condition],
+	title: "无锁交错丢更新 vs Mutex 守护完整临界区",
+	section: "mutex独占访问",
+	legend: EXECUTION_LEGEND,
+	caption: "互斥的不是某一次写入，而是“读旧值 → 计算 → 写新值”这整段读-改-写临界区。",
+	description:
+		"前两帧展示无锁保护时两线程同时读到 0 并先后写回 1，导致更新丢失；后两帧展示 Mutex 把完整读-改-写串行化，使两次加一按序把 count 从 0 推到 2。",
+	frames,
 };

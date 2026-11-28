@@ -66,12 +66,6 @@ function tree(note: string, active: string[], output?: (string | number)[]) {
 }
 
 export const treeExamples = {
-	"binary-tree-inorder-traversal": example(
-		"中序遍历",
-		"在同一棵树上，按左子树、根、右子树的顺序输出。",
-		225,
-		tree("先访问 1、2、3，再访问根节点 4，最后访问 6、7、9。", ["a"], [1, 2, 3, 4, 6, 7, 9]),
-	),
 	"binary-tree-level-order-traversal": example(
 		"层序遍历",
 		"队列按层处理节点，下一层从左到右入队。",
@@ -80,35 +74,17 @@ export const treeExamples = {
 		tree("处理第二层的 2 和 7 时，依次把 1、3、6、9 放入下一批。", ["b", "c"], [2, 7]),
 		tree("第三层全是叶子，处理后队列为空。", ["d", "e", "f", "g"], [1, 3, 6, 9]),
 	),
-	"binary-tree-right-side-view": example(
-		"二叉树右视图",
-		"取每层实际存在的最右节点。",
-		224,
-		tree("从右侧观察三层，依次看见根 4、右孩子 7、右侧叶子 9。", ["a", "c", "g"], [4, 7, 9]),
-	),
 	"diameter-of-binary-tree": example(
 		"二叉树直径",
 		"粗边给出一条最长路径，直径按边计数。",
 		171,
 		tree("一条最长路径是 1 → 2 → 4 → 7 → 9，长度为 4 条边。", ["d", "b", "a", "c", "g"]),
 	),
-	"maximum-depth-of-binary-tree": example(
-		"二叉树最大深度",
-		"从根到叶子数节点。",
-		171,
-		tree("根节点 4 到叶子 1 的路径共 3 个节点，其余叶子也在第 3 层。", ["a", "b", "d"]),
-	),
 	"lowest-common-ancestor-of-a-binary-tree": example(
 		"最近公共祖先",
 		"查询节点 1 和 3，找它们向上的首个汇合点。",
 		171,
 		tree("1 和 3 分别位于 2 的左右子树，因此最近公共祖先是 2。", ["d", "b", "e"]),
-	),
-	"kth-smallest-element-in-a-bst": example(
-		"BST 中第 k 小的元素",
-		"沿 BST 的中序顺序计数。",
-		224,
-		tree("令 k=3。中序遍历先访问 1、2、3，第三个节点就是 3。", ["e"], [1, 2, 3]),
 	),
 	"convert-sorted-array-to-binary-search-tree": example(
 		"有序数组构建 BST",
