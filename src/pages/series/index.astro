@@ -17,18 +17,18 @@ const standalonePosts = posts.filter((post) => !seriesEntryUrls.has(entryUrl(pos
 	<BrowseNav current="series" />
 	{standalonePosts.length > 0 && (
 		<section class="mb-(--receipt-section-gap)" aria-labelledby="standalone-posts">
-			<h2 id="standalone-posts" class="mb-2 font-serif text-sm font-semibold text-printer-ink">
+			<h2 id="standalone-posts" class="receipt-section-title mb-(--receipt-heading-gap)">
 				独立文章
 			</h2>
-			<ul class="divide-y divide-dashed divide-printer-ink/20 rounded-sm border border-printer-ink/20" role="list">
+			<ul class="receipt-list rounded-sm border border-(--receipt-rule)" role="list">
 				{standalonePosts.map((post) => (
 					<li>
-						<a class="receipt-row-link block rounded-xs px-3 py-3 sm:px-4" href={entryUrl(post)} aria-labelledby={`title-${post.id}`}>
+						<a class="receipt-row-link block rounded-xs px-(--receipt-series-indent) py-(--receipt-row-padding)" href={entryUrl(post)} aria-labelledby={`title-${post.id}`}>
 							<div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
 								<h3 id={`title-${post.id}`} class="font-serif text-base leading-snug tracking-tight sm:text-lg">
 									{post.data.title}
 								</h3>
-								<FormattedDate class="whitespace-nowrap font-mono text-xs text-printer-ink-light tabular-nums" date={post.data.publishDate} />
+								<FormattedDate class="receipt-meta" date={post.data.publishDate} />
 							</div>
 							<p class="mt-2 font-serif text-sm leading-relaxed text-printer-ink/80">{post.data.description}</p>
 						</a>
@@ -39,7 +39,7 @@ const standalonePosts = posts.filter((post) => !seriesEntryUrls.has(entryUrl(pos
 	)}
 	{groups.length > 0 && (
 		<section aria-labelledby="series-list">
-			<h2 id="series-list" class="mb-2 font-serif text-sm font-semibold text-printer-ink">系列</h2>
+			<h2 id="series-list" class="receipt-section-title mb-(--receipt-heading-gap)">系列</h2>
 			<SeriesArchive groups={groups} headingLevel="h3" />
 		</section>
 	)}

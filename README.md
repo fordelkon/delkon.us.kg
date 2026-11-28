@@ -67,8 +67,9 @@ Example English and Chinese writing lives in `content/posts/` and `content/notes
 
 [Content collection schemas](src/content.config.ts) are the source of truth for frontmatter. [Entry selection](src/data/entries.ts) provides chronological listings including series members, backed by shared [ordering](src/data/ordering.ts) and [series membership](src/data/series.ts).
 
+The home page lists recent posts before works and notes, with a link to the series directory.
 The posts archive lists all published posts by year, including series members.
-Its browse navigation also links to the series directory and the tag directory.
+Its browse navigation links to the directory of series and standalone posts and to the tag directory.
 
 - Posts: `content/posts/**/*.{md,mdx}`; required `title`, `description`, and `publishDate`. Optional tags, pinned status, draft status, cover image, update date, and custom social image.
 - Notes: `content/notes/`; required `title` and an ISO 8601 `publishDate` with timezone offset, for example `2026-10-02T14:05:00Z`; optional topic tags.

@@ -14,15 +14,15 @@ const tags = await getTagDirectory();
 
 		return members.length > 0 && (
 			<section class="mb-(--receipt-section-gap)" aria-labelledby={`group-${group.id}`}>
-				<h2 id={`group-${group.id}`} class="mb-3 print-label-wide text-printer-ink-light">
+				<h2 id={`group-${group.id}`} class="receipt-section-title mb-(--receipt-heading-gap)">
 					{group.title}
 				</h2>
-				<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
+				<ul class="receipt-group-rule receipt-list" role="list">
 					{members.map((tag) => (
 						<li>
 							<a class="receipt-row receipt-row-link min-h-11 flex-row items-center justify-between gap-4" href={tagUrl(tag.id)}>
 								<span class="font-serif text-base"><span aria-hidden="true">#</span>{tag.title}</span>
-								<span class="shrink-0 print-label text-printer-ink-light">{tag.count} 篇</span>
+								<span class="receipt-meta shrink-0">{tag.count} 篇</span>
 							</a>
 						</li>
 					))}

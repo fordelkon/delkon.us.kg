@@ -15,28 +15,27 @@ const { as: Tag = "div", post, withDesc = false, showSeries = false } = Astro.pr
 const series = showSeries ? await getSeriesContext(post) : undefined;
 ---
 
-<div>
-	<a class="receipt-row receipt-row-link" href={entryUrl(post)}>
-		<FormattedDate
-			class="print-label text-printer-ink-light tabular-nums"
-			date={post.data.publishDate}
-		/>
+<div class:list={[withDesc && "py-(--receipt-row-padding)"]}>
+	<a class:list={["receipt-row receipt-row-link", withDesc && "py-0"]} href={entryUrl(post)}>
+		{!withDesc && <FormattedDate class="print-label text-printer-ink-light tabular-nums" date={post.data.publishDate} />}
 		<Tag class="font-serif text-base leading-snug tracking-tight sm:text-lg">
 			{post.data.draft && <span class="text-red-500">(Draft) </span>}
 			{post.data.title}
 		</Tag>
 		{withDesc && (
-			<q class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">
+			<p class="line-clamp-2 font-serif text-sm leading-relaxed text-printer-ink/80">
 				{post.data.description}
-			</q>
+			</p>
 		)}
 	</a>
-	{series && (
-		<a
-			class="printer-link -mt-1 mb-1 inline-flex min-h-8 items-center rounded-xs px-1 text-xs text-printer-ink-light hover:text-printer-accent focus-visible:text-printer-accent focus-visible:outline-2 focus-visible:outline-printer-accent"
-			href={seriesUrl(series.group.id)}
-		>
-			系列 · {series.group.title}
-		</a>
+	{(withDesc || series) && (
+		<div class:list={["flex flex-wrap items-center gap-x-3", withDesc ? "mt-1" : "-mt-1 mb-1"]}>
+			{withDesc && <FormattedDate class="receipt-meta" date={post.data.publishDate} />}
+			{series && (
+				<a class="receipt-section-link printer-link" href={seriesUrl(series.group.id)}>
+					系列 · {series.group.title}
+				</a>
+			)}
+		</div>
 	)}
 </div>

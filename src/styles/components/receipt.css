@@ -12,6 +12,85 @@
 	@apply text-printer-ink hover:bg-printer-ink/3 hover:text-printer-accent focus-visible:bg-printer-ink/3 focus-visible:text-printer-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-printer-accent motion-reduce:transition-none;
 }
 
+.receipt-series-row {
+	@apply mx-0 border-s border-dashed border-(--receipt-rule) ps-(--receipt-series-indent);
+}
+
+/* A ruled margin on the continuous sheet, with a registration mark at each entry. */
+.receipt-register {
+	--register-inset: 1rem;
+	position: relative;
+	margin-inline-start: calc(-1 * var(--register-inset) - 1px);
+	border-block: 1px solid var(--receipt-rule);
+	border-inline-start: 1px solid var(--receipt-rule);
+	padding-inline-start: var(--register-inset);
+	background:
+		linear-gradient(var(--receipt-rule), var(--receipt-rule)) no-repeat 100% 0 / 1px 5px,
+		linear-gradient(var(--receipt-rule), var(--receipt-rule)) no-repeat 100% 100% / 1px 5px;
+}
+
+.receipt-register::before,
+.receipt-group-rule::before {
+	position: absolute;
+	inset-block-start: -1px;
+	inset-inline-start: 0;
+	inline-size: 0.75rem;
+	border-block-start: 2px solid var(--color-printer-accent);
+	content: "";
+}
+
+.receipt-register li {
+	position: relative;
+}
+
+.receipt-register li::before {
+	position: absolute;
+	inset-block-start: calc(var(--receipt-row-padding) + 0.5rem);
+	inset-inline-start: calc(-1 * var(--register-inset));
+	inline-size: 0.375rem;
+	border-block-start: 1px solid var(--receipt-rule);
+	pointer-events: none;
+	content: "";
+}
+
+.receipt-section-title {
+	@apply font-serif text-sm font-semibold text-printer-ink;
+}
+
+.receipt-section-header {
+	@apply mb-(--receipt-heading-gap) flex flex-wrap items-baseline justify-between gap-x-3;
+}
+
+.receipt-section-link {
+	@apply inline-flex min-h-6 items-center font-mono text-xs text-printer-ink-light underline-offset-4 hover:text-printer-accent hover:underline focus-visible:outline-2 focus-visible:outline-printer-accent;
+}
+
+.receipt-list > li + li {
+	border-block-start: 1px dotted var(--receipt-rule-subtle);
+}
+
+.receipt-compact-row {
+	@apply min-h-11 flex-row flex-wrap items-baseline justify-between gap-x-3;
+}
+
+.receipt-compact-row > :first-child {
+	flex: 1 1 min(10rem, 100%);
+	overflow-wrap: anywhere;
+}
+
+.receipt-meta {
+	@apply whitespace-nowrap font-mono text-xs text-printer-ink-light tabular-nums;
+}
+
+.receipt-compact-row > time {
+	margin-inline-start: auto;
+}
+
+.receipt-group-rule {
+	position: relative;
+	border-block-start: 1px solid var(--receipt-rule);
+}
+
 /* Index and utility-page titles share a scale; article mastheads remain larger. */
 .receipt-title {
 	@apply font-serif text-2xl font-bold tracking-tight sm:text-3xl;

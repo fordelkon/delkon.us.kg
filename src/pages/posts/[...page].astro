@@ -5,7 +5,6 @@ import { Icon } from "astro-icon/components";
 import BrowseNav from "@/components/BrowseNav.astro";
 import PostPreview from "@/components/blog/PostPreview.astro";
 import Pagination from "@/components/Paginator.astro";
-import PrintedSection from "@/components/printed/PrintedSection.astro";
 import { getPublishedPosts } from "@/data/entries";
 import { getPinnedPosts, groupPostsByYear, MAX_POSTS_PER_PAGE } from "@/data/post";
 import PageLayout from "@/layouts/Base.astro";
@@ -44,12 +43,12 @@ const groupedByYear = groupPostsByYear(page.data);
 	</header>
 	<BrowseNav current="posts" />
 	{page.currentPage === 1 && pinnedPosts.length > 0 && (
-		<section class="mb-(--receipt-section-gap)" aria-label="Pinned posts">
-			<PrintedSection label="Pinned" />
-			<ul role="list">
+		<section class="mb-(--receipt-section-gap)" aria-labelledby="pinned-posts">
+			<h2 id="pinned-posts" class="receipt-section-title mb-(--receipt-heading-gap)">置顶文章</h2>
+			<ul class="receipt-register receipt-list" role="list">
 				{pinnedPosts.map((post) => (
 					<li>
-						<PostPreview showSeries as="h2" post={post} />
+						<PostPreview showSeries as="h3" post={post} withDesc />
 					</li>
 				))}
 			</ul>
@@ -57,11 +56,11 @@ const groupedByYear = groupPostsByYear(page.data);
 	)}
 	{groupedByYear.map(([yearKey, posts]) => (
 		<section class="mb-(--receipt-section-gap)" aria-labelledby={`year-${yearKey}`}>
-			<h2 id={`year-${yearKey}`} class="mb-(--receipt-heading-gap) print-label-wide text-printer-ink-light">
+			<h2 id={`year-${yearKey}`} class="mb-(--receipt-heading-gap) font-mono text-sm font-semibold text-printer-ink tabular-nums">
 				<span class="sr-only">Posts in </span>
 				{yearKey}
 			</h2>
-			<ul class="divide-y divide-dotted divide-printer-ink/10" role="list">
+			<ul class="receipt-register receipt-list" role="list">
 				{posts.map((post) => (
 					<li>
 						<PostPreview showSeries as="h3" post={post} withDesc />

@@ -1,14 +1,10 @@
 ---
-import PostPreview from "@/components/blog/PostPreview.astro";
-import Note from "@/components/note/Note.astro";
+import EntryList from "@/components/EntryList.astro";
 import PrintedDivider from "@/components/printed/PrintedDivider.astro";
-import PrintedSection from "@/components/printed/PrintedSection.astro";
-import SeriesArchive from "@/components/SeriesArchive.astro";
 import SocialList from "@/components/SocialList.astro";
 import WorksGrid from "@/components/work/WorksGrid.astro";
 import { getPublishedNotes, getPublishedPosts } from "@/data/entries";
 import { getPinnedPosts } from "@/data/post";
-import { getSeriesGroups } from "@/data/series";
 import { works } from "@/data/works";
 import PageLayout from "@/layouts/Base.astro";
 
@@ -26,12 +22,6 @@ const latestPosts = publishedPosts
 // Notes, set to a max of 4
 const MAX_NOTES = 4;
 const latestNotes = (await getPublishedNotes()).slice(0, MAX_NOTES);
-
-// Folder rows give series a single home-page entry point per collection.
-const [postSeriesGroups, noteSeriesGroups] = await Promise.all([
-	getSeriesGroups("post"),
-	getSeriesGroups("note"),
-]);
 
 const meta = { title: "Home" };
 ---
@@ -55,62 +45,35 @@ const meta = { title: "Home" };
 
 	<PrintedDivider style="dotted" />
 
-	<section>
-		<PrintedSection label="Works" />
+	<section aria-labelledby="latest-posts">
+		<header class="receipt-section-header">
+			<h2 id="latest-posts" class="receipt-section-title">近期文章</h2>
+			<a class="receipt-section-link" href="/posts/">全部文章 →</a>
+		</header>
+		{pinnedPosts.length > 0 && (
+			<div class="mb-(--receipt-group-gap)">
+				<h3 class="mb-1 print-label text-printer-ink-light">置顶</h3>
+				<EntryList entries={pinnedPosts} />
+			</div>
+		)}
+		<EntryList entries={latestPosts} />
+		<a class="receipt-section-link mt-(--receipt-group-gap)" href="/series/">系列与单篇 →</a>
+	</section>
+
+	<PrintedDivider />
+
+	<section aria-labelledby="works">
+		<h2 id="works" class="receipt-section-title mb-(--receipt-heading-gap)">作品</h2>
 		<WorksGrid records={works} />
 	</section>
 
-	<PrintedDivider style="dashed" />
+	<PrintedDivider />
 
-	<section>
-		<PrintedSection label="Latest posts">
-			<a
-				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
-				href="/posts/"
-			>
-				View all →
-			</a>
-		</PrintedSection>
-		<SeriesArchive groups={postSeriesGroups} />
-		{pinnedPosts.length > 0 && (
-			<section class="mb-(--receipt-group-gap)">
-				<h2 class="sr-only">Pinned posts</h2>
-				<ul role="list" class="space-y-1">
-					{pinnedPosts.map((p) => (
-						<li>
-							<PostPreview showSeries post={p} />
-						</li>
-					))}
-				</ul>
-			</section>
-		)}
-		<ul role="list" class="space-y-1">
-			{latestPosts.map((p) => (
-				<li>
-					<PostPreview showSeries post={p} />
-				</li>
-			))}
-		</ul>
-	</section>
-
-	<PrintedDivider style="dashed" />
-
-	<section>
-		<PrintedSection label="Notes">
-			<a
-				class="print-label text-printer-accent transition-colors hover:text-printer-ink focus-visible:text-printer-ink"
-				href="/notes/"
-			>
-				View all →
-			</a>
-		</PrintedSection>
-		<SeriesArchive groups={noteSeriesGroups} />
-		<ul role="list" class="space-y-1">
-			{latestNotes.map((note) => (
-				<li>
-					<Note note={note} as="h2" isPreview compact />
-				</li>
-			))}
-		</ul>
+	<section aria-labelledby="latest-notes">
+		<header class="receipt-section-header">
+			<h2 id="latest-notes" class="receipt-section-title">便签</h2>
+			<a class="receipt-section-link" href="/notes/">全部便签 →</a>
+		</header>
+		<EntryList entries={latestNotes} />
 	</section>
 </PageLayout>

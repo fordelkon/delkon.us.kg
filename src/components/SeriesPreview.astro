@@ -35,7 +35,7 @@ const dateRange =
 
 <a
 	href={seriesUrl(group.id)}
-	class="receipt-row receipt-row-link border-s border-dashed border-printer-ink/20 ps-(--receipt-series-indent)"
+	class="receipt-row receipt-row-link receipt-series-row"
 >
 	<p class="print-label text-printer-ink-light tabular-nums">
 		<span class="text-printer-accent" aria-hidden="true">Series</span> · {dateRange}
@@ -47,8 +47,8 @@ const dateRange =
 		</span>
 	</Tag>
 	{group.description && (
-		<q class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">
+		<p class="line-clamp-2 font-serif text-xs leading-relaxed text-printer-ink-light">
 			{group.description}
-		</q>
+		</p>
 	)}
 </a>

@@ -18,7 +18,7 @@ const orderedGroups = [...groups].toSorted((a, b) => latestPublish(b) - latestPu
 ---
 
 {orderedGroups.length > 0 && (
-	<ul class="mb-(--receipt-group-gap) divide-y divide-dotted divide-printer-ink/10" role="list">
+	<ul class="receipt-list mb-(--receipt-group-gap)" role="list">
 		{orderedGroups.map((group) => (
 			<li>
 				<SeriesPreview as={headingLevel} group={group} />

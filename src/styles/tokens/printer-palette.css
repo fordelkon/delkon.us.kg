@@ -109,6 +109,8 @@
 @layer base {
 	html {
 		--printer-desk: #d9dad6;
+		--receipt-rule: color-mix(in oklab, var(--color-printer-ink) 24%, transparent);
+		--receipt-rule-subtle: color-mix(in oklab, var(--color-printer-ink) 15%, transparent);
 
 		/* Derived (not registered) prose highlighter-band tints: they mix
 		   --color-printer-accent at a fixed alpha, so they keep animating on

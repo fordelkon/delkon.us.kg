@@ -1,0 +1,27 @@
+---
+import FormattedDate from "@/components/FormattedDate.astro";
+import type { Entry } from "@/data/ordering";
+import { entryUrl } from "@/data/routes";
+
+interface Props {
+	entries: Entry[];
+}
+
+const { entries } = Astro.props;
+---
+
+{entries.length > 0 && (
+	<ul class="receipt-register receipt-list" role="list">
+		{entries.map((entry) => (
+			<li>
+				<a class="receipt-row receipt-row-link receipt-compact-row" href={entryUrl(entry)}>
+					<span class="min-w-0 font-serif text-base leading-snug sm:text-lg">
+						{entry.collection === "post" && entry.data.draft && <span class="text-red-500">(Draft) </span>}
+						{entry.data.title}
+					</span>
+					<FormattedDate class="receipt-meta" date={entry.data.publishDate} dateTimeOptions={{ year: undefined }} />
+				</a>
+			</li>
+		))}
+	</ul>
+)}
