@@ -1,39 +1,74 @@
-import { box, type Scene } from "./types.ts";
+import { label, mark } from "./examples.ts";
+import type { Frame, Scene } from "./types.ts";
 
-const calls = [3, 2, 1, 0];
+function trace(n: number): Frame[] {
+	const stack: number[] = [];
+	const frames: Frame[] = [];
 
-const steps = [
-	{ depth: 1, action: "调用 sumTo(2)", note: "sumTo(3) 入栈，准备求和到 2。" },
-	{ depth: 2, action: "调用 sumTo(1)", note: "sumTo(2) 入栈，外层保留 n = 3。" },
-	{ depth: 3, action: "调用 sumTo(0)", note: "sumTo(1) 入栈，前两层各自等待。" },
-	{ depth: 4, action: "直接返回 0", note: "到达基本情况，sumTo(0) 返回 0。" },
-	{ depth: 3, action: "0 + 1 = 1", note: "sumTo(0) 出栈，sumTo(1) 拿到 0，再加上自己的 1。" },
-	{ depth: 2, action: "1 + 2 = 3", note: "sumTo(1) 出栈，sumTo(2) 接到 1，算出 3。" },
-	{ depth: 1, action: "3 + 3 = 6", note: "sumTo(2) 出栈，sumTo(3) 接到 3，算出 6。" },
-	{ depth: 0, action: "最终结果 6", note: "sumTo(3) 返回 6，图中的调用栈清空。" },
-];
+	function snapshot(action: string, note: string) {
+		const top = stack.length - 1;
+		const y = (index: number) => 140 - index * 44;
+
+		const boxes = stack.map((value, index) =>
+			mark(
+				`frame-${value}`,
+				72,
+				y(index),
+				278,
+				44,
+				`sumTo(${value})　${index === top ? action : `等返回值 + ${value}`}`,
+				"cell",
+				index === top,
+			),
+		);
+
+		boxes.push(label("top", 34, y(top) + 22, "栈顶", 64));
+		frames.push({ note, boxes });
+	}
+
+	function call(value: number): number {
+		stack.push(value);
+
+		if (value === 0) {
+			snapshot("返回 0", "到达基本情况。sumTo(0) 返回 0，下面三层各自还留着一次加法。");
+			stack.pop();
+
+			return 0;
+		}
+
+		snapshot(
+			"调用下一层",
+			`sumTo(${value}) 还要加 ${value}。它先调用 sumTo(${value - 1})，把这次加法留在自己的栈帧里。`,
+		);
+		const childResult = call(value - 1);
+		const result = childResult + value;
+		snapshot(
+			`${childResult} + ${value} = ${result}`,
+			`子调用返回 ${childResult}，sumTo(${value}) 恢复，取出本层保留的 ${value}，返回 ${result}。`,
+		);
+		stack.pop();
+
+		return result;
+	}
+
+	const result = call(n);
+	frames.push({
+		note: "sumTo(3) 已返回给调用方。图中这四次 sumTo 调用的栈帧都已退出。",
+		boxes: [
+			label("empty", 180, 70, "调用栈已清空", 290),
+			mark("result", 72, 108, 216, 44, `返回给调用方：${result}`, "cell", true),
+		],
+	});
+
+	return frames;
+}
 
 export const scene: Scene = {
-	title: "sumTo(3) 的调用栈",
-	section: "调用栈保存了什么",
-	caption: "粗框标出栈顶。栈顶返回后，上一层用自己保留的 n 完成加法。",
+	title: "每次递归调用留下的加法",
+	diagramHeight: 194,
+	caption:
+		"粗框标出正在执行的栈顶。进入子调用时，上一层留下自己的加法；返回后，只有紧挨着的那一层恢复。",
 	description:
-		"栈向上增长，粗边框标出栈顶。sumTo 依次用 3、2、1、0 入栈。sumTo(0) 直接返回 0，上一层用保留的 n 算出 1，再逐层算出 3 和 6，最后清空调用栈。",
-	frames: steps.map(({ depth, action, note }) => ({
-		note,
-		boxes: depth
-			? calls.slice(0, depth).map((n, index) => {
-					const isTop = index === depth - 1;
-
-					return box(
-						`frame-${n}`,
-						64,
-						188 - index * 60,
-						232,
-						[`sumTo(${n})`, isTop ? action : `保留 n = ${n}，等待子调用`],
-						isTop,
-					);
-				})
-			: [box("result", 64, 188, 232, ["调用栈已清空", action], true)],
-	})),
+		"sumTo(3) 依次压入 3、2、1、0 四层。0 是基本情况，返回 0。其余层各自从栈顶恢复，将子调用结果分别加 1、2、3，依次返回 1、3、6。",
+	frames: trace(3),
 };

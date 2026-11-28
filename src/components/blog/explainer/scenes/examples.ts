@@ -68,7 +68,7 @@ export function example(
 	return {
 		title,
 		caption,
-		description: [caption, ...frames.map((frame) => frame.note)].join(" "),
+		description: frames.map((frame) => frame.note).join(" "),
 		diagramHeight,
 		frames,
 	};

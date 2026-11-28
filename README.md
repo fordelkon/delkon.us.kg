@@ -16,9 +16,9 @@ Use pnpm. The executable command definitions live in [package.json](package.json
 | `pnpm build`   | Generate `dist/` and the Pagefind search index   |
 | `pnpm preview` | Serve the production build locally               |
 
-Opening explainers live in [`src/components/blog/explainer/`](src/components/blog/explainer/). beautiful-mermaid renders relationship diagrams to SVG in Node during the build; stack, scheduling, publication, and queue scenes use authored SVG geometry. Builds do not launch or download a browser and do not require system fonts for diagram layout. The browser displays the generated SVG with local font fallbacks and runs the single-button playback controls.
+Posts with an opening figure are listed in [post-explainers.ts](src/data/post-explainers.ts). The [explainer component](src/components/blog/explainer/) renders the figure as SVG at build time. Readers can step forward and back, play the sequence, or expand all frames for comparison.
 
-Article bodies can use Mermaid fences with accessible captions through the same renderer and theme. See [diagram authoring](docs/writing.md#diagrams); `pnpm test:diagrams` checks the Markdown integration.
+Article bodies can use Mermaid fences with accessible captions. See [diagram authoring](docs/writing.md#diagrams). Run `pnpm test:diagrams` to check the Markdown integration.
 
 Search requires a production build. Run `pnpm build` before previewing search. Run `pnpm preview --host 127.0.0.1 --port 4321` to inspect the build locally.
 

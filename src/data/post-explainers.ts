@@ -1,63 +1,30 @@
-import { getAlgorithmSceneId, type SceneId } from "../components/blog/explainer/scenes/index.ts";
+import type { SceneId } from "../components/blog/explainer/scenes/index.ts";
 
-/** Select a post's opening scene without exposing scene details to the layout. */
+const openings = new Map<string, SceneId>([
+	["algorithm/container-with-most-water", "container-short-wall"],
+	["algorithm/copy-list-with-random-pointer", "random-list-weave"],
+	["algorithm/find-median-from-data-stream", "dual-heap-median"],
+	["algorithm/find-the-duplicate-number", "duplicate-index-cycle"],
+	["algorithm/implement-trie-prefix-tree", "implement-trie-prefix-tree"],
+	["algorithm/largest-rectangle-in-histogram", "monotonic-stack-window"],
+	["algorithm/median-of-two-sorted-arrays", "binary-search-cut"],
+	["algorithm/min-stack", "min-stack"],
+	["algorithm/partition-equal-subset-sum", "subset-update-order"],
+	["algorithm/rotting-oranges", "multi-source-bfs"],
+	["algorithm/search-a-2d-matrix-ii", "saddle-search"],
+	["algorithm/set-matrix-zeroes", "set-matrix-zeroes"],
+	["algorithm/sort-colors", "three-way-partition"],
+	["algorithm/trapping-rain-water", "trapping-water-pointers"],
+	["algorithm/validate-binary-search-tree", "validate-binary-search-tree"],
+	["concurrency/async-concurrency-task-lifecycle", "cancellation-ownership"],
+	["concurrency/message-passing-workers-backpressure", "worker-pool"],
+	["concurrency/parallelism-execution-units", "scheduling"],
+	["networking/layered-architecture-packet-journey", "packet-journey"],
+	["networking/routing-forwarding-nat-virtual-interfaces", "longest-prefix-route"],
+	["networking/transport-tcp-udp-socket-quic", "cumulative-ack-gap"],
+	["understanding-recursion", "recursion-stack"],
+]);
+
 export function getPostExplainer(postId: string): SceneId | undefined {
-	switch (postId) {
-		case "understanding-recursion":
-			return "recursion-stack";
-		case "algorithm/permutations":
-			return "backtracking-state";
-		case "algorithm/rotting-oranges":
-			return "multi-source-bfs";
-		case "algorithm/course-schedule":
-			return "topological-cycle";
-		case "algorithm/median-of-two-sorted-arrays":
-			return "binary-search-cut";
-		case "algorithm/largest-rectangle-in-histogram":
-			return "monotonic-stack-window";
-		case "algorithm/find-median-from-data-stream":
-			return "dual-heap-median";
-		case "algorithm/minimum-window-substring":
-			return "sliding-window-cover";
-		case "algorithm/sliding-window-maximum":
-			return "sliding-deque-max";
-		case "algorithm/sort-colors":
-			return "three-way-partition";
-		case "algorithm/first-missing-positive":
-			return "inplace-index-swap";
-		case "algorithm/next-permutation":
-			return "next-permutation-steps";
-		case "algorithm/spiral-matrix":
-			return "spiral-bounds";
-		case "algorithm/search-a-2d-matrix-ii":
-			return "saddle-search";
-		case "algorithm/lru":
-			return "lru-cache-ops";
-		case "algorithm/find-the-duplicate-number":
-			return "duplicate-index-cycle";
-		case "algorithm/linked-list-cycle-ii":
-			return "floyd-cycle-entry";
-		case "algorithm/trapping-rain-water":
-			return "trapping-water-pointers";
-		case "concurrency/parallelism-execution-units":
-			return "scheduling";
-		case "concurrency/locks-condvars-shared-memory-sync":
-			return "mutex-counter";
-		case "concurrency/atomics-memory-model":
-			return "atomic-publication";
-		case "concurrency/deadlock-livelock-correctness":
-			return "deadlock";
-		case "concurrency/message-passing-workers-backpressure":
-			return "worker-pool";
-		case "concurrency/async-concurrency-task-lifecycle":
-			return "await-state";
-		case "networking/layered-architecture-packet-journey":
-			return "packet-journey";
-		case "networking/transport-tcp-udp-socket-quic":
-			return "socket-buffer-eof";
-		case "networking/http-evolution-tls-handshake-https":
-			return "tls-handshake-visibility";
-		default:
-			return getAlgorithmSceneId(postId);
-	}
+	return openings.get(postId);
 }

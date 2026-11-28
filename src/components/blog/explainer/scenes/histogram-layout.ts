@@ -8,7 +8,7 @@ export function columnX(count: number, index: number) {
 	return (360 - count * columnWidth) / 2 + index * columnWidth;
 }
 
-export function histogram(heights: number[], active: number[]) {
+export function histogram(heights: readonly number[], active: number[]) {
 	const boxes = heights.flatMap((height, index) => {
 		const x = columnX(heights.length, index);
 		const top = baseline - height * unitHeight;

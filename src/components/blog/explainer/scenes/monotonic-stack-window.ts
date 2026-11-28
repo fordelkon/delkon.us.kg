@@ -1,69 +1,69 @@
-import { example, label, mark } from "./examples.ts";
+import { example, frame, label, mark } from "./examples.ts";
 import { baseline, columnWidth, columnX, histogram, unitHeight } from "./histogram-layout.ts";
 
-const heights = [2, 1, 5, 6, 2, 3];
+const heights = [2, 1, 5, 6, 2, 3] as const;
+const right = 4;
 
-const steps = [
-	{
-		start: 3,
-		width: 0,
-		height: 0,
-		stack: "栈 [1, 2, 3]",
-		note: "扫描到下标 3 时，栈中柱高为 1、5、6，等待第一根更矮的柱子。",
-	},
-	{
-		start: 3,
-		width: 1,
-		height: 6,
-		stack: "栈 [1, 2] · 面积 6",
-		note: "下标 4 的柱高为 2，弹出下标 3。左右阻挡边界为 2 和 4，能覆盖 1 格，面积为 6。",
-	},
-	{
-		start: 2,
-		width: 2,
-		height: 5,
-		stack: "栈 [1] · 面积 10",
-		note: "继续弹出下标 2，左边界退到 1，右边界仍为 4。高 5 的矩形覆盖下标 2 和 3，面积为 10。",
-	},
-	{
-		start: 2,
-		width: 2,
-		height: 5,
-		stack: "最终最大面积 10",
-		note: "末尾的虚拟零高柱把剩余柱结算完，最大面积仍为 10。",
-	},
-];
+function snapshot(stack: number[], note: string, popped?: 2 | 3) {
+	const left = stack[stack.length - 1];
 
-export const scene = {
-	...example(
-		"柱状图中最大的矩形",
-		"柱高对应输入值。虚线矩形的高由弹出的柱决定，宽由左右阻挡边界决定。",
-		209,
-		...steps.map(({ start, width, height, stack, note }, index) => {
-			const plot = histogram(heights, index === 1 || index === 2 ? [4] : []);
+	if (left === undefined) throw new Error("Missing left boundary");
 
-			return {
-				...plot,
-				note,
-				boxes: [
-					...plot.boxes,
-					...(width
-						? [
-								mark(
-									"area",
-									columnX(heights.length, start),
-									baseline - height * unitHeight,
-									width * columnWidth,
-									height * unitHeight,
-									"",
-									"area",
-								),
-							]
-						: []),
-					label("stack", 180, 194, stack, 270),
-				],
-			};
-		}),
+	const plot = histogram(heights, popped === undefined ? [right] : [left, right]);
+	const boxes = [...plot.boxes];
+
+	if (popped !== undefined) {
+		const height = heights[popped];
+		const width = right - left - 1;
+		const x = columnX(heights.length, left + 1);
+
+		boxes.push(
+			mark(
+				"area",
+				x,
+				baseline - height * unitHeight,
+				width * columnWidth,
+				height * unitHeight,
+				"",
+				"area",
+			),
+			label(
+				"area-value",
+				x + (width * columnWidth) / 2,
+				baseline - (height * unitHeight) / 2,
+				String(height * width),
+				52,
+			),
+		);
+	}
+
+	boxes.push(
+		label("stack-label", 78, 211, "下标栈", 82),
+		...stack.map((index, slot) =>
+			mark(
+				`slot-${slot}`,
+				124 + slot * 40,
+				192,
+				40,
+				38,
+				String(index),
+				"cell",
+				slot === stack.length - 1,
+			),
+		),
+	);
+
+	return frame(note, boxes, plot.edges);
+}
+
+export const scene = example(
+	"同一根矮柱，为什么会结算出两个宽度？",
+	"扫描停在下标 4。每弹出一根高柱，新的栈顶就给出它的左边界，两界之间的列数就是矩形宽度。",
+	242,
+	snapshot(
+		[-1, 1, 2, 3],
+		"下标 4 的柱高只有 2。栈顶的 3 对应高度 6，矩形遇到了右界。栈底 −1 是哨兵。",
 	),
-	section: "固定高度求最大宽度两侧首个更矮边界",
-};
+	snapshot([-1, 1, 2], "先弹出下标 3，新栈顶是 2。高度 6 只能覆盖下标 3 这一列，面积是 6。", 3),
+	snapshot([-1, 1], "再弹出下标 2，新栈顶是 1。高度 5 可以横跨下标 2、3 两列，面积是 10。", 2),
+);

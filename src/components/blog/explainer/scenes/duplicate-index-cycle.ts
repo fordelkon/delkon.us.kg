@@ -14,7 +14,7 @@ const [nodes, edges] = topology(
 		["1", "3"],
 		["3", "2"],
 	],
-	["2"],
+	["3", "2"],
 	true,
 );
 
@@ -25,7 +25,11 @@ export const scene = example(
 	frame(
 		"由 0 出发依次访问下标 1、3、2、4、2。下标 3 与 4 都指向 2，对应两处数组元素同为 2。",
 		[
-			label("array", 180, 22, "nums = [1, 3, 4, 2, 2]", 260),
+			...Array.from({ length: 5 }, (_, index) =>
+				label(`index-${index}`, 100 + index * 40, 29, String(index), 40),
+			),
+			label("indices", 46, 29, "下标", 48),
+			label("values", 46, 68, "值", 48),
 			...cells("values", [1, 3, 4, 2, 2], 48, [3, 4]),
 			...nodes,
 		],

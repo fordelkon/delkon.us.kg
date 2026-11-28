@@ -1,6 +1,6 @@
 ---
-import ScenePlayer from "./ScenePlayer.astro";
-import type { Scene } from "./scenes/types";
+import Diagram from "./Diagram.astro";
+import { DIAGRAM_HEIGHT, DIAGRAM_WIDTH, type Scene } from "./scenes/types";
 
 interface Props {
 	scene: Scene;
@@ -8,22 +8,74 @@ interface Props {
 }
 
 const { scene, sceneId } = Astro.props;
+const { caption, description } = scene;
+const animated = scene.frames.length > 1;
+const Canvas = animated ? "step-explainer" : "div";
+const diagramViewBox = `0 0 ${DIAGRAM_WIDTH} ${scene.diagramHeight ?? DIAGRAM_HEIGHT}`;
+const { frames } = scene;
 ---
 
-{scene.legend ? (
-	<div class="explainer-scenes not-prose" data-pagefind-ignore>
-		<p class="explainer-heading">{scene.title}</p>
-		<p class="explainer-legend">
-			{scene.legend}
-			{scene.frames.length > 1 && (
-				<>
-					<br />
-					粗边框标出当前状态；步骤停留时间不代表实际耗时。
-				</>
-			)}
-		</p>
-		<ScenePlayer scene={scene} sceneId={sceneId} study />
-	</div>
-) : (
-	<ScenePlayer scene={scene} sceneId={sceneId} study />
-)}
+<figure
+	class="step-explainer not-prose"
+	data-scene={sceneId}
+	aria-label={scene.title}
+	data-pagefind-ignore
+>
+	<Canvas class="step-explainer-canvas">
+		<div class="step-explainer-visual" role={animated ? undefined : "img"} aria-label={animated ? undefined : description}>
+			{frames.map((frame, index) => (
+				<div
+					class="step-explainer-frame"
+					aria-hidden={animated && index > 0 ? "true" : undefined}
+				>
+					<Diagram
+						frame={frame}
+						id={animated ? `${sceneId}-${index}-artwork` : undefined}
+						marker={`${sceneId}-arrow-${index}`}
+						height={scene.diagramHeight}
+					/>
+					{animated && <p class="explainer-note">{frame.note}</p>}
+				</div>
+			))}
+		</div>
+		{animated && (
+			<div class="explainer-controls" role="group" aria-label="图解步骤" hidden>
+				<span class="explainer-step" role="status" aria-atomic="true">
+					<span class="sr-only">步骤 </span>
+					<span data-position>1 / {frames.length}</span>
+					<span class="sr-only" data-current-note></span>
+				</span>
+				<button type="button" data-previous aria-disabled="true">上一步</button>
+				<button type="button" data-next>下一步</button>
+				<button type="button" data-play>播放</button>
+			</div>
+		)}
+	</Canvas>
+	<figcaption>
+		<p class="step-explainer-caption">{caption}</p>
+		{animated && (
+			<details class="step-explainer-transcript">
+				<summary>查看全部步骤</summary>
+				<ol>
+					{frames.map((frame, index) => (
+						<li>
+							<svg
+								class="explainer-diagram"
+								viewBox={diagramViewBox}
+								aria-hidden="true"
+								focusable="false"
+							>
+								<use href={`#${sceneId}-${index}-artwork`} />
+							</svg>
+							<p>{frame.note}</p>
+						</li>
+					))}
+				</ol>
+			</details>
+		)}
+	</figcaption>
+</figure>
+
+<script>
+	import "./playback";
+</script>

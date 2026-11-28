@@ -16,16 +16,6 @@ tags: ["algorithm", "tricks", "python", "cpp"]
 - 由于值域是 $[1, n]$，下标 `0` **永远不可能成为任何元素的指针目标**（没有节点的 `next` 指向 `0`），因此 `0` 一定是位于环外、入度为 0 的起点；
 - 由于共有 $n + 1$ 个下标却只有 $n$ 个有效目标值，根据**鸽巢原理**（pigeonhole principle）[^pigeonhole]，从 `0` 出发不断迭代 $i \mapsto \text{nums}[i]$ 必然进入一个有向环；而环入口节点 `d` 至少同时被环外前驱与环内尾节点两条不同边指向，意味着存在两个不同下标 `a != b` 满足 `nums[a] == nums[b] == d`——`d` 正是唯一重复的数字。
 
-用题目的示例数组 `[1, 3, 4, 2, 2]`。先按下标排出原数组，用粗体标出两个值为 2 的格子：
-
-<div class="algorithm-table">
-
-| 下标 | 0 | 1 | 2 | 3 | 4 |
-| --- | --- | --- | --- | --- | --- |
-| 数组值 | 1 | 3 | 4 | **2** | **2** |
-
-</div>
-
 于是问题与[《环形链表 II：快慢指针相遇后为什么能找到入口》](/posts/algorithm/linked-list-cycle-ii/)完全同构，可直接复用 Floyd 龟兔判圈算法[^knuth-floyd]：
 
 1. **第一阶段（快慢追及）**：`slow = nums[0]`，`fast = nums[nums[0]]`（注意必须先各走一步再进入 `while slow != fast`，否则两者同在 `0` 会立刻结束循环），此后每次 `slow = nums[slow]`、`fast = nums[nums[fast]]`，直到在环内相遇；
