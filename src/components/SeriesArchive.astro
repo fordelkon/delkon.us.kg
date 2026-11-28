@@ -4,9 +4,10 @@ import type { SeriesGroup } from "@/data/series";
 
 interface Props {
 	groups: SeriesGroup[];
+	headingLevel?: "h2" | "h3";
 }
 
-const { groups } = Astro.props;
+const { groups, headingLevel = "h2" } = Astro.props;
 
 // Newest activity first, matching the archive's chronological ordering of
 // standalone entries. A folder's sort date is its latest member publish date.
@@ -20,7 +21,7 @@ const orderedGroups = [...groups].toSorted((a, b) => latestPublish(b) - latestPu
 	<ul class="mb-(--receipt-group-gap) divide-y divide-dotted divide-printer-ink/10" role="list">
 		{orderedGroups.map((group) => (
 			<li>
-				<SeriesPreview as="h2" group={group} />
+				<SeriesPreview as={headingLevel} group={group} />
 			</li>
 		))}
 	</ul>
