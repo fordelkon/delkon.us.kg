@@ -16,7 +16,7 @@ Use pnpm. The executable command definitions live in [package.json](package.json
 | `pnpm build`   | Generate `dist/` and the Pagefind search index   |
 | `pnpm preview` | Serve the production build locally               |
 
-Posts with an opening figure are listed in [post-explainers.ts](src/data/post-explainers.ts). The [explainer component](src/components/blog/explainer/) renders the figure as SVG at build time. Readers can step forward and back, play the sequence, or expand all frames for comparison.
+Posts with a figure are listed in [post-explainers.ts](src/data/post-explainers.ts). The [explainer component](src/components/blog/explainer/) renders SVG at build time. Readers can switch conditions at the same step, play a sequence, or compare all states in the expanded and printed views.
 
 Article bodies can use Mermaid fences with accessible captions. See [diagram authoring](docs/writing.md#diagrams). Run `pnpm test:diagrams` to check the Markdown integration.
 

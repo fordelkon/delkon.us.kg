@@ -74,24 +74,12 @@ HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接
 
 以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。本例使用**临时椭圆曲线迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE），两端在 `ClientHello` 与 `ServerHello` 中用 `key_share` 交换各自的临时公钥，从而获得**前向保密**（Forward Secrecy，FS）。双方在 `ServerHello` 后以**基于 HMAC 的密钥派生函数**（HMAC-based Key Derivation Function，HKDF）从共享秘密导出握手流量密钥。此后，握手消息以**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护[^5]。
 
-```mermaid title="TLS 1.3 旁观者能读到哪里" description="以 TCP 上仅认证服务端的完整握手为例，未启用 ECH 或 0-RTT。被动旁观者能读两条 Hello。此后仍能观察记录长度和时序，证书与 ALPN 选择由握手密钥保护，HTTP 消息由应用流量密钥保护。"
-flowchart TB
- subgraph visible[链路上可直接读到]
-  hellos["ClientHello · SNI、ALPN 候选、客户端公钥<br/>ServerHello · 服务端公钥"]
- end
- subgraph protected[只有持有对应流量密钥才能读取]
-  handshake["握手密钥 · ALPN 选择、服务端证书、签名、Finished"]
-  appdata["应用流量密钥 · HTTP 请求与响应"]
- end
- hellos -->|端点计算共享秘密并派生握手密钥| handshake
-```
-
 `CertificateVerify` 用证书对应的私钥对握手上下文签名，证明持有该私钥，并把身份绑定到本次握手；证书链与服务名检查仍须另行完成。双方各自的 `Finished` 则校验握手记录并确认掌握相应密钥。本例客户端没发送证书，验证它的 `Finished` 不等于认证特定客户端身份。客户端发出自己的 `Finished` 后才能发送普通应用数据；服务端发出自己的 `Finished` 后可以先发送，不一定要等客户端的 `Finished` 到达[^5]。
 
 因此，在这条 TLS 1.3 连接上抓包时，读取服务端证书链需要握手流量密钥；TLS 1.2 的常见完整证书握手则会公开发送证书消息[^5]。
 
 - **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 本身不认证身份[^6]。
-- **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：在本次握手中选定应用协议。[DNS HTTPS 记录中的 `alpn` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)可供客户端事先发现服务支持的候选协议。在图中未启用 ECH 的例子里，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选。服务端的最终选择受 `EncryptedExtensions` 保护[^7]。
+- **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：在本次握手中选定应用协议。[DNS HTTPS 记录中的 `alpn` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)可供客户端事先发现服务支持的候选协议。未启用 ECH 时，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选。服务端的最终选择受 `EncryptedExtensions` 保护[^7]。
 
 ### 证书链可信，还要检查名字
 

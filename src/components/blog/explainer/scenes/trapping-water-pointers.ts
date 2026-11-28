@@ -51,11 +51,20 @@ function section(rightWall: number, observation: string) {
 	);
 }
 
-export const scene = example(
-	"把右壁升高一格，能多存多少水？",
-	"固定左壁和槽底，只升高右壁。哪边先溢水，哪边就决定这两列能装下多少水。",
-	198,
-	section(3, "水刚好到达右壁顶端。"),
-	section(4, "两壁齐平，两列各多存一格。"),
-	section(5, "水已经能从左壁溢出，再加高右壁也装不下更多水。"),
-);
+const rightWalls = [3, 4, 5];
+
+const observations = [
+	"水刚好到达右壁顶端。",
+	"两壁齐平，两列各多存一格。",
+	"水已经能从左壁溢出，再加高右壁也装不下更多水。",
+];
+
+export const scene = {
+	control: { kind: "range" as const, label: "右壁高度", options: rightWalls.map(String) },
+	...example(
+		"把右壁升高一格，能多存多少水？",
+		"固定左壁和槽底，只升高右壁。哪边先溢水，哪边就决定这两列能装下多少水。",
+		198,
+		...rightWalls.map((height, index) => section(height, observations[index] ?? "")),
+	),
+};

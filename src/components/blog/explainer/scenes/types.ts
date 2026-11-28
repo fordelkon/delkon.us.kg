@@ -23,12 +23,15 @@ export interface Edge {
 }
 
 export interface Frame {
+	readout?: string;
 	note: string;
 	boxes: Box[];
 	edges?: Edge[];
 }
 
 export interface Scene {
+	// Each option owns the same number of consecutive frames.
+	control?: { label: string; options: string[]; kind?: "range"; stepLabel?: string };
 	title: string;
 	diagramHeight?: number;
 	caption: string;

@@ -22,8 +22,9 @@ function trace(n: number): Frame[] {
 			),
 		);
 
-		boxes.push(label("top", 34, y(top) + 22, "栈顶", 64));
-		frames.push({ note, boxes });
+		const pointerY = y(top) + 22;
+		boxes.push(label("top", 23, pointerY, "栈顶", 44));
+		frames.push({ note, boxes, edges: [{ id: "stack-pointer", path: `M46 ${pointerY} H68` }] });
 	}
 
 	function call(value: number): number {

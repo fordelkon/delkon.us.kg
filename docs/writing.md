@@ -71,6 +71,10 @@ For mathematical notation and formulas, read [mathematics](../.agents/skills/sit
 
 An opening figure can introduce the article's main idea or explain one difficult point worth seeing before the first section. Pick a question the drawing can answer. For example, how much more water fits when the right wall rises above the left one? Keep the basin in the same position across frames and derive the waterline and volume from the wall heights. Readers can then change one condition and see its effect. A single view works when the relationship is already visible at rest. If the picture would only repeat a list of steps, start with the text.
 
+Give each control the name of the quantity or choice it changes. When comparing two procedures, keep the reader at the same step as they switch between them. For example, compare which cell each knapsack scan reads when both write capacity four.
+
+Register the scene for the post in [post-explainers.ts](../src/data/post-explainers.ts). By default it appears above the first paragraph. To place it beside a derivation, put `<!-- article-figure -->` on its own line between two Markdown blocks.
+
 Use a `mermaid` fenced block for relationships or flows that benefit from a diagram. Include quoted `title` and `description` metadata: the title names the accessible graphic, and the description becomes its visible caption and text alternative. State the conditions behind arrows and distinguish causal order from elapsed time. Keep runnable examples and literal program output in their original code blocks.
 
 ````markdown

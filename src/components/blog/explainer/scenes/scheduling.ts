@@ -13,14 +13,16 @@ function track(id: string, y: number, cpu: string, tasks: string[]) {
 export const scene: Scene = {
 	title: "两个任务何时同时执行",
 	diagramHeight: 154,
-	caption: "沿一行看同一个 CPU 先后执行了谁，沿一列看同一时刻有几个任务正在执行。",
+	caption:
+		"A、B 各需两个等长时间片，忽略切换开销。沿一行看一个 CPU 先后执行了谁，沿一列看哪些任务在同时执行。",
 	description:
 		"设任务 A 和 B 各需要两个等长时间片。一个逻辑 CPU 依次执行 A、B、A、B。两个逻辑 CPU 可以在头两个时间片分别运行 A 和 B。每列对齐同一个时间片。",
 	frames: [
 		{
-			note: "A 和 B 各需两个时间片，图中忽略切换开销。",
+			note: "单 CPU 在 t1 和 t2 先后执行 A、B。双 CPU 在 t1 就能同时执行这两个任务。",
 			boxes: [
-				label("time", 238, 12, "时间片从左往右", 220),
+				label("time", 62, 12, "时间片", 100),
+				...[1, 2, 3, 4].map((tick, i) => label(`tick-${tick}`, 157 + i * 54, 12, `t${tick}`, 54)),
 				...track("single", 30, "单 CPU", ["A", "B", "A", "B"]),
 				...track("first", 80, "双 CPU · 1", ["A", "A"]),
 				...track("second", 118, "双 CPU · 2", ["B", "B"]),

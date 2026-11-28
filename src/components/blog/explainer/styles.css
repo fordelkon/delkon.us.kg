@@ -45,8 +45,51 @@
 	font-size: var(--explainer-copy-font-size);
 }
 .explainer-controls[hidden],
+.explainer-choices[hidden],
 .explainer-controls button[hidden] {
 	display: none;
+}
+.explainer-choices {
+	margin: 0;
+	padding: 0.25rem 0.65rem;
+	border: 0;
+	border-block-end: 1px solid var(--color-printer-ink-light);
+	min-inline-size: 0;
+	font-size: var(--explainer-copy-font-size);
+}
+.explainer-choices legend {
+	padding-block-start: 0.4rem;
+	font-weight: 600;
+}
+.explainer-choices label,
+.explainer-slider {
+	display: inline-flex;
+	align-items: center;
+	min-block-size: 2.75rem;
+	gap: 0.3rem;
+	margin-inline-end: 0.5rem;
+	cursor: pointer;
+}
+.explainer-choices input,
+.explainer-scan input {
+	accent-color: var(--color-printer-accent);
+}
+.explainer-slider input {
+	min-inline-size: 0;
+	flex: 1;
+}
+.explainer-slider,
+.explainer-choices .explainer-slider {
+	display: flex;
+	inline-size: 100%;
+	margin: 0;
+}
+.explainer-slider output {
+	font-variant-numeric: tabular-nums;
+}
+.step-explainer-canvas[data-steps="1"] .explainer-controls {
+	border: 0;
+	padding: 0;
 }
 .explainer-controls button {
 	min-height: 2.75rem;
@@ -170,11 +213,25 @@
 	font-variant-numeric: tabular-nums;
 }
 @media print {
-	.step-explainer:has(details) .step-explainer-canvas {
+	.step-explainer .explainer-choices,
+	.step-explainer .explainer-controls,
+	.step-explainer-transcript {
 		display: none;
 	}
-	.step-explainer details::details-content {
-		content-visibility: visible;
+	.step-explainer-visual {
+		display: block;
+	}
+	.step-explainer-frame {
+		break-inside: avoid;
+	}
+	.step-explainer-frame[aria-hidden="true"] {
+		opacity: 1;
+	}
+	.step-explainer-frame[data-condition]::before {
+		content: attr(data-condition);
+		display: block;
+		font-weight: 600;
+		text-align: center;
 	}
 }
 

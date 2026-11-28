@@ -7,7 +7,7 @@ tags: ["algorithm", "binary-search", "python", "cpp"]
 
 [LeetCode 4. 寻找两个正序数组的中位数](https://leetcode.cn/problems/median-of-two-sorted-arrays/)（Hot 100，困难）给定两个大小分别为 $m$ 和 $n$ 的正序（非递减）数组 `nums1` 和 `nums2`，要求在 $O(\log(m + n))$ 时间复杂度内找出这两个正序数组合并后的中位数。题目保证 $0 \le m, n \le 1000$，$1 \le m + n \le 2000$，元素范围在 $[-10^6, 10^6]$ 之间。
 
-如果像归并排序那样用双指针逐个合并两个数组（参见[《合并 K 个升序链表：小顶堆与两两归并》](/posts/algorithm/merge-k-sorted-lists/)的归并思路），找到第 $\lfloor (m + n) / 2 \rfloor$ 个元素需要 $O(m + n)$ 时间。要达到对数级复杂度，不能逐个推进指针，而必须把“找中位数”重新表述为**在较短数组上二分一个切分位置**。
+按[归并排序](/posts/algorithm/merge-k-sorted-lists/)的方式逐个取数，总长度为奇数时取正中间的值，为偶数时取中间两值的平均数。即使只扫描到中间也需要 $O(m+n)$ 时间。要达到对数级复杂度，可以在较短数组上二分切分位置。
 
 ## 中位数的切分等价定义
 

@@ -17,7 +17,7 @@ const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 	aria-hidden="true"
 	focusable="false"
 >
-	<defs>
+	{frame.edges?.some((line) => !line.undirected) && <defs>
 		<marker
 			id={marker}
 			viewBox="0 0 8 8"
@@ -29,7 +29,7 @@ const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 		>
 			<path d="M0 0 L8 4 L0 8z" fill="context-stroke" />
 		</marker>
-	</defs>
+	</defs>}
 	<g id={id}>
 		{frame.edges?.map((line) => (
 			<path
@@ -52,13 +52,13 @@ const { frame, marker, id, height = DIAGRAM_HEIGHT } = Astro.props;
 							y={node.y}
 							width={node.width}
 							height={height}
-							rx={node.glyph === "circle" ? height / 2 : node.glyph ? 0 : 3}
+							rx={node.glyph === "circle" ? height / 2 : undefined}
 						/>
 					)}
 					{node.lines.map((line, index) => (
 						<text
 							x={node.x + node.width / 2}
-							y={node.y + height / 2 + (index - (node.lines.length - 1) / 2) * 19}
+							y={node.y + height / 2 + (index - (node.lines.length - 1) / 2) * 25}
 							dominant-baseline="central"
 							text-anchor="middle"
 						>

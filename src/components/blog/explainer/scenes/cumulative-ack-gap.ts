@@ -24,6 +24,9 @@ function receive(): Frame[] {
 
 		while (buffered.has(next)) next++;
 
+		const prefixWidth = (next - firstSeq) * 56;
+		const boundary = 12 + prefixWidth;
+
 		return {
 			note,
 			boxes: [
@@ -46,9 +49,10 @@ function receive(): Frame[] {
 						),
 					];
 				}).flat(),
-				mark("prefix", 12, 117, (next - firstSeq) * 56, 10, "", "bar", true),
-				label("ack", 180, 157, `累计 ACK = ${next}`, 320),
+				mark("prefix", 12, 117, prefixWidth, 10, "", "bar"),
+				label("ack", Math.min(boundary, 263), 159, `RCV.NXT = ${next}`, 190),
 			],
+			edges: [{ id: "next-byte", path: `M${Math.min(boundary, 263)} 144 H${boundary} V129` }],
 		};
 	});
 }
@@ -56,8 +60,9 @@ function receive(): Frame[] {
 export const scene: Scene = {
 	title: "缺口挡住累计确认",
 	diagramHeight: 180,
-	caption: "每格是一个字节，横条标出从 1001 起连续收到的部分。累计 ACK 指向横条之后的第一个字节。",
+	caption:
+		"粗框是这次到达的字节，底部横条是已经连续收到的部分。指针 RCV.NXT 停在横条右端，它的序号就是累计 ACK。",
 	description:
-		"本方向此前已确认到 1001，没有序号回绕。先收到 1001 和 1002，再收到 1005 和 1006，缺口使累计 ACK 停在 1003。补齐 1003 和 1004 后，连续范围覆盖到 1006，ACK 才升到 1007。",
+		"接收端起初等待字节 1001，没有序号回绕。先收到 1001 和 1002，再收到 1005 和 1006，缺口使累计 ACK 停在 1003。补齐 1003 和 1004 后，连续范围覆盖到 1006，ACK 才升到 1007。",
 	frames: receive(),
 };

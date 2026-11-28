@@ -33,6 +33,15 @@ const series = await getSeriesContext(post);
 const linkedPosts = orderLinkedPosts(neighborhood?.neighbors ?? [], series);
 const sceneId = getPostExplainer(post.id);
 const scene = sceneId ? getScene(sceneId) : undefined;
+const marker = "<!-- article-figure -->";
+
+const inlineParts = post.rendered?.html.includes(marker)
+	? (await Astro.slots.render("default")).split(marker)
+	: undefined;
+
+if (inlineParts && (!scene || inlineParts.length !== 2)) {
+	throw new Error(`Expected one article-figure marker and a registered scene in ${post.id}`);
+}
 
 const stylesheets = contentStyles(contentFrontmatter, {
 	hasExplainer: Boolean(scene),
@@ -55,8 +64,9 @@ const stylesheets = contentStyles(contentFrontmatter, {
 			<SeriesNav entry={post} />
 		</div>
 		<div class="prose prose-sm min-w-0 max-w-none font-serif sm:prose-base [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+			{inlineParts && <Fragment set:html={inlineParts[0]} />}
 			{sceneId && scene && <Explainer scene={scene} sceneId={sceneId} />}
-			<slot />
+			{inlineParts ? <Fragment set:html={inlineParts[1]} /> : <slot />}
 			<WebMentions />
 		</div>
 	</article>

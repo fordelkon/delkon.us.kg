@@ -8,63 +8,74 @@ interface Props {
 }
 
 const { scene, sceneId } = Astro.props;
-const { caption, description } = scene;
-const animated = scene.frames.length > 1;
-const Canvas = animated ? "step-explainer" : "div";
-const diagramViewBox = `0 0 ${DIAGRAM_WIDTH} ${scene.diagramHeight ?? DIAGRAM_HEIGHT}`;
-const { frames } = scene;
+const { caption, control, description, frames } = scene;
+const interactive = frames.length > 1;
+const steps = frames.length / (control?.options.length ?? 1);
+const Canvas = interactive ? "step-explainer" : "div";
+const viewBox = `0 0 ${DIAGRAM_WIDTH} ${scene.diagramHeight ?? DIAGRAM_HEIGHT}`;
+const conditionAt = (index: number) => control?.options[Math.floor(index / steps)];
 ---
 
-<figure
-	class="step-explainer not-prose"
-	data-scene={sceneId}
-	aria-label={scene.title}
-	data-pagefind-ignore
->
-	<Canvas class="step-explainer-canvas">
-		<div class="step-explainer-visual" role={animated ? undefined : "img"} aria-label={animated ? undefined : description}>
+<figure class="step-explainer not-prose" data-scene={sceneId} aria-label={scene.title} data-pagefind-ignore>
+	<Canvas class="step-explainer-canvas" data-steps={interactive ? steps : undefined}>
+		{control && (
+			<fieldset class="explainer-choices" data-choices hidden>
+				<legend>{control.label}</legend>
+				{control.kind === "range" ? (
+					<label class="explainer-slider">
+						<span class="sr-only">{control.label}</span>
+						<input type="range" min="0" max={control.options.length - 1} value="0" step="1" data-option aria-valuetext={control.options[0]} />
+						<output data-setting>{control.options[0]}</output>
+					</label>
+				) : control.options.map((option, index) => (
+					<label>
+						<input type="radio" name={`${sceneId}-condition`} value={index} checked={index === 0} data-option />
+						{option}
+					</label>
+				))}
+			</fieldset>
+		)}
+		<div class="step-explainer-visual">
 			{frames.map((frame, index) => (
-				<div
-					class="step-explainer-frame"
-					aria-hidden={animated && index > 0 ? "true" : undefined}
-				>
-					<Diagram
-						frame={frame}
-						id={animated ? `${sceneId}-${index}-artwork` : undefined}
-						marker={`${sceneId}-arrow-${index}`}
-						height={scene.diagramHeight}
-					/>
-					{animated && <p class="explainer-note">{frame.note}</p>}
+				<div class="step-explainer-frame" data-condition={conditionAt(index)} data-readout={frame.readout} aria-hidden={interactive && index > 0 ? "true" : undefined}>
+					<div role={!interactive ? "img" : undefined} aria-label={!interactive ? description : undefined}>
+						<Diagram frame={frame} id={interactive ? `${sceneId}-${index}-artwork` : undefined} marker={`${sceneId}-arrow-${index}`} height={scene.diagramHeight} />
+					</div>
+					<p class="explainer-note">{frame.note}</p>
 				</div>
 			))}
 		</div>
-		{animated && (
+		{interactive && (
 			<div class="explainer-controls" role="group" aria-label="图解步骤" hidden>
-				<span class="explainer-step" role="status" aria-atomic="true">
-					<span class="sr-only">步骤 </span>
-					<span data-position>1 / {frames.length}</span>
+				{control?.stepLabel && (
+					<label class="explainer-slider explainer-scan">
+						{control.stepLabel}
+						<input type="range" min="0" max={steps - 1} value="0" data-seek aria-valuetext={frames[0]?.readout} />
+						<output data-reading>{frames[0]?.readout}</output>
+					</label>
+				)}
+				<span class:list={["explainer-step", {"sr-only": steps === 1}]} role="status" aria-atomic="true">
+					{steps > 1 && <><span class="sr-only">步骤 </span><span data-position>1 / {steps}</span></>}
 					<span class="sr-only" data-current-note></span>
 				</span>
-				<button type="button" data-previous aria-disabled="true">上一步</button>
-				<button type="button" data-next>下一步</button>
-				<button type="button" data-play>播放</button>
+				{steps > 1 && <>
+					<button type="button" data-previous aria-disabled="true">上一步</button>
+					<button type="button" data-next>下一步</button>
+					<button type="button" data-play>播放</button>
+				</>}
 			</div>
 		)}
 	</Canvas>
 	<figcaption>
 		<p class="step-explainer-caption">{caption}</p>
-		{animated && (
+		{interactive && (
 			<details class="step-explainer-transcript">
-				<summary>查看全部步骤</summary>
+				<summary>{control ? "查看全部对照" : "查看全部步骤"}</summary>
 				<ol>
 					{frames.map((frame, index) => (
 						<li>
-							<svg
-								class="explainer-diagram"
-								viewBox={diagramViewBox}
-								aria-hidden="true"
-								focusable="false"
-							>
+							{control && index % steps === 0 && <strong>{control.label} · {conditionAt(index)}</strong>}
+							<svg class="explainer-diagram" viewBox={viewBox} aria-hidden="true" focusable="false">
 								<use href={`#${sceneId}-${index}-artwork`} />
 							</svg>
 							<p>{frame.note}</p>
@@ -77,5 +88,13 @@ const { frames } = scene;
 </figure>
 
 <script>
-	import "./playback";
+	function loadPlayer() {
+		if (document.querySelector("step-explainer") && !customElements.get("step-explainer")) {
+			void import("./playback");
+		}
+	}
+
+	loadPlayer();
+
+	document.addEventListener("astro:page-load", loadPlayer);
 </script>

@@ -291,23 +291,9 @@ A 准备向同链路的 B 发送 IPv4 包时，先广播询问谁拥有 `192.168
 
 ### 从 ARP 结果到实际发出的帧
 
-A 只有一条 `192.168.1.0/24` 直连路由和一条默认路由。比较两封从同一接口发出的 IPv4 包，在邻居缓存未命中时，A 分别要查询谁的 MAC？
+A 只有一条 `192.168.1.0/24` 直连路由和一条默认路由。邻居缓存未命中时，同网段目的地由 A 直接查询对方的 MAC；访问远端则查询默认网关的 MAC。
 
-```mermaid title="ARP 解析所选下一跳的 MAC" description="同链路的 B 自己是下一跳，远端服务器的下一跳是本地网关。完成 ARP 后，两帧的源地址都属于 A；目的 MAC 取决于下一跳，包内的目的 IP 始终标识最终目标。"
-flowchart TB
- subgraph direct[直连路由 · 交给 B]
-  local_arp["ARP 询问 192.168.1.11（B）"]
-  local_frame["出站帧 · 目的 MAC 为 B 的 MAC<br/>包内目的 IP · 192.168.1.11"]
-  local_arp -->|B 应答| local_frame
- end
- subgraph remote[默认路由 · 交给网关]
-  gateway_arp["ARP 询问 192.168.1.1（网关）"]
-  remote_frame["出站帧 · 目的 MAC 为网关的 MAC<br/>包内目的 IP · 198.51.100.20"]
-  gateway_arp -->|网关应答| remote_frame
- end
-```
-
-发往远端的帧先交给网关，是因为目的 MAC 填了网关的地址；网关取出里面的 IPv4 包后，仍按 `198.51.100.20` 继续选路。A 无需取得远端服务器的 MAC。交换机只在当前 VLAN 内交付这个帧，经过路由器之后的下一份帧见第三篇的[三跳包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)。
+以远端地址 `198.51.100.20` 为例，A 发出的帧以网关的 MAC 为目的地址，包内仍保留远端 IP。网关拆帧后按这个 IP 继续选路。A 无需取得远端服务器的 MAC。交换机只在当前 VLAN 内交付这个帧，经过路由器之后的下一份帧见第三篇的[三跳包头对照](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)。
 
 [一次冷启动 HTTPS 访问](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)会先后用到这两种交付方式。若两个映射都未缓存，发 DNS 查询前先对直连解析器 `192.168.1.53` 发 ARP，向远端网站发 SYN 前再对网关 `192.168.1.1` 发 ARP。两次 ARP 都由以太网单独承载，得到的 MAC 分别填入后续 DNS 帧和 SYN 帧的目的 MAC 字段。
 

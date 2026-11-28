@@ -11,11 +11,7 @@ tags: ["algorithm", "linked-list", "python", "cpp"]
 
 [LeetCode 206. 反转链表](https://leetcode.cn/problems/reverse-linked-list/)的迭代过程维护两段（局部三指针翻转机制在[《回文链表：把判定拆成三个指针原语》](/posts/algorithm/palindrome-linked-list/)中也有详细推导）：`prev` 指向已反转的前缀，`curr` 指向尚未处理的后缀。每轮先用 `next_node` 保存 `curr.next`，再将 `curr.next` 改为 `prev`，最后推进两个指针。保存后继的顺序不能颠倒，否则会丢失未处理部分的入口。
 
-分组反转还需要记录组外的连接点：
-
-```text
-group_prev -> [group_start -> ... -> group_end] -> next_group
-```
+分组前先记住首节点的前驱 `group_prev` 和末节点的后继 `next_group`。
 
 反转后，`group_end` 成为新组头，`group_start` 成为新组尾。因此要把 `group_prev` 接到新组头，再把新组尾接到 `next_group`。操作前先向后探测 $k$ 个节点，确认本组完整，便无需在尾部不足时回滚。
 

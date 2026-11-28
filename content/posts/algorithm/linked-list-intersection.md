@@ -11,12 +11,7 @@ tags: ["algorithm", "linked-list", "python", "cpp"]
 
 ## 换头如何抵消长度差
 
-设 A、B 在交点前分别有 $a$、$b$ 个节点，公共尾部有 $c$ 个节点。换头让两个指针都补走对方的独立部分：
-
-```text
-A: a nodes -> shared tail (c nodes) -> None
-B: b nodes -> shared tail (c nodes) -> None
-```
+设 A、B 在交点前分别有 $a$、$b$ 个节点，公共尾部有 $c$ 个节点。换头让两个指针都补走对方的独立部分。
 
 如果 $a = b$，两个指针不必换头，走 $a$ 步就会在交点相遇。若 $a \ne b$，它们换头后到达交点所需的步数分别为：
 

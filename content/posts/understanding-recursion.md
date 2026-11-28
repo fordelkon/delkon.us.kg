@@ -92,8 +92,8 @@ preorder(&root); // Output: "A B C "
 
 ```mermaid title="preorder(&root) 的调用树与访问 C 时的活跃调用栈" description="实线边是访问 C 节点瞬间仍留在调用栈上的活跃路径（A 暂停在 right 调用处等待，C 在栈顶）；虚线边表示左子树 B 及其空子调用均已完成并出栈，不会与 C 同时占住调用栈。"
 flowchart TB
- callA["preorder(A)<br/>活跃：等待 right 返回"] -->|当前活跃栈| callC["preorder(C)<br/>当前栈顶"]
- callA -.->|已返回出栈| callB["preorder(B)<br/>左子树已出栈"]
+ callA["preorder(A)<br/>活跃：等待 right 返回"] -.->|已返回出栈| callB["preorder(B)<br/>左子树已出栈"]
+ callA -->|当前活跃栈| callC["preorder(C)<br/>当前栈顶"]
  callB -.->|已返回| bNullL(["nullptr × 2"])
  callC -->|即将进入| cNull(["nullptr × 2"])
  class callA actor

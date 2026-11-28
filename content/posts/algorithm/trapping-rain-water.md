@@ -5,7 +5,7 @@ description: "LeetCode 42 的接雨水：用 Python 前后缀最大值直观计�
 tags: ["algorithm", "two-pointer", "python", "cpp"]
 ---
 
-[LeetCode 42. 接雨水](https://leetcode.cn/problems/trapping-rain-water/)给定一排宽度为 1 的柱子，要求根据非负柱高数组 `height` 计算凹陷处的总水量。在 `[4, 0, 1, 3]` 中，右壁把水位限制在高度 3，再高就会溢出。中间两列分别能存 3 格和 2 格水。[《盛最多水的容器》](/posts/algorithm/container-with-most-water/)计算两面外壁之间的矩形容量，这里还要扣除柱子本身占去的空间。
+[LeetCode 42. 接雨水](https://leetcode.cn/problems/trapping-rain-water/)给定一排宽度为 1 的柱子，要求根据非负柱高数组 `height` 计算凹陷处的总水量。在 `[4, 0, 1, 3]` 中，右壁把水位限制在高度 3，水面再升高，水就会越过右壁流走。中间两列分别能存 3 格和 2 格水。[《盛最多水的容器》](/posts/algorithm/container-with-most-water/)计算两面外壁之间的矩形容量，这里还要扣除柱子本身占去的空间。
 
 ## Python：用前后缀最大值直接计算水深
 
@@ -129,10 +129,10 @@ $$
 
 这个乘积只计算 `height[bottom]` 以上的新增水层，更低的凹陷已在先前弹栈时填平；同一列可以出现在多个水层的宽度中，但这些水层的高度区间互不重叠。栈内允许等高柱子，靠右的同高柱子先弹出时会得到 $\Delta h = 0$ 的水层，随后靠左的同高柱子再与真正的左壁算出完整水层，不影响结果。每个下标只入栈一次、最多出栈一次，配合列表尾部追加与弹出的平摊 $O(1)$ 开销，总时间复杂度为 $O(n)$；单调不增的输入会使所有下标留在栈中，最坏额外空间为 $O(n)$[^python-list-stack]。
 
-两种方法的结算单位不同：双指针确定一列的完整水深，单调栈确定一层新增水量。从状态管理视角看，单调栈在顺序扫描中显式维护了“尚未遇到更高右壁的凹槽序列”：每次右侧出现更高柱子，就通过弹栈逐层结算水层，再由新栈顶恢复左壁约束。这与[《从调用栈理解递归》](/posts/understanding-recursion/#从递归改写为迭代)中的显式栈共享后进先出的状态管理方式，但本题并未从某个递归实现改写而来，不能据此声称消除了调用栈开销。这里的成本来自下标对象、列表存储及其扩容、尾部入栈与弹栈，以及每层水量计算；列表栈 API 的适用性并不能单独证明完整函数更快。
+双指针一次结算一列的完整水深；单调栈一次结算两壁之间新增的一层水，两种分法覆盖相同的积水面积。
 
-迁移到[《柱状图中最大的矩形：弹栈确定左右边界》](/posts/algorithm/largest-rectangle-in-histogram/)（LeetCode 84）时，仍可在栈中保存尚未确定右边界的下标，但弹栈条件改为遇到更矮的柱子。接雨水用两壁较矮者减去槽底高度，计算新增水层；最大矩形用弹出柱自身的高度乘以可延伸宽度，计算候选面积。等高柱子的保留或合并方式要与各自的边界定义配套，不能直接照搬；而前文预处理每列左右极值的前后缀拆解结构，也可对照[《除自身以外数组的乘积：左侧积乘以右侧积》](/posts/algorithm/product-of-array-except-self/)。
+[《柱状图中最大的矩形：弹栈确定左右边界》](/posts/algorithm/largest-rectangle-in-histogram/)同样用栈保存待定下标。接雨水遇到更高的右壁时结算新增水层，最大矩形遇到更矮的柱子时确定候选矩形的宽度。
 
 [^cpp-max]: [C++ 工作草案：Minimum and maximum](https://eel.is/c++draft/alg.min.max)——说明返回两个值中的较大者，二者相等时返回第一个参数。
 
-[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明通过列表末尾的 `append()` 与 `pop()` 实现后进先出栈；这里引用的是 API 用法，不是完整算法的性能测量。
+[^python-list-stack]: [Python 文档：将列表当作栈使用](https://docs.python.org/3/tutorial/datastructures.html#using-lists-as-stacks)——说明通过列表末尾的 `append()` 与 `pop()` 实现后进先出栈。

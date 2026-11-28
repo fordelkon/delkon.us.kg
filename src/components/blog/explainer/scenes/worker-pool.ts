@@ -9,7 +9,7 @@ function handoff(): Frame[] {
 	let pending: number | undefined = nextJob;
 	let working: number | undefined = 1;
 
-	const snapshot = (note: string): Frame => ({
+	const snapshot = (note: string, transfer?: "dequeue" | "enqueue"): Frame => ({
 		note,
 		boxes: [
 			label("sender", 56, 28, "待入队", 92),
@@ -23,13 +23,22 @@ function handoff(): Frame[] {
 					56,
 					58,
 					48,
-					jobs[i]?.toString() ?? "",
+					jobs[capacity - 1 - i]?.toString() ?? "—",
 					"cell",
-					jobs[i] === nextJob,
+					jobs[capacity - 1 - i] === nextJob,
 				),
 			),
 			mark("running-task", 273, 56, 58, 48, working?.toString() ?? "—", "cell"),
 		],
+		edges: transfer
+			? [
+					{
+						id: transfer,
+						path: transfer === "dequeue" ? "M242 80 H268" : "M89 80 H117",
+						active: true,
+					},
+				]
+			: [],
 	});
 
 	const frames = [
@@ -37,10 +46,12 @@ function handoff(): Frame[] {
 	];
 
 	working = jobs.shift();
-	frames.push(snapshot("worker 完成 1 并领取队首的 2。入口现在有一个可用槽，任务 4 还没有入队。"));
+	frames.push(
+		snapshot("worker 完成 1 并领取队首的 2。入口现在有一个可用槽，任务 4 还没有入队。", "dequeue"),
+	);
 	jobs.push(nextJob);
 	pending = undefined;
-	frames.push(snapshot("发送恢复，任务 4 进入队尾。worker 仍在处理 2，队列重新满员。"));
+	frames.push(snapshot("发送恢复，任务 4 进入队尾。worker 仍在处理 2，队列重新满员。", "enqueue"));
 
 	return frames;
 }
@@ -48,8 +59,8 @@ function handoff(): Frame[] {
 export const scene: Scene = {
 	title: "满队列把等待留在哪里",
 	diagramHeight: 126,
-	caption: "跟着任务 4 看：队列满时它等在入口，worker 领走队首后，空出的槽位才能接纳它。",
+	caption: "队尾在左，队首在右。队列满时任务 4 等在入口，worker 领走队首后，空出的槽位才能接纳它。",
 	description:
-		"队列容量为二，左边是队首。队列被 2 和 3 占满时，4 在入口等待。worker 完成 1，领走 2，剩下 3 和一个空位。4 随后进入空位，2 仍在 worker 手中。",
+		"队列容量为二，右边是队首。队列被 2 和 3 占满时，4 在入口等待。worker 完成 1，领走 2，剩下 3 和一个空位。4 随后进入空位，2 仍在 worker 手中。",
 	frames: handoff(),
 };
