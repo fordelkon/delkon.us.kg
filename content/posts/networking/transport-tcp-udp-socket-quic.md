@@ -35,48 +35,17 @@ TCP 在两端为每条连接维护状态：本地与对端的地址和端口、�
 
 通常的主动建连过程是：客户端发送带**同步序号标志**（Synchronize，`SYN`）的报文段，**初始序号**（Initial Sequence Number，ISN）为 $x$；服务端回复同时置位 `SYN` 和**确认标志**（Acknowledgment，`ACK`）的报文段，携带自身初始序号 $y$ 并确认 $x+1$；客户端再以 ACK 确认 $y+1$。这个交换使双方同步初始序号，并确认对方能够接收自己的序号信息；连接状态机还必须处理旧报文与重复报文，避免把滞留的连接请求误认为新的有效连接[^1]。
 
-图中的被动端状态跟随本次连接，监听套接字仍可继续接收其他连接[^tcp-lifecycle]。
-
-```mermaid title="TCP 三次握手：报文方向与两端状态" description="客户端主动打开，服务端被动打开。初始状态标在参与者名下，自上而下读三段报文，注记标记各端在相关发送或接收后进入的状态。本例三段的 TCP 载荷均为空，省略同时打开、重传与超时。"
-sequenceDiagram
- participant C as 客户端<br/>CLOSED
- participant S as 服务端<br/>LISTEN
- C->>S: SYN · Seq=x
- Note over C: SYN-SENT
- Note over S: SYN-RECEIVED
- S->>C: SYN+ACK · Seq=y · Ack=x+1
- Note over C: ESTABLISHED
- C->>S: ACK · Seq=x+1 · Ack=y+1
- Note over S: ESTABLISHED
-```
+客户端发出 SYN 后进入 `SYN-SENT`，收到有效的 SYN+ACK 后进入 `ESTABLISHED`。服务端为本次请求建立的连接从 `SYN-RECEIVED` 进入 `ESTABLISHED`，原监听套接字仍可接受其他连接[^tcp-lifecycle]。
 
 这里的确认号都在 TCP 头里。SYN 即使没有载荷也占用一个序号，纯 ACK 则不消耗序号。第三段 ACK 可以带数据，本例取纯 ACK。三个 TCP 控制段都能单独交给 IP，再由当前链路成帧，参见[封装路径对照](/posts/networking/layered-architecture-packet-journey/#同一条链路上的不同封装路径)[^1]。
 
 ### 初始 SYN 的报文布局
 
-把时序图里的第一支箭头展开。例中客户端从 `192.168.1.10:50001` 连接 `198.51.100.20:443`，初始序号仍记为 `x`。TCP 头里的数据偏移字段以 32 位字为单位。无选项时它的值为 `5`，表示 TCP 头占 20 字节[^tcp-header]。
+例如客户端从 `192.168.1.10:50001` 连接 `198.51.100.20:443`，初始序号仍记为 `x`。TCP 头里的数据偏移字段以 32 位字为单位。无选项时它的值为 `5`，表示 TCP 头占 20 字节[^tcp-header]。
 
 在[同一次 HTTPS 访问的阶段对照](/posts/networking/layered-architecture-packet-journey/#按阶段对照报文与封装)中，DNS 答案提供目的 IPv4 地址，TCP 用自己的头部发出 SYN。建连后，TLS 才把 `ClientHello` 编码成记录字节写入 TCP 流。对照这两个发送动作，SYN 的控制信息位于 TCP 头部，TLS 记录的字节则位于后续段的 TCP 载荷。
 
-```mermaid title="初始 SYN 装在 IPv4 包里" description="未加 VLAN 标签的 Ethernet II 帧。IPv4 和 TCP 都无选项，IPv4 总长度 40 字节。TCP 段只含 TCP 头，SYN 标志与初始序号就在头中。帧填充和 FCS 位于 IPv4 包之外。图只列关键字段。"
-flowchart TB
- subgraph frame[Ethernet II 帧]
-  eth["帧头 · EtherType=0x0800"]
-  subgraph ip[IPv4 包 · 40 字节]
-   ip_header["IPv4 头 · 20 字节<br/>Protocol=6 · TCP<br/>源：192.168.1.10<br/>目的：198.51.100.20"]
-   subgraph tcp[TCP 段 · 20 字节]
-    tcp_header["TCP 头 · 50001 → 443<br/>Seq=x · SYN=1 · ACK=0<br/>数据偏移=5<br/>TCP 载荷=0 字节"]
-   end
-   ip_header --- tcp_header
-  end
-  tail["链路层填充 · FCS"]
-  eth --- ip_header
-  tcp_header --- tail
- end
- linkStyle default stroke:none
-```
-
-这里的 `ACK=0` 指 ACK 标志未置位，确认号字段因此无效。SYN 可以携带**最大报文段长度**（Maximum Segment Size，MSS）选项，用来通告本端可接收的单个 TCP 报文段的数据长度上限。MSS 只计 TCP 数据，带此选项的 SYN 仍可以没有载荷，增加的是 TCP 头的长度[^mss]；路径上的 [MTU 与 MSS 预算](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)在第八篇继续展开。时序图中的纯 ACK 也有自己的 TCP 头[^tcp-header]。
+若初始 SYN 不带载荷，且 IPv4 和 TCP 都没有选项，IPv4 包总长为 40 字节，其中 TCP 头置 `SYN=1`、`Seq=x`，ACK 标志未置位，确认号字段无效。SYN 可以携带**最大报文段长度**（Maximum Segment Size，MSS）选项，用来通告本端可接收的单个 TCP 报文段的数据长度上限。MSS 只计 TCP 数据，带此选项的 SYN 仍可以没有载荷，增加的是 TCP 头的长度[^mss]；路径上的 [MTU 与 MSS 预算](/posts/networking/network-diagnostics-performance-troubleshooting/#mtumss-与-pmtud-黑洞)在第八篇继续展开。纯 ACK 同样携带 TCP 头[^tcp-header]。
 
 ### 连接关闭：FIN、半关闭与 TIME-WAIT
 
@@ -84,25 +53,7 @@ TCP 的两个方向可以分别结束。调用 `shutdown(fd, SHUT_WR)` 会关闭
 
 在通常的非同时关闭流程中，先发 FIN 的主动关闭端等待自己的 FIN 被确认，再接收对方 FIN 并发出最终 ACK，进入 `TIME-WAIT`。这取决于关闭顺序，客户端与服务端都可能成为这一端；同时关闭时也可能两端都进入该状态。规范中的等待为**最大报文段生存时间**（Maximum Segment Lifetime，MSL）的两倍，用于在对方重传 FIN 时重新确认，并让旧连接的残留报文在网络中失效；具体系统的计时与连接复用策略应按实现理解，不能从“等待几十秒”倒推所有平台的统一常量[^1]。工程上，服务端重启监听原端口常因仍有旧连接处于 `TIME-WAIT` 而遇到 `EADDRINUSE`：为此监听前常配置 `SO_REUSEADDR` 允许重新绑定仍被 `TIME-WAIT` 占用的端口；而 `SO_REUSEPORT` 则是另一种允许多个套接字同时绑定相同地址和端口以分担接入负载的选项，两者作用不同。
 
-```mermaid title="TCP 四段关闭：两个方向分别结束" description="A 先关闭写方向，B 先单独确认，稍后才关闭自己的写方向。初始状态标在参与者名下，自上而下读四段控制报文，间距不表示耗时。半关闭期间 B 仍可向 A 发送数据。图中假设这期间无额外数据。"
-sequenceDiagram
- participant A as 端点 A<br/>初始：ESTABLISHED
- participant B as 端点 B<br/>初始：ESTABLISHED
- A->>B: FIN+ACK · Seq=m · Ack=n
- Note over A: FIN-WAIT-1
- Note over B: CLOSE-WAIT
- B->>A: ACK · Seq=n · Ack=m+1
- Note over A: FIN-WAIT-2
- Note over B: 写方向仍开放
- B->>A: FIN+ACK · Seq=n · Ack=m+1
- Note over B: LAST-ACK
- A->>B: ACK · Seq=m+1 · Ack=n+1
- Note over A: TIME-WAIT
- Note over B: CLOSED
- Note over A: 2 MSL 后 CLOSED
-```
-
-图中的 `m`、`n` 是两端关闭前各自的下一个发送序号，每个 FIN 占用一个序号。B 的 TCP 可以确认 A 的 FIN，无需等 B 的应用读到 EOF。此时 `FIN-WAIT-2` 表示 A 自己的 FIN 已获确认，仍等待 B 的 FIN；`CLOSE-WAIT` 表示 B 已收到 A 的 FIN，自己的写方向仍然开放。B 可以在这段时间继续写响应；等它也发出 FIN 才进入 `LAST-ACK`。下文的[半关闭程序](#运行一次半关闭发送结束后继续接收)正是先读到 EOF、再写回响应[^tcp-lifecycle]。
+例如 A 先关闭写方向。B 的 TCP 可以确认 A 的 FIN，无需等 B 的应用读到 EOF。此时 `FIN-WAIT-2` 表示 A 自己的 FIN 已获确认，仍等待 B 的 FIN；`CLOSE-WAIT` 表示 B 已收到 A 的 FIN，自己的写方向仍然开放。B 可以在这段时间继续写响应；等它也发出 FIN 才进入 `LAST-ACK`。下文的[半关闭程序](#运行一次半关闭发送结束后继续接收)正是先读到 EOF、再写回响应[^tcp-lifecycle]。
 
 若两端同时关闭，`FIN-WAIT-1` 收到尚未确认本端 FIN 的对端 FIN 时可进入 `CLOSING`，等本端 FIN 获确认再进入 `TIME-WAIT`。其他状态转换见 RFC 9293 的连接状态图[^tcp-lifecycle]。
 
@@ -121,19 +72,7 @@ TCP 为字节流分配序号，并通过确认与计时器判断传输进度：
 
 把这些字段放进具体报文。沿用第三篇中[无 NAT 的路由实验](/posts/networking/routing-forwarding-nat-virtual-interfaces/#同一个-ip-包经过三段以太网链路)：A 为 `192.168.1.10:50001`，B 为 `198.51.100.20:443`，两端 TCP 已建立。假设 A 下一个发送序号为 `1001`，B 下一个发送序号为 `7001`，接下来只有 A 向 B 发送数据。
 
-```mermaid title="TCP 数据、累计确认与超时重传" description="已建立的连接，使用绝对示例序号。虚线标记途中丢失的报文，B 未收到。超时前没有后续数据，本例由 RTO 触发重传。各段均置 ACK 标志，Len 只计 TCP 载荷，间距不代表耗时。"
-sequenceDiagram
- participant A as A · 端口 50001
- participant B as B · 端口 443
- A->>B: Seq=1001 · Ack=7001 · Len=100
- B->>A: Seq=7001 · Ack=1101 · Len=0
- A-->>B: 途中丢失 · Seq=1101<br/>Ack=7001 · Len=60
- Note over A: 未收到确认，RTO 到期
- A->>B: 重传 Seq=1101 · Ack=7001 · Len=60
- B->>A: Seq=7001 · Ack=1161 · Len=0
-```
-
-第一段占据序号 `1001…1100`，所以 B 回复 `Ack=1101`；第二段占据 `1101…1160`，补齐后回复 `Ack=1161`。`Ack` 是确认号字段，`ACK=1` 则表示确认标志置位；`Len` 只计 TCP 载荷，不包含 TCP 头。这里纯 ACK 不携带数据，也不含 SYN 或 FIN，因此不消耗发送序号，B 的 `Seq` 一直为 `7001`[^1]。
+第一段占据序号 `1001…1100`，所以 B 回复 `Ack=1101`；第二段的 60 字节（`1101…1160`）途中丢失。若没有后续数据，A 等到 RTO 再重传这 60 字节，B 收齐后回复 `Ack=1161`。`Ack` 是确认号字段，`ACK=1` 则表示确认标志置位；`Len` 只计 TCP 载荷，不包含 TCP 头。这里纯 ACK 不携带数据，也不含 SYN 或 FIN，因此不消耗发送序号，B 的 `Seq` 一直为 `7001`[^1]。
 
 每个 A → B 包的 IP 头仍为 `192.168.1.10 → 198.51.100.20`，B → A 则相反；当前链路的 MAC 地址随路由转发而变化。中间路由器不因为转发数据就替 B 产生 TCP ACK。这个确认说明 B 的 TCP 已连续收到对应字节，不说明 B 的应用已经读取或处理；重传也不要求重新使用原来的 IP 标识、TTL或以太网帧。
 
@@ -181,21 +120,7 @@ const struct TcpSequenceState sender_after_loss = {
 
 ## Socket 接口与内核缓冲区契约
 
-第一篇的 [Socket 边界](/posts/networking/layered-architecture-packet-journey/#操作系统边界socket-与网络接口)说明了应用怎样把字节交给操作系统。通过普通 TCP Socket，应用读写的是内核 TCP 处理过的连接字节流。通过第三篇的 [TUN 虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)，用户态程序读写的是带 IP 头的包。下图沿一条 TCP 连接追踪发送应用与接收应用之间的字节交付。
-
-```mermaid mobile-direction="TB" title="TCP 字节从发送应用到接收应用" description="实线表示单向字节流的交付路径，虚线表示反向的 TCP 累计确认。write 成功只表示本地接受了字节；接收端 TCP 不必等应用 read 才能确认。图不规定 ACK 和 read 的先后，也不表示一次写入对应一次读取。"
-flowchart LR
- subgraph local[发送端]
-  sender["发送应用"] -->|write / send| send_buffer["本端 TCP<br/>发送缓冲"]
- end
- subgraph remote[接收端]
-  receive_buffer["对端 TCP<br/>接收缓冲"] -->|read / recv| receiver["接收应用"]
- end
- send_buffer -->|TCP 数据经 IP 交付| receive_buffer
- send_buffer <-.-|TCP 累计 ACK| receive_buffer
- class sender,receiver actor
- class send_buffer,receive_buffer resource
-```
+第一篇的 [Socket 边界](/posts/networking/layered-architecture-packet-journey/#操作系统边界socket-与网络接口)说明了应用怎样把字节交给操作系统。通过普通 TCP Socket，发送应用调用 `write`/`send` 把字节写入本端发送缓冲，经 IP 交付到对端接收缓冲后由接收应用 `read`/`recv` 取走，对端 TCP 则独立发回累计确认。通过第三篇的 [TUN 虚拟网络接口](/posts/networking/routing-forwarding-nat-virtual-interfaces/#虚拟网络接口tun-与-tap-如何接入协议栈)，用户态程序读写的是带 IP 头的包。
 
 `write`/`send` 成功返回 `n`，只说明本次调用接受了前 `n` 个字节；在普通缓冲式 TCP 实现中，这通常对应本机发送缓冲区的接纳，并不证明这些字节已经发出[^send-man]。[累计 ACK](#tcp-的序号确认与重传)确认的是对端 TCP 已连续收到相应的字节，不说明对端应用是否调用了 `read`。就算 `read` 已经把字节交给应用，也无法据此判断请求是否已处理或已提交。这个区别与并发系列中[消息入队和处理完成](/posts/concurrency/message-passing-workers-backpressure/#消息交付与处理完成)相同：如果发送方需要知道处理结果，要等应用协议定义的响应。
 

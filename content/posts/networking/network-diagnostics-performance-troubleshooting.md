@@ -15,32 +15,6 @@ tags: ["networking"]
 
 沿接口与选路、DNS、传输、服务身份与 HTTP 逐步收集证据。已有连接或缓存时，从实际发生的阶段开始。先区分基于 TCP 的 HTTP 与[在 UDP 上运行 QUIC 的 HTTP/3](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)，再选对应的握手证据[^tcp-handshake][^quic-setup]。
 
-```mermaid title="按证据选择下一项网络诊断" description="先确认本机网卡、代理开关与 DNS 解析路径，并在取得实际目的 IP 后核对目的选路与接口，再逐层验证传输握手、TLS 身份校验与 HTTP 响应。否分支表示仍需补查的证据，不是最终根因；HTTP/3 的 TLS 身份验证包含在 QUIC 握手内，复用连接时不必看到新握手。"
-flowchart TB
- start["记录 URL、地址族与代理状态"] --> env{"本地与 DNS<br/>配置正常？"}
- env -->|否或不明| route["查接口、代理与 DNS 配置"]
- env -->|是| dns{"解析拿到<br/>有效 IP？"}
- dns -->|否或不明| resolver["查系统与 dig 解析路径"]
- dns -->|是或已知 IP| dest_route{"目的 IP 选路<br/>符合预期？"}
- dest_route -->|否或不明| route_dest["按地址族查路由与 TUN"]
- dest_route -->|是| transport{"尝试哪种传输？"}
- transport -->|TCP| tcp{"TCP 握手<br/>完成？"}
- tcp -->|否或不明| tcpTrace["对照 SYN / RST 与重试"]
- transport -->|QUIC| quic{"QUIC 握手与<br/>认证成功？"}
- quic -->|失败或不明| quicTrace["查 Initial 与端到端日志"]
- tcp -->|HTTPS| tls{"TLS 证书与<br/>服务名通过？"}
- tls -->|否或不明| secure["核对证书、SAN 与信任库"]
- tls -->|是| http{"收到预期<br/>HTTP 响应？"}
- quic -->|是| http
- tcp -->|明文 HTTP| http
- http -->|否| service["核对状态码、重定向与代理"]
- http -->|是但慢| performance["测阶段耗时、重传与窗口"]
- class start actor
- class env,dns,dest_route,transport,tcp,quic,tls,http state
- class route,resolver,route_dest,tcpTrace,quicTrace,secure,service risk
- class performance result
-```
-
 先把“打不开”改写成可验证的问题，例如“哪个端点在哪个接口上发了握手，哪里没有看到对应回应？” 如果 DNS 返回的是 [Fake-IP](/posts/networking/proxies-tunnels-transparent-interception/#fake-ip在-dns-阶段建立映射)，先核对应用是否实际连向这个地址，再用选路和代理日志关联到出站。应用侧握手成功不等于出站成功。
 
 | 阶段 | 核心问题 | macOS / Linux 常见工具 | 解释结果时的边界 |
@@ -194,18 +168,6 @@ curl -q -4 --noproxy '*' --http1.1 \
 同时检查命令退出状态和 HTTP 状态。curl 默认不会把 HTTP 4xx/5xx 都作为传输失败；未完成的阶段还可能显示零，不能照样相减后解释为“零耗时”。
 
 这些计时值是从本次传输开始到相应里程碑的累计秒数，而不是从 shell 启动命令的时刻起计时。在上述单次成功连接模型中，可近似用相邻里程碑之差划分等待阶段[^curl]：
-
-```mermaid mobile-direction="TB" title="curl 的累计计时点" description="适用于新建 TCP 连接、直连且无重定向的一次成功 HTTPS 传输。每个时间值都从同一起点计算。相邻时间相减得到下表的阶段耗时；图上的距离只表示顺序。请求至首字节包括请求发送、网络往返和服务端处理。"
-flowchart LR
- start["传输开始<br/>t = 0"] -->|DNS| dns["解析完成<br/>time_namelookup"]
- dns -->|TCP| tcp["连接完成<br/>time_connect"]
- tcp -->|TLS| tls["TLS 完成<br/>time_appconnect"]
- tls -->|首字节| first["收到首字节<br/>time_starttransfer"]
- first -->|正文| total["传输完成<br/>time_total"]
- class start actor
- class dns,tcp,tls,first state
- class total result
-```
 
 | 计算 | 表示的阶段 | 仍可能包含什么 |
 | --- | --- | --- |

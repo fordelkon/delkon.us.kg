@@ -17,19 +17,6 @@ tags: ["algorithm", "sliding-window", "python", "cpp"]
 - 当窗口内某字符 `c` 的频次**恰好首次达到** `need[c]` 时，`formed += 1`（**易错反例**：若写成 `window[c] >= need[c]` 就递增 `formed`，对于 `t = "AA"`、`s = "AAAB"`，第三个 `'A'` 会让 `formed` 重复加 1，导致 `formed` 与 `required` 失真）；
 - 只要 `formed == required`，当前窗口 `[left, right]` 必然完全覆盖 `t`。此时进入内层 `while` 循环：记录更短窗口的起始下标与长度（**延迟切片**，不在循环内构造子串），再把 `s[left]` 移出窗口；一旦某必需字符移出后频次严格跌破 `need[c]`，就令 `formed -= 1`，退出收缩继续向右扩张 `right`。
 
-```mermaid title="覆盖窗口的两个状态" description="窗口在缺字符时持续右扩；满足全部字符频次后切入收缩状态，记录更短窗口并持续右移左端，直至失去覆盖再回到扩张状态；最终在扩张状态扫完右端时结束。"
-stateDiagram-v2
-    state "缺字符<br/>扩张右端" as grow
-    state "已覆盖<br/>记录并收缩" as shrink
-
-    [*] --> grow
-    grow --> grow: 仍缺字符，继续右扩
-    grow --> shrink: 字符频次达标
-    shrink --> shrink: 仍覆盖，记录并继续收缩
-    shrink --> grow: 移出关键字符，失去覆盖
-    grow --> [*]: 右端扫完
-```
-
 ## Python & C++：达标种数守卫与定长计数表
 
 Python 版本用 `collections.Counter` 统计目标频次[^py-counter]，只在函数返回前做一次切片以避免循环内重复拷贝字符数据：

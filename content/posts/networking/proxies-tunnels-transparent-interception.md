@@ -117,28 +117,11 @@ TUN 只是交付 IP 包的接口，并不规定后续必须把完整内层 IP �
 
 把 [DNS 回答与实际连接](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-答案怎样影响连接目标)分开看。DNS 查询命中 Fake-IP 时，解析侧分配或复用虚拟地址并记录域名关联；Fake-IP 响应通常还会刻意返回极短 TTL（例如 `1` 秒）以减少系统长时缓存旧映射，但如果应用忽略 TTL 自建连接池、地址池写满触发旧条目回收替换、或未开启映射持久化时核心重启，后续连接就可能找不到映射。**DNS 回答成功并不表示已经建立了目标连接**。之后应用可能从缓存取到这个地址并发起连接；只有本次传输被路由到 TUN，且代理仍有对应映射时，下图的查表恢复才成立[^3][^4][^mapping-storage]。
 
-```mermaid title="Fake-IP 的两次事件：DNS 建映射，连接查映射" description="DNS 和代理核心共享地址映射。缓存中的回答可以稍后用于连接。本图只展开命中域名规则且出站支持传域名的情形；箭头表示逻辑交付顺序，不按耗时绘制。"
-sequenceDiagram
- participant App as 应用
- participant DNS as Mihomo DNS<br/>（Fake-IP 映射表）
- participant OS as 系统网络栈
- participant Core as 代理核心
- participant Node as 远端代理节点
- participant Target as 目标服务
- App->>DNS: [阶段 1 · DNS] 查询 example.com 的 A 记录
- DNS->>DNS: 记录共享映射<br/>198.18.0.8 ↔ example.com
- DNS-->>App: A 记录：198.18.0.8
- Note over App,OS: 阶段 2 · 传输：缓存生效，应用按虚拟地址发起连接
- App->>OS: 连接 198.18.0.8:443
- OS->>Core: 选中 TUN，交付 IP 包
- Core->>Core: 恢复 example.com<br/>域名规则选中远端节点
- Core->>Node: 通过出站会话提交 example.com:443
- Node->>Node: 解析真实目标地址
- Node->>Target: 建立目标连接
- Target-->>Node: 响应数据
- Node-->>Core: 按出站会话返回
- Core-->>OS: 按应用侧连接状态写回 IP 包
- OS-->>App: 交付响应字节
+```mermaid title="同一个虚拟地址怎样找回域名" description="解析器先给应用返回虚拟地址。稍后，若连接进入 TUN 且映射仍有效，代理可凭目的 IP 恢复域名；真实地址与出站选择要由后续规则决定。"
+flowchart TB
+ dns["DNS 查询 example.com<br/>返回 198.18.0.8"] -->|建立或复用| mapping["共享映射表的一行<br/>198.18.0.8 ↔ example.com"]
+ tun["稍后 TUN 收到连接<br/>目的 198.18.0.8:443"] -->|按虚拟地址查找| mapping
+ mapping -->|命中| name["供规则匹配的域名 · example.com"]
 ```
 
 地址映射回答的是“这个虚拟 IP 对应哪个域名”；它既不记录最终出站，也不代替每条连接的转发状态。同一域名可以发起多条连接，每条流仍要按规则选出站。若规则或出站需要真实 IP，例如目标 IP 规则或 DIRECT，再按需取得真实地址[^3][^6]。
@@ -177,21 +160,6 @@ sequenceDiagram
 
 流量已经进入代理后，先区分目标是 Fake-IP 还是真实 IP。Fake-IP 失去映射时，虚拟地址本身无法指向目标服务。真实 IP 没有可用域名时，代理仍可用目标 IP、进程等已有信息匹配规则。`fake-ip-filter` 返回的真实地址也按这条路径处理[^3][^5]。
 
-```mermaid title="目标域名关联的成功与失败分支" description="限定连接已进入代理。Fake-IP 必须有可用映射，不能作为普通公网地址连接；真实 IP 可以按配置尝试嗅探，但 ECH 或自定义协议可能不提供真实域名。图中停止节点表示缺少继续直连或匹配所需的有效信息，具体报错与恢复由实现决定。"
-flowchart TB
- inbound["入站已收到目标地址"] --> fake{"目标属于配置的<br/>Fake-IP 池？"}
- fake -->|是| cache{"映射仍可用？"}
- cache -->|命中| domain["恢复域名<br/>进入规则与出站处理"]
- cache -->|未命中| fail["映射缺失<br/>停止按虚拟 IP 直连"]
- fake -->|否，真实 IP| sniff{"允许且成功取得<br/>域名元数据？"}
- sniff -->|是| domain
- sniff -->|否| iponly["仅按已有 IP 与其他元数据处理<br/>（或依配置拒绝并停止）"]
- class inbound actor
- class fake,cache,sniff state
- class domain result
- class fail,iponly risk
-```
-
 遇到映射缺失或线索不足时，应结合下表对照 DNS 记录、持久化配置与连接日志重新核查，不把临时报错当成远端服务异常：
 
 | 条件 | 缺少什么 | 下一步证据 |
@@ -206,27 +174,6 @@ flowchart TB
 ## 分流规则与出站选择
 
 代理先整理入站提供的目标地址、补足的域名以及可用的进程信息。在 `rule` 模式下，规则依次使用这些信息，选出直连、拒绝或节点出站。命中策略组时，还要由组内策略选定最终出站。
-
-```mermaid title="规则匹配、出站选择与响应返回" description="规则按顺序检查，还需核对出站适用性；真实目标 IP 按规则和出站需要获取。REJECT 在此终止，策略组选择需落实到最终出站，非拒绝结果按实际选择建立直连或代理会话。响应通过对应的出站会话和入站转发状态返回原应用，不是把远端 TCP 包原样塞回原连接。"
-flowchart TB
- app["应用"] --> explicit["显式入站<br/>HTTP / SOCKS5"]
- app --> transparent["透明入站<br/>TUN / REDIRECT / TPROXY"]
- explicit --> metadata["整理目标、域名映射<br/>嗅探与进程等元数据"]
- transparent --> metadata
- metadata --> rules["按规则顺序匹配<br/>检查出站适用性"]
- rules --> choice["确定最终出站<br/>DIRECT / REJECT / 节点"]
- choice -->|REJECT| reject["拒绝请求<br/>终止处理"]
- choice -->|DIRECT| direct["核心建立到目标的出站"]
- choice -->|代理节点| relay["核心连接节点<br/>节点另建到目标的连接"]
- direct --> response["对应出站会话<br/>收到响应"]
- relay --> response
- response --> inbound["入站转发状态"]
- inbound --> original["原应用"]
- class app actor
- class explicit,transparent,metadata,rules,choice,direct,relay,response,inbound state
- class reject risk
- class original result
-```
 
 代理按书写顺序自上而下检查规则，命中后还会核对所选出站是否支持当前传输（例如 UDP 流遇到不支持 UDP 中继的节点会继续检查后续规则）[^6]。常见规则类型按以下边界工作：
 
@@ -368,20 +315,6 @@ const struct Outbound *select_outbound(const struct Rule *rules, size_t count,
 ### 按地址族验证接管与出站
 
 应用可能从系统 DNS 或自带 DoH 得到真实 AAAA，也可能从代理 DNS 得到配置支持的虚拟地址。要从应用实际尝试的目标地址查路由，因为双栈竞速可能改变最后使用的地址族。即便 IPv4 已进入 TUN，IPv6 仍需要自己的接管路由。进入代理后，核心再按出站策略单独选择地址族[^3][^4]。
-
-```mermaid title="AAAA、IPv6 入站与出站的边界" description="限定应用尝试连接 IPv6 地址；本次选路决定是否进入 TUN。虚线是决策与关联，实线是包或连接数据的交付。代理处理入站后另选真实目标及出站地址族，代理节点本身的解析和选路另计。"
-flowchart TB
- dns["应用取得 AAAA"] -.->|实际尝试该地址| route{"IPv6 实际选路"}
- route -->|TUN| tun["内核交付 IPv6 包"]
- route -->|物理接口| native["按系统路由出站"]
- route -.->|无有效路由| stop["本次尝试失败"]
- tun -.->|虚拟地址查映射；真实地址用已有线索| core["核心识别目标并匹配规则"]
- core -->|建立独立出站| out["按可达性与策略使用 IPv4 或 IPv6"]
- class dns actor
- class route,tun,native,core state
- class stop risk
- class out result
-```
 
 排查意外绕行时，先核对 A、AAAA 回答，再对同一域名分别运行 `curl -4` 和 `curl -6`，记录 `remote_ip`。用[路由查询](/posts/networking/routing-forwarding-nat-virtual-interfaces/#实验一查看完整路由表与特定目标的选路结果)和第八篇的[捕获位置对照](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)核实出接口，并用代理日志确认对应的入站与出站。经显式代理时，`remote_ip` 记录 curl 连到的代理地址。若目标域名也交给代理处理，另一段连接使用的地址族要在出站侧另行核实[^curl]。
 

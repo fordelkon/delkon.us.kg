@@ -21,22 +21,7 @@ tags: ["algorithm", "backtracking", "python", "cpp"]
 - 只要 `open_count < n`，就可以追加一个 `'('`；
 - 只要 `close_count < open_count`，就可以追加一个 `')'`。
 
-可以验证，沿着这两条规则构造出的任意前缀，其剩余左括号数为 $n - \text{open\_count} \ge 0$，剩余右括号数始终不少于剩余左括号数，因此**每一个中间节点都必然至少能延伸出一个合法完整解**——搜索树上不存在任何一条死路。
-
-```mermaid title="括号生成的前缀剪枝搜索树（n = 2）" description="以 n = 2 为例，节点给出括号前缀及已用的左右括号数，边标签表示追加的括号。两条虚线红框分支分别示范右括号超前（右 > 左）与左括号超限（左 > n）时的剪枝，最终得到 (()) 和 ()()。"
-flowchart TB
- root["ε · (0,0)"] -->|"+("| first["( · (1,0)"]
- root -.->|"+)"| pruneR["✗ ) · 剪枝(右 > 左)"]
- first -->|"+("| left["(( · (2,0)"]
- first -->|"+)"| right["() · (1,1)"]
- left -.->|"+("| pruneL["✗ ((( · 剪枝(左 > n)"]
- left -->|"+)"| inner["(() · (2,1)"] -->|"+)"| nested["(()) · (2,2)"]
- right -->|"+("| open["()( · (2,1)"] -->|"+)"| adjacent["()() · (2,2)"]
- class root actor
- class first,left,right,inner,open state
- class nested,adjacent result
- class pruneR,pruneL risk
-```
+可以验证，沿着这两条规则构造出的任意前缀，其剩余左括号数为 $n - \text{open\_count} \ge 0$，剩余右括号数始终不少于剩余左括号数，因此**每一个中间节点都必然至少能延伸出一个合法完整解**——搜索树上不存在任何一条死路。以 $n = 2$ 为例，空串时不能追加 `')'`（否则 `close_count > open_count`，右括号超前），前缀 `"(("` 时不能再追加 `'('`（否则 `open_count > n`）；这两类非法前缀在展开前即被剪除，最终只得到 `"(())"` 与 `"()()"`。
 
 ## Python：共享列表缓冲与双计数回溯
 

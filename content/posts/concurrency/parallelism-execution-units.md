@@ -17,23 +17,6 @@ tags: ["concurrency", "async", "rust"]
 
 这里要分开两个问题：执行抽象回答“谁持有什么资源、在哪里保存进度”，调度策略回答“谁决定下一步运行什么、何时能切换”。两者是独立的维度。进程提供地址空间和资源边界，内核把可运行的 OS 线程调度到逻辑 CPU；如果还有用户态运行时，它再安排线程推进哪个任务。Linux 内核用自己的 task 结构记录各个可调度的执行流，这里的 task 不是应用层的一项逻辑工作[^2][^3][^4]。
 
-```mermaid title="任务、运行时、线程与 CPU" description="两条路径分别展示线程直接执行工作，以及用户态运行时先安排任务。OS 线程始终由内核调度到逻辑 CPU；进程提供线程共享的资源边界。箭头写明调度、归属或执行关系。"
-flowchart TB
- work["逻辑工作<br/>请求、计算、事件"]
- runtime["用户态运行时 / 执行器"]
- thread["OS 线程"]
- process["进程资源<br/>地址空间、打开的文件"]
- cpu["逻辑 CPU"]
- work -->|直接交给| thread
- work -->|交由| runtime
- runtime -->|安排工作线程| thread
- process -.->|由同进程线程共享| thread
- thread -->|内核调度到| cpu
- class work state
- class thread,runtime,cpu actor
- class process resource
-```
-
 进程中的线程共享地址空间，但各有自己的栈。对用户态异步来说，任务是运行时调度的单位，Future 则表示可被轮询的计算：一个任务可以推进多个 Future，不是每个 Future 都要独立调度[^3][^5][^6]。
 
 | 抽象 | 持有的资源或状态 | 谁推进 |
@@ -271,17 +254,7 @@ first branch: 2
 
 **任务粒度**（granularity）描述每次派发承担多少工作；**负载均衡**（load balancing）关注这些工作是否让执行单元都得到有效利用。等量数据不一定对应等量计算：解析不同复杂度的记录、搜索不同深度的子树，都可能产生不均衡。动态领取任务可以改善分配，但不能消除算法中的依赖，也不保证比静态分块更快[^10]。
 
-**工作窃取**（work stealing）是动态分配的一种做法：找不到工作的一方尝试从另一方的本地队列领任务。以 Go 1.23.0 的 G/M/P 调度模型为例——其中 G 代表 goroutine、M 代表 OS 线程、P 代表执行 Go 代码所需的处理器上下文资源——M 必须持有 P 才能执行用户 Go 代码。每个 P 除了普通本地队列外，还有一个单槽位、优先级更高的 `runnext` 字段（目标普通本地队列为空时，窃取路径在某些条件下也可能转而尝试 `runnext`）；运行时也有全局就绪队列。下图只画从另一个 P 的普通本地队列取任务的路径，不代表查找工作的固定顺序，也不是 Go 语言保证[^11]。
-
-```mermaid mobile-direction="TB" title="Go 1.23.0：从另一条本地队列取工作" description="假设 P A 没有本地工作，P B 的普通本地队列有四个就绪 goroutine 且队列没有并发变化。A 从 B 取走两个：一个立即交给持有 A 的线程执行，一个留在 A 的本地队列。B 留下另外两个；正在 B 上运行的 goroutine 不在这次窃取的范围内。实线表示被取走的工作去向。"
-flowchart LR
- donor["P B 本地队列<br/>4 个就绪，留下 2 个"] -->|取走 2 个| stolen["P A 取得的工作"]
- stolen -->|一个| run["持有 A 的线程<br/>开始执行"]
- stolen -->|另一个| local["P A 本地队列<br/>暂存待执行"]
- class donor,local resource
- class stolen state
- class run actor
-```
+**工作窃取**（work stealing）是动态分配的一种做法：找不到工作的一方尝试从另一方的本地队列领任务。以 Go 1.23.0 的 G/M/P 调度模型为例——其中 G 代表 goroutine、M 代表 OS 线程、P 代表执行 Go 代码所需的处理器上下文资源——M 必须持有 P 才能执行用户 Go 代码。每个 P 除了普通本地队列外，还有一个单槽位、优先级更高的 `runnext` 字段（目标普通本地队列为空时，窃取路径在某些条件下也可能转而尝试 `runnext`）；运行时也有全局就绪队列。当持有 P A 的线程本地没有工作时，通常会从另一个 P B 的普通本地队列分走约一半就绪 goroutine（一个立即执行，其余转入 A 的本地队列），但这不代表查找工作的固定顺序，也不是 Go 语言保证[^11]。
 
 第五篇的[任务池](/posts/concurrency/message-passing-workers-backpressure/#任务池复用执行单元)展示了另一种领取方式：多个 worker 从同一个队列取任务。无论任务如何领取，粒度仍由算法决定，worker 数量与任务数量也不必相同。
 

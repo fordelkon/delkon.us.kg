@@ -199,25 +199,7 @@ fn try_claim() -> bool {
 }
 ```
 
-`compare_exchange` 成功返回 `Ok(旧值)`，失败返回 `Err(读到的值)`；两个内存序参数分别约束成功时的读改写与失败时的读取。成功路径是一次完整的读改写，可以按所选内存序接收先前的发布，或发布此前的访问；失败路径只读取，因此不能使用 `Release` 或 `AcqRel`。
-
-下图列出 Rust CAS 成功和失败的内存序范围。弱 CAS 即使比较值相等也可以走失败分支[^9][^8]。
-
-```mermaid title="CAS 的成功、失败与完成发布" description="成功是一次读改写，可选五种内存序。失败只读，可选 Relaxed、Acquire 或 SeqCst。弱 CAS 可以虚假失败；认领成功后还要初始化，并单独发布完成状态。"
-flowchart TB
- cas["compare_exchange<br/>读取并比较旧值"]
- won["成功：原子读改写，返回 Ok(旧值)<br/>可用 Relaxed / Acquire / Release / AcqRel / SeqCst"]
- fail["失败：只读，未写入，返回 Err(读到的值)<br/>仅可用 Relaxed / Acquire / SeqCst"]
- init["已认领，正在初始化"]
- ready["初始化完成，另行发布"]
- cas -->|满足比较且写入成功| won
- cas -->|值不符或弱 CAS 虚假失败| fail
- won --> init
- init --> ready
- class cas,init state
- class fail risk
- class ready result
-```
+`compare_exchange` 成功返回 `Ok(旧值)`，失败返回 `Err(读到的值)`；两个内存序参数分别约束成功时的读改写与失败时的读取。成功路径是一次完整的读改写，可选五种内存序（`Relaxed`、`Acquire`、`Release`、`AcqRel` 或 `SeqCst`），可以按所选内存序接收先前的发布，或发布此前的访问；失败路径只读取，只能选用 `Relaxed`、`Acquire` 或 `SeqCst`，不能使用 `Release` 或 `AcqRel`，且弱 CAS 即使比较值相等也可以走失败分支[^9][^8]。
 
 两条路径按各自需要选择：`try_claim` 没有要发布的数据，也没有要接收的发布，两个参数都用 `Relaxed` 就够了。
 
@@ -274,23 +256,7 @@ fn lock() -> Guard {
 - 失败路径用 `Relaxed`：CAS 失败说明锁仍被占用，线程没有取得访问受保护数据的资格，这次读取也不需要接收任何发布，自旋重试即可。
 - guard 的 `Drop` 用 `Release`：为临界区内的修改建立发布的一端。
 
-把临界区的数据访问接到加锁与解锁两端，就得到完整链路：
-
-```mermaid mobile-direction="TB" title="自旋锁的发布与接收" description="B 的 Acquire CAS 成功，并读到 A 解锁时写入的 false，才接上这条同步边。实线是 sequenced-before，虚线是 synchronizes-with，粗实线是由两者推出的 happens-before。"
-flowchart LR
- subgraph owner["线程 A：持锁"]
-  write["修改共享状态"] -->|sequenced-before| unlock["guard 析构：写 false<br/>Release"]
- end
- subgraph successor["线程 B：接手锁"]
-  lock["CAS 成功：Acquire<br/>读到 A 释放的 false"] -->|sequenced-before| read["读取共享状态<br/>可见 A 的修改"]
- end
- unlock -.->|synchronizes-with| lock
- write ==>|happens-before| read
- class unlock,lock state
- class read result
-```
-
-这里由 `Release` 写和 `Acquire` CAS 直接建立同步边。使用标准互斥锁时，不必假定它内部也用这套写法；只需依据接口对同一把锁的解锁与后续成功加锁所规定的[同步关系](#同步边不只来自原子操作)[^7]。
+把临界区的数据访问接到加锁与解锁两端，复用的是与[发布协议](#release--acquire发布与接收的边界)相同的 `sequenced-before` 加 `synchronizes-with` 推导链：前任线程先修改共享状态再经 `Release` 写入 `false`，下一任线程的 `Acquire` CAS 读到这个 `false` 时接上同步边，再继续读取共享状态，由此推出前后两段临界区之间的 happens-before。使用标准互斥锁时，不必假定它内部也用这套写法；只需依据接口对同一把锁的解锁与后续成功加锁所规定的[同步关系](#同步边不只来自原子操作)[^7]。
 
 如果 `lock` 与 `unlock` 都改成 `Relaxed`，锁标志上的 CAS 仍能控制同一时刻只有一个持有者，但不再为前后两段临界区建立所需的 happens-before。若临界区访问普通非原子数据，且没有其他同步关系，这些冲突访问就构成数据竞争，在 Rust/C++ 中属于未定义行为，不能只理解为“可能读到旧值”。若相关数据本身也是原子的，则没有这类数据竞争，但仍需另外证明跨对象的访问顺序。这与前面的[数据发布失败](#原子标志与数据发布)是同一种协议缺口。
 
@@ -428,21 +394,7 @@ fn config() -> &'static str {
 
 前面的发布示例显式使用 Release/Acquire，但跨线程顺序也可以由锁、线程等待、消息交接和一次性初始化建立。它们提供不同的使用接口，共同的推理方法是：先找到协议中的发布与接收，再把两端的数据访问接入 happens-before 链。同步约束的是访问之间的关系，范围不局限于充当同步点的那个变量；不过，链之外的其他冲突访问仍需单独证明安全。
 
-以第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)为例，一个线程先修改状态、再解锁，另一个线程成功获取同一把锁后读取状态。C++ 标准明确规定，同一互斥锁的解锁与后续取得所有权的加锁同步；Go 内存模型也规定了相应的解锁到加锁顺序[^7]。把线程内顺序接上去，才得到数据写入到读取的顺序：
-
-```mermaid mobile-direction="TB" title="同一互斥锁上的同步链" description="实线是 sequenced-before，虚线是同一把锁上的 synchronizes-with，粗实线是由这三条边推出的 happens-before。"
-flowchart LR
- subgraph previous["线程 A"]
-  write["修改共享状态"] -->|sequenced-before| unlock["释放锁"]
- end
- subgraph next["线程 B"]
-  lock["成功获取同一把锁"] -->|sequenced-before| read["读取共享状态"]
- end
- unlock -.->|synchronizes-with| lock
- write ==>|happens-before| read
- class unlock,lock state
- class read result
-```
+以第二篇的[互斥锁](/posts/concurrency/locks-condvars-shared-memory-sync/#mutex独占访问)为例，一个线程先修改状态、再解锁，另一个线程成功获取同一把锁后读取状态。C++ 标准明确规定，同一互斥锁的解锁与后续取得所有权的加锁同步；Go 内存模型也规定了相应的解锁到加锁顺序[^7]。它复用的也是前面[发布协议](#release--acquire发布与接收的边界)中相同的 `sequenced-before` 加 `synchronizes-with` 推导链：把解锁前的写入、同一把锁的解锁到加锁同步边以及加锁后的读取连起来，就推出数据写入到读取的 happens-before。
 
 **同步边的成立有条件，不能只看两端都调用了同步接口**。不同机制需要核对的条件不同：
 

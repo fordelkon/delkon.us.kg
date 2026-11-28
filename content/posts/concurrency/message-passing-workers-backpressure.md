@@ -79,19 +79,6 @@ fn main() {
 | **已完成**（Completed） | worker 产出成功结果或明确的业务失败 | 结果不一定已入队，更不一定已送达 |
 | **已确认**（Acknowledged） | 提交方收到协议约定的最终状态，通常随结果送达 | 确认不等于成功；协议也可以确认取消或故障 |
 
-```mermaid mobile-direction="TB" title="接纳、领取、完成与确认" description="在这条处理路径上，任务入队即被接纳，随后由 Worker 领取。Worker 先完成处理，提交方收到结果才算确认；若结果端关闭，任务即使已完成也可能未获确认。"
-flowchart LR
- submit["提交任务"] -->|入队成功| accepted["Accepted<br/>已接纳"]
- accepted -->|Worker 取走| claimed["Claimed<br/>已领取"]
- claimed -->|产出业务结果| completed["Completed<br/>已完成"]
- completed -->|提交方收到结果| acknowledged["Acknowledged<br/>已确认"]
- completed -.->|结果端关闭| lost["结果无法交付"]
- class submit actor
- class accepted,claimed state
- class completed,acknowledged result
- class lost risk
-```
-
 有缓冲的接口通常允许消息入队后发送就返回；直接会合可以等待接收方接手，但接手也不等于完成后续业务。这些边界要落到接口上核对：Rust 的 `Sender::send` 返回 `Ok` 不保证消息最终一定被接收，接收端可能随后断开；`SyncSender::send` 在容量为 0 时成功返回，才保证消息已被接收。Go 的无缓冲通道也明确规定接收与对应发送完成之间的同步，但这条边不包含接收后的处理步骤[^6][^5]。
 
 如果提交方必须等到处理完成才能继续，应等待与该任务对应的结果或确认，而不是把 `send` 返回当作完成凭证。多个生产者的消息可以交错；消费者领取了 A 的一条消息，也不能据此认定 B 的任务已接纳或已完成。这与前面的示例只要求十个任务各处理一次、不规定生产者之间的全局执行顺序一致。
@@ -167,25 +154,6 @@ worker 创建完毕后，主线程也丢弃原始 `task_rx`，只让 worker 持�
 
 正常结果与预期业务失败可以作为 `Result` 经同一结果通道交回。Worker 在领取后 panic 时，原示例通过 `join` 暴露故障，该任务可能没有结果；如果允许重试，所有者需要记录已领取的任务及其业务标识。调用方提前退出时，结果发送失败应走明确的停止或回收路径；丢弃通道端可解除对应的通信等待，已经在执行的工作仍需自己的停止协议。
 
-```mermaid title="Worker 或下游失效后的任务归属" description="预期的业务失败作为结果返回。若 Worker 在处理时 panic，由任务池所有者检查尚未收到结果的任务；若结果接收端关闭，由 Worker 根据关停协议结束或回收结果。图中不自动重试，避免未知副作用被重复执行。"
-flowchart TB
- work["Worker 已领取任务"]
- business["产出 Result（含业务失败）"]
- panic["Worker panic"]
- output["结果端关闭"]
- owner["所有者核对任务与已产生的效果"]
- stop["按协议退出或回收结果"]
- work --> business
- work -.-> panic
- panic --> owner
- business -.->|send 返回断连| output
- output --> stop
- class work,owner actor
- class business result
- class stop state
- class panic,output risk
-```
-
 ### 共享接收端与调度队列
 
 | 接收方式 | 谁能领取 | 等待方式与协调成本 |
@@ -205,21 +173,6 @@ flowchart TB
 
 前面的 Rust 任务池已经体现了分摊与汇总：两个 worker 领取同一输入，再把结果发送到同一结果通道。Go 官方[流水线示例](https://go.dev/blog/pipelines)采用另一种拓扑：`gen` 产生数据，两个 `sq` 从同一输入分摊计算，各自输出到独立通道，再由 `merge` 汇总。任务池强调执行单元复用，fan-out / fan-in 强调数据怎样分流与合流，两种视角可以描述同一个系统[^11]。
 
-```mermaid title="Go 流水线的分发与汇聚" description="两个 sq 从共享输入分摊任务，每条消息仅由一个 worker 领取，并非广播。merge 转发各路结果，不恢复输入顺序；输入 2、3 时，接收方可能先看到 9。"
-flowchart TB
- gen["gen：输入 2、3"] --> input["共享输入通道"]
- input -->|领取| sq1["sq 1：计算"]
- input -->|领取| sq2["sq 2：计算"]
- sq1 --> out1["输出通道 1"]
- sq2 --> out2["输出通道 2"]
- out1 --> merge["merge：合并输出"]
- out2 --> merge
- merge --> receive["4、9 或 9、4"]
- class gen,sq1,sq2,merge actor
- class input,out1,out2 resource
- class receive result
-```
-
 先领取不等于先完成，先完成也不等于先被接收：哪个结果先到还取决于发送与转发的调度。Go 示例的 `merge` 不按输入编号排序，所以 `gen(2, 3)` 的结果既可能是 `4, 9`，也可能是 `9, 4`[^11]。若调用方需要按输入顺序逐项输出，可以在分发前编号，汇总端暂存提前到达的结果，直到缺少的编号补齐。这会增加缓存占用；较慢的首项还会拖住已经就绪的后续结果。长流水线若要求重排缓存有界，就要限制领先于最早未输出项的在途工作数，并为失败或取消的编号约定处置方式，否则汇总端可能一直等缺项。前面的 Rust 示例在整批收齐后才排序，适用于这个小批次，不提供按序流式输出。
 
 这里引入 Go，是因为它允许多个接收者直接共享通道，且后面可以用 `select` 清楚展示取消信号与数据发送之间的选择。Go 的结束协议需要另行说明：向已关闭通道发送、重复关闭通道以及关闭 `nil` 通道（`close(nil)`）都会触发 panic，因此应由发送方负责关闭；多个发送者共享输出时，需由协调者确认全部发送结束后再关闭，官方 `merge` 就用 `WaitGroup` 等待所有转发结束。通道关闭且缓冲取空后，`<-ch` 不会阻塞，而是**立即不断返回零值**（`v, ok := <-ch` 得到 `ok == false`，`for range` 随之退出）；相对地，对 `nil` 通道发送与接收都会永久阻塞——在 `select` 里这会让对应分支被永久跳过，因此 Go 的 fan-in 汇总器常在观察到 `!ok` 后显式把该输入变量置为 `nil`，避免在已关闭通道上空转死循环。Rust 标准库通道通过最后一个发送端被丢弃表示不再有消息；两种机制都需要明确结束发送的责任[^4][^11][^12]。
@@ -230,22 +183,11 @@ flowchart TB
 
 **背压**（backpressure）让下游的处理压力传回上游。以前面的 Rust 任务池为例，任务队列和结果队列都是有界的，且发送等到有空位才继续。如果下游持续取结果比 worker 产出结果慢，结果队列会先填满。worker 逐个卡在发送上，不能领取下一项；若上游继续提交，任务队列也会填满，入口便要等空位才能接纳新任务[^4]。
 
-```mermaid mobile-direction="TB" title="背压怎样传回提交入口" description="两端都是有界队列，且满时发送等待空位。下游持续取结果过慢，结果队列填满，Worker 等待发送而不能继续领取；在上游仍提交的情况下，任务队列也填满，最终入口等待接纳。箭头表示压力传播的因果顺序，不表示消息流向。"
-flowchart LR
- slow["下游取结果慢"] --> output["有界结果队列<br/>填满"]
- output --> blocked["Worker 等待发送<br/>不能再领取"]
- blocked --> input["有界任务队列<br/>填满"]
- input --> upstream["上游提交等待<br/>尚未接纳"]
- class slow actor
- class output,input resource
- class blocked,upstream risk
-```
-
-下游恢复取结果后，结果队列空出位置，worker 才能交出结果并重新领取，进而给入口腾出任务队列空间。上图只适用于等待型发送：Rust 的 `SyncSender::send` 阻塞线程，Tokio 有界 `mpsc` 的 `send().await` 挂起任务等待容量；同一 Tokio 通道的 `try_send` 在满时立即返回错误，入口可以用它拒绝提交，而不是继续等[^4][^13]。
+下游恢复取结果后，结果队列空出位置，worker 才能交出结果并重新领取，进而给入口腾出任务队列空间。这种逐级反压只适用于等待型发送：Rust 的 `SyncSender::send` 阻塞线程，Tokio 有界 `mpsc` 的 `send().await` 挂起任务等待容量；同一 Tokio 通道的 `try_send` 在满时立即返回错误，入口可以用它拒绝提交，而不是继续等[^4][^13]。
 
 压力传到提交接口，不等于真正传到了生产者。如果每次提交都先创建一个任务，再让它等待 `send().await`，消息虽然没进队列，等待发送的任务仍可能无限增长。要让这条反馈放慢生产，就应让生产者直接等待，或在创建等待者之前限制数量。
 
-上一张图追踪压力如何传播，下面沿消息流向检查积压存在哪里。设入口最多保留 $S$ 个待提交值，有容量为 $Q$ 的任务队列、$W$ 个 worker 槽和容量为 $R$ 的结果队列。若每个 worker 只领取一项，等结果进入队列后才领下一项，且不另留副本，这段管线中至多有 $S + Q + W + R$ 项。等待许可、执行业务、等待发送结果都占用同一个 worker 槽；许可数 $K \le W$ 仅进一步限制同时占用外部资源的工作。若把等待许可移到独立派发任务，那些任务也需要自己的上限。
+前面追踪了压力如何传播，下面沿消息流向检查积压存在哪里。设入口最多保留 $S$ 个待提交值，有容量为 $Q$ 的任务队列、$W$ 个 worker 槽和容量为 $R$ 的结果队列。若每个 worker 只领取一项，等结果进入队列后才领下一项，且不另留副本，这段管线中至多有 $S + Q + W + R$ 项。等待许可、执行业务、等待发送结果都占用同一个 worker 槽；许可数 $K \le W$ 仅进一步限制同时占用外部资源的工作。若把等待许可移到独立派发任务，那些任务也需要自己的上限。
 
 ```mermaid title="任务池中的容量与等待位置" description="顺着消息流向，入口等待 S、任务队列 Q、Worker 持有 W、结果队列 R 是四处积压位置。等待许可、执行业务、等待发送结果共用 W 个 Worker 槽；资源许可 K（K ≤ W）单独限制同时占用的外部资源。"
 flowchart TB

@@ -70,11 +70,6 @@ class Solution:
 
 另一种写法直接处理从 `group_start` 到 `next_group` 之前的半开区间。把反转时的 `prev` 初始化为 `next_group`，第一次改写就让原组头连上下一组，省去临时置空和单独接回组尾的操作。下面用 C++ 展示；这种半开区间反转也能用于 Python，辅助空间相同。
 
-```mermaid mobile-direction="TB" title="三节点一组的接线结果" description="原组为 A、B、C，D 是下一组入口。反转后原组首 A 接 D，组前驱接原组尾 C。下一轮的组前驱移到 A。"
-flowchart LR
- P["group_prev"] --> C["C"] --> B["B"] --> A["A"] --> D["next_group：D"]
-```
-
 ```cpp
 class Solution {
 public:

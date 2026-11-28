@@ -53,29 +53,6 @@ class MinStack:
 
 注意判断条件必须是 **`<=`** 而非 `<`：若连续压入两次相同的最小值（例如 `push(0)`、`push(-2)`、`push(-2)`）只记了一次，第一次 `pop()` 就会把 `mins_` 里的 `-2` 弹空，导致 `getMin()` 丢失仍在主栈中的另一个 `-2`。
 
-```mermaid title="压缩最小栈处理重复最小值的同步交互" description="按调用顺序展示 push(0)、push(-2)、push(-2)、pop() 与 getMin() 时主栈 data_ 与辅助栈 mins_ 的同步关系。因使用 <= 将重复最小值 -2 压入 mins_，首次 pop() 同步弹出后 mins_ 栈顶仍保留 -2，避免 getMin() 误返回 0。"
-sequenceDiagram
-    participant C as Caller
-    participant D as data_
-    participant M as mins_
-
-    C->>D: push(0) -> [0]
-    C->>M: 空栈，push(0) -> [0]
-
-    C->>D: push(-2) -> [0, -2]
-    C->>M: -2 <= 0，push(-2) -> [0, -2]
-
-    C->>D: push(-2) -> [0, -2, -2]
-    C->>M: -2 <= -2，push(-2) -> [0, -2, -2]
-    Note over M: 用 <= 而非 <，保留重复最小值
-
-    C->>D: pop() 弹出 -2 -> [0, -2]
-    C->>M: 弹出值 == 栈顶，pop() -> [0, -2]
-
-    C->>M: getMin()
-    M-->>C: 返回 -2（剩余副本仍在栈顶）
-```
-
 ```cpp
 #include <vector>
 

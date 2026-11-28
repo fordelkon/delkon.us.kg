@@ -95,26 +95,7 @@ const struct Route *longest_match(const struct Route *routes, size_t count,
 
 在 Linux 上，**路由策略数据库**（Routing Policy Database，RPDB）按优先级数字从小到大检查规则。每条规则先匹配选择条件，匹配后才执行动作。默认 IPv4 规则依次查询 `local`（`0`）、`main`（`32766`）和 `default`（`32767`）；这里的数字是规则优先级，`default` 是表名，不是 `/0` 路由[^policy]。
 
-```mermaid title="Linux IPv4 的 RPDB 选路决策" description="从最小优先级数字开始。规则不匹配、本次查表无路由或命中 throw、查表成功但结果被抑制，都会继续扫描。goto 只能跳向优先级数字更大的后续规则以防止环路。查到可用路由或得到拒绝结果时停止；规则用尽且未得到结果则选路失败。图展示常见的本地与单播交付，不展开广播等特殊路由。"
-flowchart TB
- rules["按优先级取下一条规则<br/>小数字在前"]
- rules -->|规则用尽| miss["选路失败：无路由结果"]
- rules -->|有规则| selector{"规则匹配？"}
- selector -->|否| next["回到起点<br/>检查下一条规则"]
- selector -->|是| action["执行规则动作"]
- action -->|goto| jump["跳到后续更高优先级<br/>数字的目标规则重新匹配"]
- action -->|lookup| lookup["只查指定表<br/>表内做最长前缀匹配"]
- action -->|直接拒绝| negative["终止：丢弃或报错"]
- lookup -->|无路由或 throw| next
- lookup -->|命中拒绝路由| negative
- lookup -->|查表成功| suppress{"结果被抑制？"}
- suppress -->|是| next
- suppress -->|否| usable["终止：采用结果<br/>local：本机交付<br/>unicast：选定出接口与下一跳"]
- class rules,selector,suppress state
- class action,lookup,jump,next actor
- class usable result
- class miss,negative risk
-```
+规则不匹配、查表无结果或结果被抑制时，继续检查后面的规则。取得可用路由或命中终止性的拒绝动作就停止；规则用尽仍无结果，选路失败[^policy]。
 
 为避免策略表之间出现死循环，Linux 内核要求 `goto` 的目标规则优先级数字必须严格大于当前规则（只允许向后跳），若目标未命中也会继续扫描下一条。`throw` 结束的是本次查表，不会再退回同一张表找更短前缀。**抑制**（suppression）则发生在查表成功之后，例如 `suppress_prefixlength 0` 会拒用匹配到的 `/0` 路由，但不会拒用匹配到的 `/24`；`suppress_ifgroup` 可以按出接口所属的接口组抑制结果。`blackhole` 则表示静默丢弃：不论是规则动作还是命中的路由类型，它都终止整个决策。`unreachable` 和 `prohibit` 同样终止，而差错含义不同[^policy][^iproute][^rpdb-kernel]。
 
@@ -201,24 +182,7 @@ MAC 只列末字节，完整地址见上表。R1 和 R2 各更新一遍 IPv4 头
 
 以 IPv4 的 `ping` 回显请求为例。IPv4 头的 `Protocol=1` 指明载荷交给 ICMP。ICMP 用标识符和序号关联请求与应答；应答使用 `Type=0`，并返回相应的标识符、序号和探测数据[^2]。
 
-```mermaid title="IPv4 直接承载 ICMP Echo Request" description="外层 Ethernet II 帧承载 IPv4 包。IPv4 头用 Protocol=1 指向 ICMP。Echo Request 的固定部分为 8 字节，后面可带探测数据。此处没有 TCP 或 UDP 头，省略链路层填充和 FCS。"
-flowchart TB
- subgraph frame[Ethernet II 帧]
-  eth["帧头 · EtherType=0x0800"]
-  subgraph ip[IPv4 包]
-   ip_header["IPv4 头 · Protocol=1 · ICMP<br/>源 IPv4 · 目的 IPv4 · TTL"]
-   subgraph echo[ICMP Echo Request]
-    first["Type=8 · Code=0 · 校验和"]
-    match["标识符 · 序号"]
-    data["探测数据 · 可为空"]
-    first --- match --- data
-   end
-   ip_header --- first
-  end
-  eth --- ip_header
- end
- linkStyle default stroke:none
-```
+Echo Request 的 ICMP 头占 8 字节，依次是类型（`8`）、代码（`0`）、校验和、标识符和序号，后面可以带探测数据。它直接占用 IPv4 的载荷，无须 TCP 或 UDP 端口[^2]。
 
 ### 路由器怎样报告差错
 
@@ -396,41 +360,9 @@ IPv4/IPv6 路由、策略规则和排除项决定哪些包进入 TUN。接入 TU
 
 这几行可以组合，但不能混为同一机制。代理重建连接时，不一定把原始 IP 包逐个套上外层头；因此，第八篇讨论 [MTU 与包长预算](/posts/networking/network-diagnostics-performance-troubleshooting/#包长预算与-tcp-载荷)时不能仅凭“启用了 TUN”推导固定的隧道头开销。应用自身的 HTTPS、代理链路加密与 VPN 封装也分别由相应协议决定。
 
-```mermaid title="同一个 TUN 入口之后的两种处理" description="比较两种实现，不是同一条连接依次经过两种模式。左支限定终结应用侧 TCP 的用户态代理，创建独立出站连接；右支限定把完整内层 IP 包加密封装到 UDP/IP 的一种三层 VPN，远端解封装后继续转发原包。两种程序的外层出站都需要可用的绕行路由；标记、策略或接口绑定的效果必须按平台验证。图只展示出站，回程分别重建应用侧包或解封装内层回包。"
-flowchart TB
- tun["内核按路由发送 IP 包<br/>用户态从 TUN 读取"] --> proxy["TUN 代理<br/>协议栈终结应用侧 TCP"]
- proxy --> socket["取得载荷，新建出站套接字<br/>拥有独立确认、重传与关闭"]
- socket --> bypass["按策略与实际选路绕过 TUN<br/>直连或交给远端代理"]
- tun --> vpn["三层 IP VPN<br/>保留完整内层 IP 包"]
- vpn --> outer["加密封装为外层 UDP/IP<br/>路由到远端隧道端点<br/>（外层流量需绕过 TUN）"]
- outer --> peer["远端解密并去掉外层头<br/>继续转发内层 IP 包"]
- class tun state
- class proxy,vpn actor
- class socket,outer resource
- class bypass,peer result
-```
+把上表中“三层 VPN 隧道”的封装展开来看：应用建立连接时选用本机隧道地址 `10.0.0.2` 访问 `198.51.100.20`；VPN 程序通过物理接口地址 `192.168.1.10` 向对端 `203.0.113.9` 发送流量。这里观察的是靠近本机的两个位置：TUN 读出的内层包，以及上游 NAT 之前的物理出口。
 
-再把右支的封装展开。应用建立连接时选用本机隧道地址 `10.0.0.2` 访问 `198.51.100.20`；VPN 程序通过物理接口地址 `192.168.1.10` 向对端 `203.0.113.9` 发送流量。这里观察的是靠近本机的两个位置：TUN 读出的内层包，以及上游 NAT 之前的物理出口。
-
-```mermaid title="VPN 密文包住完整的 TUN 原包" description="TUN 原包包含内层 IPv4 头、TCP 头和原始载荷。加密箭头指向 UDP 数据报内的 VPN 密文区。外层 IPv4、UDP 和 VPN 元数据各有自己的位置；省略外部链路帧与认证标签的具体格式。"
-flowchart LR
- original["TUN 原包<br/>内层 IPv4：10.0.0.2 → 198.51.100.20<br/>TCP：50001 → 443<br/>原始载荷"]
- subgraph outer[物理出口的 IPv4 包]
-  ip["外层 IPv4 头 · Protocol=17<br/>192.168.1.10 → 203.0.113.9"]
-  subgraph udp[UDP 数据报]
-   udp_header["UDP 头 · 52000 → 51820"]
-   subgraph vpn[UDP 载荷 · VPN 数据]
-    metadata["VPN 元数据"]
-    cipher["密文 · 完整内层包"]
-   end
-  end
- end
- original -->|加密完整原包| cipher
- class original actor
- class cipher state
-```
-
-外层目的 IP 让普通路由把包送到 VPN 对端；对端解密、去掉外层封装后，才按内层目的 IP 继续转发。这里的内层地址没有被外层地址简单替换，外层也有自己的 TTL 与路由。反过来，左支的代理若终结应用侧 TCP，物理出口通常出现的是独立出站连接的包，不能套用这张“完整内层包在里面”的结构。
+外层目的 IP 让普通路由把包送到 VPN 对端；对端解密、去掉外层封装后，才按内层目的 IP 继续转发。这里的内层地址没有被外层地址简单替换，外层也有自己的 TTL 与路由。反过来，通过 TUN 接管并终结应用侧 TCP 的代理，在物理出口通常出现的是独立出站连接的包，应用侧原包的 IP 头通常到 TUN 为止。
 
 读到 TUN 时，先核对哪条路由把包交给接口，以及程序写回后内核如何处理。代理如何终结应用侧 TCP、建立独立出站并处理回程，见第七篇的 [TUN 连接与返回路径](/posts/networking/proxies-tunnels-transparent-interception/#tun-代理如何建立出站并交付回包)。
 

@@ -43,25 +43,16 @@ DNS 查询按**资源记录**（Resource Record，RR）类型返回不同用途�
 
 - **存根解析器**（Stub Resolver）：把查询交给配置好的递归解析器；系统实现还可能综合静态映射、缓存与不同网络的解析策略。
 - **递归解析器**（Recursive Resolver）：使用缓存并按需要向其他服务器发起迭代查询，最终返回答案或失败状态[^1]。运营商 DNS 与公共 DNS 都可以承担这一职责。
-- **权威名称服务器**（Authoritative Name Server）：提供某个区域的权威数据。根区服务由多个标识及其分布式实例提供；此图把它们抽象为一个角色。
+- **权威名称服务器**（Authoritative Name Server）：提供某个区域的权威数据。根区由多个分布式部署的名称服务器提供服务。
 
-存根设置 `RD=1` 请求递归服务：由提供该服务的解析器负责返回最终结果或失败，不把下一站留给存根。递归器可以直接用缓存回答；答案未命中但有可用的缓存委派时，则从最接近目标的已知区域开始补查。下面假设两种缓存都没命中，所以从根开始。图中 `198.51.100.20` 是文档地址，不是实时解析结果[^1]。
+存根设置 `RD=1` 请求递归服务，由递归器负责返回答案或失败。假设同一个存根先后查询 `example.com. IN A`，它发送的问题相同，递归器需要访问的上游却取决于缓存里还剩什么[^1]。
 
-```mermaid title="一次未命中缓存的 DNS 查询" description="从上到下读。本例没有可用的答案或委派缓存，递归器从根开始迭代查询。根与 .com 只返回下一站，递归器自己发起下一次查询；它们并不转发存根的原请求。每次都查询 example.com. 的 A 记录，省略查询名最小化、别名、失败和地址补查。"
-sequenceDiagram
- participant S as 存根
- participant R as 递归器
- participant Root as 根
- participant TLD as .com
- participant Auth as 目标权威
- S->>R: 查询 A · RD=1
- R->>Root: 查询 A · RD=0
- Root-->>R: .com 委派（NS）
- R->>TLD: 查询 A · RD=0
- TLD-->>R: example.com 委派（NS）
- R->>Auth: 查询 A · RD=0
- Auth-->>R: A = 198.51.100.20
- R-->>S: A = 198.51.100.20
+```mermaid title="缓存决定递归器从哪一级继续查询" description="以普通迭代解析为例，忽略别名和过期数据服务。已缓存且有效的目标 A 记录足以直接回答；只保留目标区域委派及可用服务器地址时，仍须问目标权威服务器。两者都没有且无更近的缓存委派时，从根提示开始。"
+flowchart TB
+ request["递归器收到 example.com. IN A"]
+ request -->|A 记录集仍有效| answer["从缓存返回地址<br/>没有上游查询"]
+ request -->|只保留 example.com 委派和服务器地址| auth["直接问 example.com 权威服务器"]
+ request -->|无可用答案或委派| root["先问根服务器<br/>按返回的委派逐级查询"]
 ```
 
 ### 委派、胶水记录与查询名最小化
@@ -74,7 +65,7 @@ sequenceDiagram
 
 ### 把查询过程展开成实际报文
 
-这里沿用第一篇时序图里的[客户端与解析器](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)，再补上递归器到权威服务器的一次查询。假设递归器已有委派信息，且实验网络已配置无 NAT 的往返路由，这次只需向权威服务器补查 `example.com. A`。权威地址 `203.0.113.53` 与答案 `198.51.100.20` 都使用文档地址。
+这里沿用第一篇冷启动示例中的[客户端与解析器](/posts/networking/layered-architecture-packet-journey/#冷启动时客户端会发哪些报文)，再补上递归器到权威服务器的一次查询。假设递归器已有委派信息，且实验网络已配置无 NAT 的往返路由，这次只需向权威服务器补查 `example.com. A`。权威地址 `203.0.113.53` 与答案 `198.51.100.20` 都使用文档地址。
 
 本例选用 UDP，客户端源端口分别为 `53001` 和 `54002`，DNS 服务端口为 `53`。DNS 头中的 `ID` 标识一次查询，`QR=0` 表示查询、`QR=1` 表示响应；响应复制对应查询的 ID，问题段说明在查哪个名字、哪种记录[^dns-message]：
 
@@ -95,27 +86,7 @@ sequenceDiagram
 
 把上表第 1 行展开成客户端在以太网口发出的帧。本例是一条无 EDNS 的 `example.com. IN A` 查询。UDP 头里的端口用于交付数据报，DNS 头里的事务 ID 用于把应答对应到查询[^dns-message]。
 
-```mermaid title="一条 DNS 查询怎样装进 UDP 数据报" description="外层以太网承载 IPv4。IPv4 用 Protocol=17 标识 UDP，UDP 载荷是一条 DNS 查询消息。DNS 头下面只有一个问题，答案、权威和附加记录计数为零。图只列关键字段，省略链路层填充和 FCS。"
-flowchart TB
- subgraph frame[Ethernet II 帧]
-  eth["帧头 · EtherType=0x0800"]
-  subgraph ip[IPv4 包]
-   ip_header["IPv4 头 · Protocol=17<br/>源：192.168.1.10<br/>目的：192.168.1.53"]
-   subgraph udp[UDP 数据报]
-    udp_header["UDP 头 · 53001 → 53<br/>长度 · 校验和"]
-    subgraph dns[DNS 查询消息]
-     dns_header["DNS 头 · ID=0x1201<br/>QR=0 · RD=1<br/>QDCOUNT=1"]
-     question["问题段<br/>example.com. · A · IN"]
-     dns_header --- question
-    end
-    udp_header --- dns_header
-   end
-   ip_header --- udp_header
-  end
-  eth --- ip_header
- end
- linkStyle default stroke:none
-```
+本例用 Ethernet II 的 `EtherType=0x0800` 标识 IPv4，IPv4 的 `Protocol=17` 标识 UDP。目的端口是 `53`，UDP 载荷里 DNS 头的 `QDCOUNT=1`，随后是问题名 `example.com.`、类型 `A` 与类别 `IN`[^dns-message]。
 
 ### DNS 的 UDP 大小限制与 TCP 回退
 
@@ -126,26 +97,6 @@ flowchart TB
 ### 缓存层级与 TTL
 
 浏览器、系统服务、路由器转发器和递归解析器都可能缓存结果，但它们不一定全部出现在同一条查询路径上。浏览器内置的 **DNS over HTTPS**（DoH，见下文[加密通道一节](#dotdoh-与-doq-保护查询通道)）可能绕过系统解析服务。本机解析也不止访问 DNS 缓存：`/etc/hosts` 提供静态映射，`.local` 域名通常走链路内的**多播 DNS**（Multicast DNS，mDNS，使用 UDP `5353` 发往 `224.0.0.251` 或 `ff02::fb`）[^mdns]，不完整域名还可能按 `search` 后缀列表补全；传统的 Linux `glibc` 解析库（`getaddrinfo`）自身并不带持久化 DNS 缓存，除非底层配合 `systemd-resolved` 等本地守护进程。
-
-```mermaid title="解析路径决定会访问哪些缓存" description="应用、系统服务或本地转发器可在本地作答；向上游发查询的箭头只画这些节点未能直接作答的情况。到达递归器后，可用缓存结果直接返回；需要补查时进入迭代查询循环，直到拿到最终答案或失败才返回。省略别名追踪与重试。"
-flowchart TB
- app["应用或浏览器<br/>先检查自身可用缓存"] --> path{"本次解析入口<br/>由谁发起？"}
- path -->|系统接口| system["系统解析服务<br/>hosts、mDNS、缓存与系统策略"]
- system --> local["本地 DNS 转发器<br/>（或路由器代理，可能另有缓存）"]
- system -->|直连外部递归或系统加密 DNS| recursive{"递归器命中<br/>可用缓存？"}
- local --> recursive
- path -->|浏览器内置 DoH| doh["浏览器选定的 DoH 服务<br/>（通常绕过系统解析缓存）"]
- doh --> recursive
- recursive -->|命中| reply["向请求方返回结果"]
- recursive -->|需要补查| query["定位最近可用委派<br/>（冷缓存从根开始）"]
- query --> iterate["向当前权威发起迭代查询"]
- iterate --> refer{"收到下级委派<br/>还是最终结果？"}
- refer -->|下一站委派| iterate
- refer -->|最终答案或失败| reply
- class app actor
- class system,local,doh,query,iterate state
- class reply result
-```
 
 DoH 是服务入口，递归是逻辑职责，两者可以属于同一服务。缓存也可以保存[否定结果或短暂的失败结果](#否定应答解析失败与超时)，不是只有地址才算命中。若只缓存了委派，它能缩短[前面的冷缓存路径](#解析器角色与委派路径)，不能回答存根的问题。观察系统缓存也不能据此判断浏览器内置 DoH 的缓存状态。
 

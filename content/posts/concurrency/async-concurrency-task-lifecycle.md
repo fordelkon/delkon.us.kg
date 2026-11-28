@@ -129,54 +129,13 @@ sequenceDiagram
 
 **执行器**（executor）负责调度任务和安排轮询；**任务**（task）是运行时管理的调度实体，保存外层 Future 的调度状态并处理其结果。一个任务可以在外层 Future 内嵌套多个内部 Future。I/O 或定时器通过 Waker 通知的是关联任务，这延续了第一篇的[执行层次](/posts/concurrency/parallelism-execution-units/#任务与执行单元)[^1][^3][^5]。
 
-```mermaid title="Executor、Task、Future 与 Waker" description="事件源通过 Waker 请求再次调度任务。执行器安排线程轮询任务的外层 Future，外层可以轮询多个内部 Future。内部 Ready 只是子计算完成；外层 Ready 才表示任务得到正常返回值。"
-flowchart TB
- event["I/O 或定时器"] -.->|事件发生时调用| waker["Waker"]
- waker -.->|请求再次调度| executor["Executor"]
- executor -->|安排线程轮询| task["Task<br/>调度状态与结果"]
- task -->|poll| outer["外层 Future"]
- outer -->|按需轮询| inner["内层 Future"]
- outer -->|返回 Ready| complete["任务正常完成"]
- class executor,task actor
- class event resource
- class waker,outer,inner state
- class complete result
-```
-
-Wake 是调度请求，内层 `Ready` 表示子计算完成，外层 `Ready` 才使该任务正常完成。把观察对象固定为外层 Future，就得到下面的轮询循环。
-
-```mermaid title="执行器的轮询与唤醒循环" description="这里轮询的是任务外层 Future：Ready 表示任务完成，Pending 表示尚未完成。wake 可在 poll 返回前发生，已有的重新调度请求必须保留；多个唤醒可合并，不保证一一排队。"
-flowchart TB
- spawn["新任务"] --> queue["就绪队列"]
- wake["wake 请求<br/>可合并"] --> queue
- queue --> poll["poll 任务外层 Future"]
- poll -->|Ready| done["记录结果<br/>结束任务"]
- poll -->|Pending| wait["等待再次调度<br/>保留已有唤醒"]
- wait -.->|已有或后续 wake| queue
- class spawn actor
- class queue resource
- class poll,wait,wake state
- class done result
-```
-
-任务可以在 `poll` 返回前就被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，不是保证每次 wake 都对应一次独立排队[^3][^5]。
+Wake 是调度请求，内层 `Ready` 表示子计算完成，外层 `Ready` 才使该任务正常完成。把观察对象固定为外层 Future，执行器的基本轮询循环就是：新任务或收到 `wake` 的任务进入就绪队列，等待执行器安排线程 `poll` 外层 Future；返回 `Ready` 时记录结果并结束任务，返回 `Pending` 时则等待已有或后续的唤醒再次入队。即使在 `poll` 返回前就已经被唤醒，执行器也必须保留这次重新调度的请求。这个循环让执行器无需持续扫描所有等待者；它描述的是调度思路，多个唤醒可能被合并，并不保证每次 `wake` 都对应一次独立排队（完整的状态迁移见文末状态图）[^3][^5]。
 
 第一篇[协作式并发示例中的 `yield_now()`](/posts/concurrency/parallelism-execution-units/#协作式并发) 会主动请求再次调度，但不保证下一次一定运行其他任务。尤其 `join!` 的多个分支仍属于同一个任务，不能把分支让出理解成创建了新的调度单位[^6]。
 
 ## I/O 就绪与完成通知
 
-网络 Future 等待数据时，运行时的 I/O 驱动把操作系统事件连接到 Waker，执行器负责接下来的任务调度。对同一次读操作，**就绪通知**（readiness）说明现在可以尝试读；**完成通知**（completion）则报告事先提交的读操作有了结果[^7][^8][^9]。
-
-```mermaid mobile-direction="TB" title="两种 I/O 通知的读操作顺序" description="就绪路径先等到可读事件，再尝试非阻塞读取；若返回 WouldBlock，还要继续等待。完成路径先提交读请求，再取回该次读取的结果。箭头表示操作顺序，不表示耗时。"
-flowchart LR
- watch["登记可读兴趣"] --> notice["收到可读事件"]
- notice --> read["尝试非阻塞读<br/>检查结果"]
- submit["提交异步读"] --> completion["收到该次读的<br/>完成通知"]
- completion --> completeResult["检查读结果"]
- class watch,submit actor
- class notice,completion state
- class read,completeResult result
-```
+网络 Future 等待数据时，运行时的 I/O 驱动把操作系统事件连接到 Waker，执行器负责接下来的任务调度。对同一次读操作，**就绪通知**（readiness）说明现在可以尝试非阻塞读（若返回 `WouldBlock` 仍需继续等待）；**完成通知**（completion）则先提交异步读请求，再报告该次读取的结果[^7][^8][^9]。
 
 Linux 的 `epoll`（在边沿触发模式 `EPOLLET` 下）与 BSD / macOS 的 `kqueue`（`EV_CLEAR`）以及 Mio 的底层轮询采用**边沿触发**（edge-triggered）或等效语义：内核通常在状态发生新变化时发送一次通知，之后不会因为缓冲区里还剩数据就持续重复通知。因此调用方每次被唤醒后，必须把非阻塞描述符连续读写**直到遇到 `WouldBlock`** 才能登记下一次等待；只读一部分就停手会错失后续唤醒。此外，Mio 的就绪事件也可能是虚假的，若首次尝试即返回 `WouldBlock`，同样要继续等待[^7]。Windows IOCP 可以报告已提交的异步 I/O 操作完成，但 Mio 在 Windows 上仍对外提供就绪抽象。可见底层机制并不决定上层接口的通知语义[^7][^8]。
 

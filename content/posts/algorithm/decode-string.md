@@ -18,35 +18,6 @@ tags: ["algorithm", "stack", "python", "cpp"]
 3. 进入内层后，将当前缓冲清空（`curr = ""`、`num = 0`），继续按完全相同的规则解码；
 4. 遇到 `']'` 时，内层子串已经完整落在 `curr` 中。弹出栈顶保存的 `(prev_str, repeat_count)`，将当前内层结果重复 `repeat_count` 次拼到 `prev_str` 后面，即 `curr = prev_str + curr * repeat_count`，恢复为外层当前前缀。
 
-以 `"3[a2[c]]"` 为例，上下文栈在两层嵌套中的压栈与弹栈过程如下：
-
-```mermaid title="解析 3[a2[c]] 的上下文栈交互" description="按字符扫描顺序展示解析 3[a2[c]] 时当前状态 (curr, k) 与显式上下文栈的压栈与弹栈协作：遇 '[' 保存外层 (prefix, k) 并重置，遇 ']' 弹出外层上下文并将当前片段重复 k 次后拼接。"
-sequenceDiagram
-    participant I as 扫描器
-    participant C as 当前 (curr, k)
-    participant S as 上下文栈
-
-    I->>C: 读入 '3' -> k = 3
-    I->>C: 读入 '['
-    C->>S: push("", 3)
-    Note over C: 重置 curr="", k=0
-
-    I->>C: 读入 'a' -> curr = "a"
-    I->>C: 读入 '2' -> k = 2
-    I->>C: 读入 '['
-    C->>S: push("a", 2)
-    Note over C: 重置 curr="", k=0
-
-    I->>C: 读入 'c' -> curr = "c"
-    I->>C: 读入 ']'
-    S-->>C: pop("a", 2)
-    Note over C: curr = "a" + "c"×2 = "acc"
-
-    I->>C: 读入 ']'
-    S-->>C: pop("", 3)
-    Note over C: curr = "" + "acc"×3 = "accaccacc"
-```
-
 与[《有效的括号：把期望的右括号压栈》](/posts/algorithm/valid-parentheses/)相比，括号匹配只需要在栈里记住“尚未闭合的括号符号”，而字符串解码把外层尚未完成的字符串前缀与倍率一并压入栈帧，完整演示了栈如何保存挂起的计算上下文。
 
 ### 多位数字的累积

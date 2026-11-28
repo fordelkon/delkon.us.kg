@@ -7,7 +7,7 @@ tags: ["networking"]
 
 在浏览器里打开一个网址，应用交给操作系统的是什么，路由器看到的又是什么？我们跟着一次 HTTPS 请求，看看数据怎样在应用、传输、网络和链路四层之间交付，再顺着一条具体路径追踪哪些字段会变、哪些会留到对端。这是[计算机网络系列](/series/networking/)的第一篇，实验以 macOS 和 Linux 为例。
 
-读一次 HTTPS 通信，可以先问「现在是谁和谁交换什么报文？」，再问「这份报文由哪些下层协议承载？」。前一个问题用时序图回答，后一个问题要展开报文的头部与载荷。本篇先认识各层与沿途设备，再把这两个问题放到[同一次冷启动访问](#冷启动时客户端会发哪些报文)里。后续篇章按机制依赖展开，先解释链路、路由与传输，再讨论 DNS 和 Web 通信。
+读一次 HTTPS 通信，可以先问「现在是谁和谁交换什么报文？」，再问「这份报文由哪些下层协议承载？」。先追踪每次交换的双方，再从当前链路的帧头向内展开，找到他们交换的载荷。本篇先认识各层与沿途设备，再把这两个问题放到[同一次冷启动访问](#冷启动时客户端会发哪些报文)里。后续篇章按机制依赖展开，先解释链路、路由与传输，再讨论 DNS 和 Web 通信。
 
 ## 为什么需要分层模型
 
@@ -53,8 +53,6 @@ tags: ["networking"]
 
 **以太网帧**（Ethernet Frame）是以太网在数据链路层的传输单位。以基于 TCP 的 HTTPS 为例，TCP 报文段承载 TLS 编码后的部分字节，IP 数据报封装 TCP 报文段，以太网帧再把这一跳要发送的 IP 数据报装进载荷。物理层把数据编码为链路上的信号。以太网帧也可以直接承载 ARP，接收端通过 EtherType 区分载荷协议[^4]。
 
-从帧首到帧尾依次是以太网头、IPv4 包和帧尾。IP 包与 TCP 段的外框标出各自的封装边界。
-
 ```mermaid title="一个以太网帧怎样包含 IPv4 与 TCP" description="未加 VLAN 标签的 Ethernet II 承载 IPv4/TCP。外框包含帧头、IPv4 包与 FCS，IPv4 包内再包含 TCP 段；外框内各块从上到下按线上出现顺序排列。省略部分字段、选项和必要的以太网填充，宽度不代表字节数。"
 flowchart TB
  subgraph frame[Ethernet II 帧]
@@ -75,7 +73,7 @@ flowchart TB
  linkStyle default stroke:none
 ```
 
-这张图展开的是未分片时的协议布局。帧的载荷包含整个 IP 数据报，IP 的载荷又包含整个 TCP 报文段；以太网头与 FCS 都在 IP 包之外。路由器换掉外层帧，不代表它同时换掉了内层的目的 IP。
+在普通 IPv4 转发中，路由器取出帧里的 IP 包，递减 TTL，更新头部校验和，再按下一跳重新成帧。原帧的 MAC 地址和 FCS 都留在上一跳，内层的目的 IP 仍指向远端。
 
 常见的未加 VLAN 标签的 Ethernet II 帧由以下字段组成[^ethernet-frame]：
 
@@ -137,28 +135,12 @@ bool decode_ethernet_header(const uint8_t *bytes, size_t size,
 
 ### 同一条链路上的不同封装路径
 
-下面并排看同一以太网接口可能发送的五类数据。沿箭头向下读，箭头指向负责承载该数据的协议。
+同一以太网接口会发出不同层级的协议数据，各自对应的承载协议也不同（前文展开了 HTTPS 经 TLS → TCP → IPv4 → 以太网的完整封装，下面对照其余几类典型报文）：
 
-```mermaid title="HTTPS、TCP SYN、DNS、ICMP 与 ARP 的封装路径" description="每条路径从产生数据的协议开始。汇合只表示使用同一种承载协议，每次发送仍各自成帧。以太网使用 IPv4 或 ARP 的 EtherType；TCP、UDP 和 ICMP 对应 IPv4 Protocol 的 6、17 和 1。"
-flowchart TB
- http["HTTP 请求"] --> tls["TLS 记录"]
- tls --> tcp["TCP 段"]
- syn["TCP SYN<br/>载荷 0 字节"] --> ip["IPv4 包"]
- tcp --> ip
- dns["DNS 查询"] --> udp["UDP 数据报"]
- udp --> ip
- icmp["ICMP Echo"] --> ip
- ip --> eth["以太网帧"]
- arp["ARP 请求"] --> eth
- class http,syn,dns,icmp,arp actor
- class tls,tcp,udp,ip resource
- class eth result
-```
-
-- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[初始 SYN 的报文布局和 MSS 选项](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)与[三次握手的时序图](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)分别展示段里装了什么、何时发送[^2][^ethernet-frame]。
+- **TCP SYN** 由 TCP 自己生成，标志和初始序号都写在头部。没有 TCP 选项和 IPv4 选项时，一个零载荷 SYN 段的 TCP 头占 20 字节，连同 IPv4 头共 40 字节。以太网另加帧头、填充和帧尾。SYN 若携带 MSS 等选项，TCP 头会更长。[初始 SYN 的报文布局和 MSS 选项](/posts/networking/transport-tcp-udp-socket-quic/#初始-syn-的报文布局)与[三次握手的序号确认](/posts/networking/transport-tcp-udp-socket-quic/#连接建立三次握手)分别展示段里装了什么、何时发送[^2][^ethernet-frame]。
 - **ICMP Echo** 是由 IPv4 直接承载的诊断报文，自己的 ICMP 头部下面可以有探测数据。这里没有 TCP 或 UDP 头，见 [ICMP Echo Request 的报文布局](/posts/networking/routing-forwarding-nat-virtual-interfaces/#icmp-echo-request-的报文布局)[^icmp-echo]。
 - **ARP 请求**由以太网直接承载，以本地链路上的下一跳 IPv4 地址为查询目标。[ARP 请求的帧布局](/posts/networking/ip-addressing-subnet-lan-delivery/#arp-请求的帧布局)展示了以太网广播地址与 ARP 消息中的目标 IPv4 各在什么位置。IPv6 邻居解析使用 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)[^arp]。
-- **DNS 查询**在图中由 UDP 承载，见 [UDP DNS 查询的报文布局](/posts/networking/dns-resolution-caching-encrypted-queries/#udp-dns-查询的报文布局)。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
+- **DNS 查询**通常由 UDP 承载，见 [UDP DNS 查询的报文布局](/posts/networking/dns-resolution-caching-encrypted-queries/#udp-dns-查询的报文布局)。[传统 DNS 也支持 TCP](/posts/networking/dns-resolution-caching-encrypted-queries/#dns-的-udp-大小限制与-tcp-回退)，采用加密 DNS 时则要看实际选用的传输方式。
 
 ### 接收端怎样选择上层协议
 
@@ -201,26 +183,7 @@ TCP 向上交付有序字节流，TLS 则依据记录头中的 `length` 字段�
 
 **套接字**（socket）是应用读写网络数据的操作系统接口。Unix-like 系统常用文件描述符访问它，再调用 `connect`、`send` 或 `recv`。常见的 Internet `SOCK_STREAM` 套接字使用 TCP，`SOCK_DGRAM` 套接字使用 UDP，具体仍取决于地址族与协议。Unix 域套接字则不经过 IP 网络[^6]。
 
-前面介绍的是协议数据格式，现在看应用如何把数据交给本机发送路径。Linux、macOS 和 Windows 都有套接字、协议栈和网络接口的抽象，钩子位置与驱动接口各有不同；下图对照回环、TUN 和物理接口三种出口。
-
-```mermaid title="从套接字到物理介质的发送路径" description="应用调用 write 或 send，把数据交给内核。路由和策略选出一条出口：回环回到本机协议栈，TUN 将 IP 包交给读取接口的用户态程序，物理接口则经驱动和网卡在链路上发送信号。箭头表示交付方向，不规定内核钩子的顺序。"
-flowchart TB
- app["用户态应用"]
- subgraph kernel[内核态]
-  socket["Socket 发送缓冲"] --> route["TCP/IP 处理<br/>路由与过滤策略"]
-  route --> loop["回环<br/>本机"]
-  route --> tun["TUN"]
-  route --> driver["驱动"]
- end
- app -->|write / send| socket
- tun -->|IP 包| reader["用户态<br/>程序"]
- driver --> nic["网卡"]
- nic --> wire["链路"]
- class app,reader actor
- class socket,nic resource
- class route state
- class loop,tun,driver,wire result
-```
+前面介绍的是协议数据格式，现在看应用如何把数据交给本机发送路径。Linux、macOS 和 Windows 都有套接字、协议栈和网络接口的抽象，钩子位置与驱动接口各有不同：应用调用 `write` 或 `send` 把数据写入内核的 Socket 发送缓冲，经 TCP/IP 处理与路由策略选择出口后，流量可能回到本机回环、通过 `TUN` 将 IP 包交给读取接口的用户态程序，或经驱动与网卡发往物理链路。
 
 协议图描述的是线上字节的排列，不要求包在内核内存中连续存放。例如 Linux 的包缓冲可以关联线性数据区与分散的页片段[^skb]；网卡通常通过**直接内存访问**（direct memory access，DMA）交换数据。Linux 的**网络事件处理机制**（NAPI，早期称 New API，即“新接口”）通常在设备中断通知后调度轮询，批量处理收发事件；硬件中断合并则是减少中断频率的另一项机制[^napi]。驱动、卸载与虚拟接口会改变主机抓包所见，参见第八篇的[捕获位置说明](/posts/networking/network-diagnostics-performance-troubleshooting/#https-与代理路径需要另一次捕获)。
 
@@ -255,19 +218,6 @@ PPP 链路的另一端就是 R2，R1 无需在这一跳通过 ARP 查询 MAC。�
 
 家庭路由器常用的是 NAT 中的**网络地址端口转换**（Network Address Port Translation，NAPT）：除转换 IP 地址外，还维护 TCP/UDP 端口的映射，让多台内网设备共用一个公网 IP 地址，并同步更新 IP 与传输层伪头部校验和[^napt]。具体的地址端口映射、回包转换与校验和调整，见第三篇的 [NAT 与 NAPT 示例](/posts/networking/routing-forwarding-nat-virtual-interfaces/#nat多台内网设备如何共用一个公网-ip)。
 
-下面把这些职责放回同一条路径。为方便比较，图中每段链路都按以太网表示；节点标注的是本例的处理职责，不是设备能力的上限。
-
-```mermaid mobile-direction="TB" title="交换、路由与 NAPT 各自改动什么" description="限定普通 IPv4/TCP、以太网链路与家庭 NAPT，无应用代理。交换机不重写 MAC 或 IP；路由器在各自出口重新封装二层头并递减 TTL。家庭 NAPT 额外改写源 IP 和源端口，之后普通公网路由不再改写这对地址端口；不是整个 IP/TCP 头逐字节保持不变。箭头表示经过顺序，不按距离或耗时比例绘制。"
-flowchart LR
- client["客户端<br/>生成请求<br/>并封装"] -->|本链路帧| switch["二层交换机<br/>按目的 MAC<br/>转发"]
- switch -->|原帧进网关| nat["家庭 NAPT 路由器<br/>查目的 IP · 减 TTL<br/>改写源地址和端口"]
- nat -->|换帧并改写<br/>源地址端口| router["公网路由器<br/>查目的 IP<br/>递减 TTL"]
- router -->|再次换帧<br/>保持转换后<br/>地址和端口| server["服务端<br/>按连接交付<br/>进程处理"]
- class client,server actor
- class switch,router state
- class nat resource
-```
-
 ## 一次 HTTPS 请求：冷启动与状态复用
 
 ### 冷启动时客户端会发哪些报文
@@ -276,32 +226,9 @@ flowchart LR
 
 浏览器先从 URL 取得主机名与默认端口 `443`[^7]。系统准备发送 DNS 查询时，先按路由选出直连解析器，再补齐它的 MAC。得到网站地址后，系统为网站连接重新选路，这次选出的下一跳是网关，又需要一次 ARP。**ARP 的时机取决于下一跳和邻居缓存**，已有可用映射时，主机可以直接发出相应的帧[^arp]。
 
-```mermaid title="从解析下一跳到收到 HTTPS 响应" description="自上而下读交换顺序。两次 ARP 请求都在本地链路广播，箭头指向应答者。DNS 在本地链路交付，网站流量经网关转发。虚线标示受 TLS 保护的消息。箭头按协议消息或交换标示，不对应固定的包数或耗时。省略 DNS 上游查询、额外的 TCP 确认、重传与连接关闭。"
-sequenceDiagram
- participant C as 客户端<br/>192.168.1.10
- participant D as 递归解析器<br/>192.168.1.53
- participant G as 默认网关<br/>192.168.1.1
- participant S as 网站<br/>198.51.100.20
- C->>D: 广播 ARP：<br/>查解析器 MAC
- D->>C: ARP 应答：<br/>解析器 MAC
- C->>D: DNS 查询：<br/>example.com A
- D->>C: DNS 应答：<br/>198.51.100.20
- C->>G: 广播 ARP：<br/>查网关 MAC
- G->>C: ARP 应答：<br/>网关 MAC
- C->>S: TCP SYN
- S->>C: TCP SYN-ACK
- C->>S: TCP ACK
- C->>S: TLS ClientHello
- S->>C: TLS ServerHello
- S-->>C: 证书与服务端<br/>Finished 等
- C-->>S: 客户端 Finished
- C-->>S: HTTP 请求
- S-->>C: HTTP 响应
-```
-
 ### 按阶段对照报文与封装
 
-按时序图从上到下找当前的交换，再沿同一行从内到外读承载关系。每行对应一组独立的协议交换，上一行留下的地址、连接或密钥会被后续阶段使用。
+下表按本例的交换顺序排列，每行从内到外列出报文的承载协议。每行对应一组独立的协议交换，上一行留下的地址、连接或密钥会被后续阶段使用。
 
 | 本次交换 | 得到什么 | 客户端链路上的封装（从内到外） |
 | --- | --- | --- |
@@ -331,24 +258,7 @@ DNS 应答为后续连接提供地址。TCP 自己生成以该地址为目的 IP
 | 连接已关闭，但 DNS 和 TLS 恢复状态仍有效 | 可以复用地址和恢复材料，仍需新建传输连接并执行恢复握手 |
 | 只剩可用的 DNS 解析结果 | 直接用已有地址建连并执行完整握手，仍按路由和邻居缓存决定是否发 ARP |
 
-连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。改用 HTTP/3 时，[TLS 握手在 QUIC 建连过程中进行](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)。
-
-下面从最先能省掉的网络工作开始，依次检查 HTTP 缓存、已有连接和解析结果。TLS 恢复材料只参与新握手，不等同于复用已有连接。
-
-```mermaid title="一次 HTTPS 请求可能跳过哪些阶段" description="从上往下检查。本地 HTTP 缓存能直接满足时，不发网络请求；有满足本次服务身份和协议要求的连接时，直接在原连接上发请求。否则先取得地址，再按 HTTP 版本新建安全连接。省略地址族竞速、协议回退与重定向。"
-flowchart TB
- cached["1. 检查本地 HTTP 缓存<br/>能直接满足：返回缓存响应"]
- reuse["2. 检查已有连接<br/>可复用：在原连接上发请求"]
- dns["3. 取得地址<br/>有可用解析结果：直接用<br/>没有结果：做 DNS 解析"]
- connect["4. 新建安全连接<br/>HTTP/1.1、HTTP/2：TCP + TLS<br/>HTTP/3：QUIC 集成 TLS"]
- send["在新连接上发送请求"]
- cached -->|不能直接满足| reuse
- reuse -->|无可用连接| dns
- dns --> connect --> send
- class cached,reuse,dns state
- class connect actor
- class send result
-```
+连接复用继续使用已有连接，TLS 会话恢复则利用保存的状态完成新握手。HTTP/2 还允许部分不同来源共用连接，前提是服务端对相应来源具有权威性、证书身份匹配且其他连接条件满足[^reuse]。改用 HTTP/3 时，[TLS 握手在 QUIC 建连过程中进行](/posts/networking/http-evolution-tls-handshake-https/#http3-怎样把-tls-放进-quic)。检查复用时依次排查 HTTP 缓存、已有连接与解析结果即可——TLS 恢复材料只参与新握手，不等同于复用已有连接。
 
 本例的客户端网段采用 IPv4 以太网。若在以太网上发送 IPv6，帧仍有源与目的 MAC，但解析下一跳用的是第二篇的 [ICMPv6 邻居发现](/posts/networking/ip-addressing-subnet-lan-delivery/#ipv6-的邻居发现ndp)，不是 ARP。
 

@@ -88,27 +88,6 @@ class Trie:
 
 需要注意一个关键细节：调用 `nodes_.emplace_back()` 追加新节点时，如果 `vector` 触发扩容重分配，所有指向旧元素的引用和指针都会失效[^cpp-emplace-back]。因此**绝不能**在 `emplace_back()` 之前把 `nodes_[curr]` 绑定为引用并在之后继续写入，而应先算出 `next_idx = nodes_.size()`、完成 `emplace_back()` 后，再用整数下标 `nodes_[curr].next[idx] = next_idx` 重新索引。查询接口接收只读 `std::string_view`，不复制调用方字符串[^cpp-string-view]：
 
-```mermaid title="C++ 连续节点池版 Trie 类结构" description="Trie 通过 vector<Node> nodes_ 连续存储所有节点（索引 0 为根节点），Node 用定长数组 next 保存子节点下标并以 -1 表示空转移，对外提供 insert、search 与 startsWith，内部统一复用 findNode。"
-classDiagram
-    class Trie {
-        -vector~Node~ nodes_
-        +Trie()
-        +insert(string_view word) void
-        +search(string_view word) bool
-        +startsWith(string_view prefix) bool
-        -findNode(string_view s) int
-    }
-
-    class Node {
-        +array~int, 26~ next
-        +bool is_end
-        +Node()
-    }
-
-    Trie "1" *-- "1..*" Node : nodes_ 连续池（0 为根）
-    Node ..> Node : next[c] 下标跳转（-1 为空）
-```
-
 ```cpp
 #include <array>
 #include <cstddef>

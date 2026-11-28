@@ -15,16 +15,7 @@ $$
 \text{curr}_i = \max(\text{nums}[i],\ \text{curr}_{i - 1} + \text{nums}[i]).
 $$
 
-这一线性扫描由 Jay Kadane 提出、经 Jon Bentley 在 *Programming Pearls* 中推广[^bentley-kadane]：
-
-```mermaid title="原数组元素与 Kadane 局部最大和走势" description="柱状为原数组 nums = [-2, 3, -1, 2, -5]，折线为以 i 结尾的最大子数组和 curr = [-2, 3, 2, 4, -1]，下标 1 从 3 重新开始，下标 3 达到峰值 4；最后一格的结尾和降到 -1，全局最大和仍为 4。"
-xychart-beta
-    title "原数组（柱）与 Kadane 局部最大和（线）"
-    x-axis [0, 1, 2, 3, 4]
-    y-axis "数值 / 最大和" -5 --> 5
-    bar [-2, 3, -1, 2, -5]
-    line [-2, 3, 2, 4, -1]
-```
+这一线性扫描由 Jay Kadane 提出、经 Jon Bentley 在 *Programming Pearls* 中推广[^bentley-kadane]。
 
 下面按位置对齐输入、以该位置结尾的最大和，以及扫描到该位置时的全局最大和：
 

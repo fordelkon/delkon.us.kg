@@ -74,27 +74,21 @@ HTTP/1.1 的持久连接不需要靠 `Connection: Keep-Alive` 才开启；连接
 
 以使用证书认证、没有 HelloRetryRequest 的常见 TLS 1.3 完整握手为例，客户端通常经过一次 TLS 网络往返（1-RTT）后即可发送应用数据；此前的 DNS、TCP 握手不包含在这个 1-RTT 里，重试等条件也可能增加往返[^5]。本例使用**临时椭圆曲线迪菲-赫尔曼密钥交换**（Elliptic Curve Diffie-Hellman Ephemeral，ECDHE），两端在 `ClientHello` 与 `ServerHello` 中用 `key_share` 交换各自的临时公钥，从而获得**前向保密**（Forward Secrecy，FS）。双方在 `ServerHello` 后以**基于 HMAC 的密钥派生函数**（HMAC-based Key Derivation Function，HKDF）从共享秘密导出握手流量密钥。此后，握手消息以**带关联数据的认证加密**（Authenticated Encryption with Associated Data，AEAD）保护[^5]。
 
-```mermaid title="TLS 1.3 完整握手与应用数据" description="示意 TCP 上仅认证服务端的 ECDHE 证书握手，未启用 ECH 或 0-RTT，也没有 HelloRetryRequest。实线为明文 ClientHello、ServerHello；虚线为受保护的消息。花括号内使用握手密钥，应用数据使用应用流量密钥。箭头不对应固定数量的 TCP 报文段或真实耗时；图末画出服务端收到客户端 Finished 后发送数据的情况。"
-sequenceDiagram
- participant Client as 客户端
- participant Server as TLS 服务端
- Client->>Server: ClientHello (key_share, SNI, ALPN 候选)
- Server->>Client: ServerHello (key_share)
- Note over Client,Server: 派生握手密钥；此时尚未完成身份验证
- Server-->>Client: {EncryptedExtensions: ALPN 选择}
- Server-->>Client: {Certificate}
- Server-->>Client: {CertificateVerify: 握手签名}
- Server-->>Client: {Finished: 握手校验}
- Note over Client: 验证证书链与服务名<br/>验证签名和服务端 Finished
- Client-->>Server: {Finished: 握手校验}
- Note over Server: 验证客户端 Finished
- Client-->>Server: 加密 Application Data
- Server-->>Client: 加密 Application Data
+```mermaid title="TLS 1.3 旁观者能读到哪里" description="以 TCP 上仅认证服务端的完整握手为例，未启用 ECH 或 0-RTT。被动旁观者能读两条 Hello。此后仍能观察记录长度和时序，证书与 ALPN 选择由握手密钥保护，HTTP 消息由应用流量密钥保护。"
+flowchart TB
+ subgraph visible[链路上可直接读到]
+  hellos["ClientHello · SNI、ALPN 候选、客户端公钥<br/>ServerHello · 服务端公钥"]
+ end
+ subgraph protected[只有持有对应流量密钥才能读取]
+  handshake["握手密钥 · ALPN 选择、服务端证书、签名、Finished"]
+  appdata["应用流量密钥 · HTTP 请求与响应"]
+ end
+ hellos -->|端点计算共享秘密并派生握手密钥| handshake
 ```
 
 `CertificateVerify` 用证书对应的私钥对握手上下文签名，证明持有该私钥，并把身份绑定到本次握手；证书链与服务名检查仍须另行完成。双方各自的 `Finished` 则校验握手记录并确认掌握相应密钥。本例客户端没发送证书，验证它的 `Finished` 不等于认证特定客户端身份。客户端发出自己的 `Finished` 后才能发送普通应用数据；服务端发出自己的 `Finished` 后可以先发送，不一定要等客户端的 `Finished` 到达[^5]。
 
-在图中的 TCP 链路上，旁观者能读到 `ClientHello` 和 `ServerHello`。从 `EncryptedExtensions` 开始，握手消息的内容不再公开：服务端选中的 ALPN、证书链、`CertificateVerify` 和双方的 `Finished` 都受保护[^5][^7]。这也与常见 TLS 1.2 完整握手的明文证书消息不同。
+因此，在这条 TLS 1.3 连接上抓包时，读取服务端证书链需要握手流量密钥；TLS 1.2 的常见完整证书握手则会公开发送证书消息[^5]。
 
 - **服务器名称指示**（Server Name Indication，SNI）：客户端用 `server_name` 扩展告诉服务器要访问的名字，使同一地址上的服务可以选择配置和证书；SNI 本身不认证身份[^6]。
 - **应用层协议协商**（Application-Layer Protocol Negotiation，ALPN）：在本次握手中选定应用协议。[DNS HTTPS 记录中的 `alpn` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)可供客户端事先发现服务支持的候选协议。在图中未启用 ECH 的例子里，旁观者可以从 `ClientHello` 读出 `h2`、`http/1.1` 等候选。服务端的最终选择受 `EncryptedExtensions` 保护[^7]。
@@ -131,45 +125,11 @@ TLS 1.3 的服务端可以在握手后发送 `NewSessionTicket`，把票据与�
 
 ### HTTP/2 与 HTTP/3 的应用数据布局
 
-握手完成后，再对照应用数据怎样装进 IP 数据报。设客户端为 `192.168.1.10`，目标为文档示例地址 `198.51.100.20`。下面比较同一客户端分别建立的 HTTP/2 与 HTTP/3 连接，只画客户端出站、尚未经过 NAT 的 IP 数据报，不画外面的链路帧。为单独看清包含关系，特意选择能在一个 TCP 段中装下完整 TLS 记录、以及一个 UDP 数据报中只装一个 QUIC 1-RTT 包的情况：
+HTTP/2 使用 TCP 时，HTTP 帧编码进 TLS 记录的密文。链路上可以看到 TCP 端口、序号和 TLS 外层记录头。`type=23` 是 TLS 1.3 加密记录的外层类型，`0x0303` 是兼容版本值，观察者无法由此读出 HTTP 方法、路径或正文[^tls-record]。
 
-```mermaid title="HTTP/2 与 HTTP/3 的数据包里分别装了什么" description="两组分别是 HTTP/2 和 HTTP/3 连接里的 IPv4 包。框的嵌套表示载荷归属。HTTP/2 组选一条完整 TLS 记录恰好装进一个 TCP 段，HTTP/3 组选一个 UDP 数据报承载一个 QUIC 短头 1-RTT 包。框内列出线上可见字段，以及密文解开后的内容。"
-flowchart TB
- subgraph h2_packet[HTTP/2：一个 IPv4 数据报]
-  ip2["IPv4 头 · Protocol=6<br/>192.168.1.10 → 198.51.100.20"]
-  subgraph tcp_segment[TCP 报文段]
-   tcp2["TCP 头<br/>50001 → 443<br/>Seq · Ack · 校验和"]
-   subgraph tls_record[TLS 1.3 记录]
-    record2["公开记录头 · type=23<br/>version=0x0303 · 密文长度"]
-    cipher2["AEAD 密文与认证标签<br/>解密后：HTTP/2 DATA 帧<br/>内层类型与可选填充"]
-    record2 --- cipher2
-   end
-   tcp2 --- record2
-  end
-  ip2 --- tcp2
- end
- subgraph h3_packet[HTTP/3：一个 IPv4 数据报]
-  ip3["IPv4 头 · Protocol=17<br/>192.168.1.10 → 198.51.100.20"]
-  subgraph udp_datagram[UDP 数据报]
-   udp3["UDP 头<br/>50002 → 443<br/>长度 · 校验和"]
-   subgraph quic_packet[QUIC 1-RTT 包]
-    header3["QUIC 短头 · 目的连接 ID 可见<br/>包号受头部保护"]
-    cipher3["AEAD 密文与认证标签<br/>解密后：STREAM 帧<br/>流内字节承载 HTTP/3 DATA 帧"]
-    header3 --- cipher3
-   end
-   udp3 --- header3
-  end
-  ip3 --- udp3
- end
- class ip2,tcp2,ip3,udp3 actor
- class record2,header3 state
- class cipher2,cipher3 result
- linkStyle default stroke:none
-```
+HTTP/3 使用 UDP 承载 QUIC。应用数据位于受保护的 1-RTT 包体中，端点解密后才能从 STREAM 帧取出 HTTP/3 字节。旁观者能看到 UDP 端口；包号受单独的头部保护[^quic-handshake]。
 
-HTTP/2 这组能读取到 TCP 端口、序号和 TLS 外层记录头，但 `type=23` 只说明这是 TLS 加密记录的外层类型，不能据此读出 HTTP 方法、路径或正文；`0x0303` 是固定兼容值，也不表示实际协商了 TLS 1.2[^tls-record]。HTTP/3 这组的应用流数据属于受保护的 QUIC 包体，包号还接受单独的头部保护[^quic-handshake]。
-
-图中的单包安排是为了看清字段归属。实际 HTTP/2 帧、TLS 记录与 TCP 段之间没有固定的一一对应关系，见第一篇的[TLS 记录与 TCP 报文段边界](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。HTTP/3 帧也可能跨多个 QUIC STREAM 帧与包传输；反过来，一个包可以携带多个 QUIC 帧。
+实际 HTTP/2 帧、TLS 记录与 TCP 段之间没有固定的一一对应关系，见第一篇的[TLS 记录与 TCP 报文段边界](/posts/networking/layered-architecture-packet-journey/#tls-记录与-tcp-报文段两套独立的边界)。HTTP/3 帧也可能跨多个 QUIC STREAM 帧与包传输；反过来，一个包可以携带多个 QUIC 帧。
 
 ### 用记录视图区分 TLS 头和密文
 
@@ -229,17 +189,6 @@ enum TlsReadResult read_tls_ciphertext(const uint8_t *bytes, size_t size,
 **加密客户端问候**（Encrypted ClientHello，ECH）用服务端配置的公钥加密 `ClientHelloInner`，真实 SNI 和需要保护的 ALPN 候选可放在其中；可见的 `ClientHelloOuter` 则承载密文。RFC 9849 定义 ECH 机制及其中携带公钥与公开名的 `ECHConfigList` 结构；客户端可从 [DNS 服务绑定记录的 `ech` 参数](/posts/networking/dns-resolution-caching-encrypted-queries/#域名空间与常见资源记录)（RFC 9848）取得这份配置列表[^8][^ech-dns]。
 
 ECH 改变的是 ClientHello 的可见范围。外层 SNI 通常使用配置中的公开名 `public_name`；外层也可携带非敏感的 ALPN 候选，不表示这就是内部真实的候选列表。服务端最终选定的 ALPN 本来就在加密的 `EncryptedExtensions` 里，是否使用 ECH 都不会把选择结果改成明文[^7][^8]。
-
-```mermaid title="ECH 的公开外层与受保护的 ClientHello" description="从同一条客户端链路上的被动旁观者视角，对照携带 SNI 与 ALPN 的普通 ClientHello，以及通过 HTTPS 或 SVCB 配置并成功使用 ECH 的情况。外层通常显示配置指定的公开名，受保护的内层字段只有持有私钥的一端能恢复。"
-flowchart LR
- plain["未启用 ECH<br/>普通 ClientHello"] -.->|旁观者可读| plain_view["目标 SNI<br/>客户端的 ALPN 候选"]
- dns["HTTPS / SVCB 的 ech 参数<br/>提供公钥与 public_name"] --> outer["成功使用 ECH<br/>ClientHelloOuter 承载内层密文"]
- outer -.->|旁观者可读| outer_view["外层 SNI（通常为 public_name）<br/>可能还有外层 ALPN 候选"]
- outer -->|用私钥解密| frontend["ECH 前端恢复内层<br/>真实 SNI 与受保护的 ALPN 候选"]
- class plain,dns,outer actor
- class plain_view,outer_view risk
- class frontend result
-```
 
 能解开 ECH 不等于能解密 HTTP。在分离部署中，ECH 前端恢复内部 ClientHello 并交给后端；后端才是目标 TLS 的终止端。合并部署时两个角色也可以在同一服务上。无论哪种部署，客户端仍须验证预期服务身份[^8]。
 
