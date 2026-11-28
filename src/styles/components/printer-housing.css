@@ -190,7 +190,7 @@ html[data-theme="dark"] .printer-btn[aria-current="page"] {
 }
 @media (max-width: 639px) {
 	.printer-btn {
-		@apply h-[30px] px-2.5;
+		@apply h-10 min-w-11 px-2 text-[11px];
 	}
 }
 

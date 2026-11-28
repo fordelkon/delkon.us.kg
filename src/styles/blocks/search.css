@@ -32,7 +32,7 @@
 	}
 
 	/* Mobile header control row: match the 40px touch target the theme
-	   toggle and burger use in the header's icon-button cluster. The
+	   toggle uses in the header's icon-button cluster. The
 	   trigger button is rendered by the Pagefind library, so this skin is
 	   the single owner of the trigger's dimensions. */
 	@media (max-width: 639px) {
